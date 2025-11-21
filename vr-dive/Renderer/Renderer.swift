@@ -5,19 +5,10 @@ import MetalKit
 import Spatial
 import SwiftUI
 
-// Must match Metal struct
+// Simple uniforms struct matching the Metal shader
 struct Uniforms {
-  var viewMatrix: (simd_float4x4, simd_float4x4)
-  var projectionMatrix: (simd_float4x4, simd_float4x4)
   var time: Float
-  var cameraPosition: simd_float3
-  var projectileData:
-    (
-      simd_float4, simd_float4, simd_float4, simd_float4, simd_float4, simd_float4, simd_float4,
-      simd_float4, simd_float4, simd_float4
-    )  // Array of 10 float4
-  var projectileCount: Int32
-  var padding: (Int32, Int32, Int32)  // Padding to match alignment if needed, usually 16 bytes alignment
+  var padding: SIMD3<Float>
 }
 
 struct VRConfiguration: CompositorLayerConfiguration {
@@ -27,9 +18,9 @@ struct VRConfiguration: CompositorLayerConfiguration {
     let supportsFoveation = capabilities.supportsFoveation
     configuration.isFoveationEnabled = supportsFoveation
 
-    let supportedLayouts = capabilities.supportedLayouts(
+    _ = capabilities.supportedLayouts(
       options: supportsFoveation ? [.foveationEnabled] : [])
-    configuration.layout = supportedLayouts.contains(.dedicated) ? .dedicated : .shared
+    configuration.layout = .layered
 
     configuration.colorFormat = .rgba16Float
     configuration.depthFormat = .depth32Float
@@ -44,8 +35,8 @@ class Renderer {
   let arSession: ARKitSession
   let worldTracking: WorldTrackingProvider
 
-  var gameManager = GameManager()
   var startTime: Date = Date()
+  private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
 
   init(_ layerRenderer: LayerRenderer) {
     self.layerRenderer = layerRenderer
@@ -60,6 +51,11 @@ class Renderer {
     pipelineDescriptor.vertexFunction = vertexFunction
     pipelineDescriptor.fragmentFunction = fragmentFunction
     pipelineDescriptor.colorAttachments[0].pixelFormat = .rgba16Float
+    pipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+    pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+    pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+    pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+    pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .zero
     pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float
     pipelineDescriptor.inputPrimitiveTopology = .triangle
 
@@ -70,153 +66,151 @@ class Renderer {
   }
 
   func startRenderLoop() {
+    print("[Renderer] Starting render loop...")
     Task {
-      try? await arSession.run([worldTracking])
-
-      let renderThread = Thread {
-        self.renderLoop()
+      do {
+        try await arSession.run([worldTracking])
+        print("[Renderer] ARSession started successfully")
+      } catch {
+        print("[Renderer] Failed to start ARSession: \(error)")
       }
-      renderThread.name = "Render Thread"
-      renderThread.start()
     }
+
+    let renderThread = Thread {
+      self.renderLoop()
+    }
+    renderThread.name = "Render Thread"
+    renderThread.start()
+    print("[Renderer] Render thread started")
   }
 
   func renderLoop() {
+    print("[Renderer] Render loop started, layerRenderer state: \(layerRenderer.state)")
+    var frameCount = 0
     while true {
-      if layerRenderer.state == .invalidated { break }
+      if layerRenderer.state == .invalidated {
+        print("[Renderer] Layer renderer invalidated, exiting")
+        break
+      }
       guard layerRenderer.state == .running else {
+        if frameCount == 0 {
+          print(
+            "[Renderer] Waiting for layerRenderer to be running, current state: \(layerRenderer.state)"
+          )
+        }
         Thread.sleep(forTimeInterval: 0.01)
         continue
       }
 
+      if frameCount == 0 {
+        print("[Renderer] First frame rendering...")
+      }
+      if frameCount % 60 == 0 {
+        print("[Renderer] Frame \(frameCount) rendered")
+      }
+      frameCount += 1
+
       guard let frame = layerRenderer.queryNextFrame() else { continue }
 
-      frame.startUpdate()
+      autoreleasepool {
+        frame.startUpdate()
 
-      // Update Game Logic
-      let time = Float(Date().timeIntervalSince(startTime))
+        let animationTime = Float(Date().timeIntervalSince(startTime))
+        let predictedTiming = frame.predictTiming()
+        let presentationTimestamp = presentationTimeInterval(from: predictedTiming)
 
-      // Get Head Pose
-      // We need to predict where the head will be at display time
-      // let timing = frame.predictTimeline()
-      // let displayTime = timing.presentationTime
-      let displayTime = CACurrentMediaTime()
+        frame.endUpdate()
 
-      // Get the device anchor
-      // Note: In a real app we use the timestamp. For simplicity we query latest.
-      // But CompositorServices requires us to use the frame's time for correct prediction.
+        let drawables = frame.queryDrawables()
+        guard !drawables.isEmpty else { return }
 
-      // Actually, we should use the `worldTracking.queryDeviceAnchor(atTimestamp: ...)`
-      // But `queryDeviceAnchor` returns an optional DeviceAnchor.
+        var deviceAnchor: ARKit.DeviceAnchor?
+        if worldTracking.state == .running {
+          deviceAnchor = worldTracking.queryDeviceAnchor(
+            atTimestamp: presentationTimestamp ?? CACurrentMediaTime()
+          )
+        }
 
-      let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: displayTime)
-      let headTransform = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        if deviceAnchor == nil && frameCount % 120 == 0 {
+          print("[Renderer] Waiting for reliable world tracking data...")
+        }
 
-      gameManager.update(time: time, deltaTime: 0.016, headTransform: headTransform)
+        frame.startSubmission()
+        defer { frame.endSubmission() }
 
-      frame.endUpdate()
-
-      guard let drawable = frame.queryDrawables().first else { continue }
-
-      let commandBuffer = commandQueue.makeCommandBuffer()!
-      let renderPassDescriptor = MTLRenderPassDescriptor()
-      renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-      renderPassDescriptor.colorAttachments[0].loadAction = .clear
-      renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(
-        red: 0, green: 0, blue: 0, alpha: 0)
-      renderPassDescriptor.colorAttachments[0].storeAction = .store
-      renderPassDescriptor.renderTargetArrayLength = 2  // Explicitly set array length for stereo
-
-      if let depthTexture = drawable.depthTextures.first {
-        renderPassDescriptor.depthAttachment.texture = depthTexture
-        renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.storeAction = .store
-        renderPassDescriptor.depthAttachment.clearDepth = 0.0
+        for drawable in drawables {
+          if let anchor = deviceAnchor {
+            render(drawable: drawable, deviceAnchor: anchor, time: animationTime)
+          } else {
+            presentDrawableWithoutRendering(drawable)
+          }
+        }
       }
-
-      let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)!
-      encoder.setRenderPipelineState(pipelineState)
-
-      // Setup Uniforms
-      // We need to handle stereo rendering (2 views)
-      // CompositorLayer usually gives us 2 views in `drawable.views`
-
-      let views = drawable.views
-      // Ensure we have at least 1 view, usually 2 for VR
-      let view0 = views.count > 0 ? views[0] : nil
-      let view1 = views.count > 1 ? views[1] : view0
-
-      guard let v0 = view0, let v1 = view1 else { continue }
-
-      var uniforms = Uniforms(
-        viewMatrix: (v0.transform.inverse, v1.transform.inverse),
-        projectionMatrix: (makeProjectionMatrix(view: v0), makeProjectionMatrix(view: v1)),
-        time: time,
-        cameraPosition: simd_make_float3(headTransform.columns.3) + gameManager.cameraPosition,  // Add virtual offset
-        projectileData: (
-          simd_float4(), simd_float4(), simd_float4(), simd_float4(), simd_float4(), simd_float4(),
-          simd_float4(), simd_float4(), simd_float4(), simd_float4()
-        ),
-        projectileCount: Int32(gameManager.projectiles.count),
-        padding: (0, 0, 0)
-      )
-
-      // Fill projectiles
-      // This is ugly manual filling because Swift tuples aren't arrays.
-
-      // In a real app, use a pointer to buffer.
-      // I'll just fill the first few manually or use `withUnsafeMutableBytes`.
-
-      var projArray = [simd_float4](repeating: simd_float4(0, 0, 0, 0), count: 10)
-      for i in 0..<min(10, gameManager.projectiles.count) {
-        let p = gameManager.projectiles[i]
-        projArray[i] = simd_float4(p.position.x, p.position.y, p.position.z, p.active ? 1.0 : 0.0)
-      }
-
-      // Copy to tuple (hacky)
-      uniforms.projectileData = (
-        projArray[0], projArray[1], projArray[2], projArray[3], projArray[4], projArray[5],
-        projArray[6], projArray[7], projArray[8], projArray[9]
-      )
-
-      // Let's use `encoder.setVertexBytes` to pass uniforms.
-      encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
-      encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
-
-      // Draw 3 vertices, 2 instances (one per eye)
-      encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3, instanceCount: 2)
-
-      encoder.endEncoding()
-
-      drawable.encodePresent(commandBuffer: commandBuffer)
-      commandBuffer.commit()
     }
   }
 
-  func makeProjectionMatrix(view: LayerRenderer.Drawable.View) -> float4x4 {
-    let tangents = view.tangents
-    // Assuming tangents order: x=left, y=right, z=top, w=bottom
-    let left = tangents.x
-    let right = tangents.y
-    let top = tangents.z
-    let bottom = tangents.w
+  private func presentationTimeInterval(from timing: LayerRenderer.Frame.Timing?) -> TimeInterval? {
+    guard let instant = timing?.presentationTime else { return nil }
+    let duration = LayerRenderer.Clock.Instant.epoch.duration(to: instant)
+    let components = duration.components
+    let seconds = Double(components.seconds)
+    let attoseconds = Double(components.attoseconds) / Renderer.attosecondsPerSecond
+    return seconds + attoseconds
+  }
 
-    let nearDepth: Float = 0.05
-    let farDepth: Float = 100.0
+  private func render(
+    drawable: LayerRenderer.Drawable,
+    deviceAnchor: ARKit.DeviceAnchor,
+    time: Float
+  ) {
+    guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
 
-    let xScale = 2.0 / (right - left)
-    let yScale = 2.0 / (top - bottom)
-    let xOffset = -(right + left) * xScale * 0.5
-    let yOffset = -(top + bottom) * yScale * 0.5
+    drawable.deviceAnchor = deviceAnchor
 
-    let zScale = farDepth / (nearDepth - farDepth)
-    let zOffset = (farDepth * nearDepth) / (nearDepth - farDepth)
+    if let renderPassDescriptor = makeRenderPassDescriptor(for: drawable),
+      let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
+    {
+      encoder.setRenderPipelineState(pipelineState)
 
-    return float4x4(
-      [xScale, 0, 0, 0],
-      [0, yScale, 0, 0],
-      [xOffset, yOffset, zScale, -1],
-      [0, 0, zOffset, 0]
-    )
+      var uniforms = Uniforms(time: time, padding: SIMD3<Float>(repeating: 0))
+      encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
+      encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
+      encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3, instanceCount: 2)
+      encoder.endEncoding()
+    }
+
+    drawable.encodePresent(commandBuffer: commandBuffer)
+    commandBuffer.commit()
+  }
+
+  private func presentDrawableWithoutRendering(_ drawable: LayerRenderer.Drawable) {
+    guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+    drawable.encodePresent(commandBuffer: commandBuffer)
+    commandBuffer.commit()
+  }
+
+  private func makeRenderPassDescriptor(for drawable: LayerRenderer.Drawable)
+    -> MTLRenderPassDescriptor?
+  {
+    guard let colorTexture = drawable.colorTextures.first else { return nil }
+    let descriptor = MTLRenderPassDescriptor()
+    let colorAttachment = descriptor.colorAttachments[0] ?? MTLRenderPassColorAttachmentDescriptor()
+    descriptor.colorAttachments[0] = colorAttachment
+    colorAttachment.texture = colorTexture
+    colorAttachment.loadAction = .clear
+    colorAttachment.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+    colorAttachment.storeAction = .store
+    descriptor.renderTargetArrayLength = colorTexture.arrayLength
+
+    if let depthTexture = drawable.depthTextures.first {
+      let depthAttachment = descriptor.depthAttachment ?? MTLRenderPassDepthAttachmentDescriptor()
+      descriptor.depthAttachment = depthAttachment
+      depthAttachment.texture = depthTexture
+      depthAttachment.loadAction = .clear
+      depthAttachment.storeAction = .store
+      depthAttachment.clearDepth = 1.0
+    }
+
+    return descriptor
   }
 }

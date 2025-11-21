@@ -29,6 +29,12 @@ struct vr_diveApp: App {
         let renderer = Renderer(layerRenderer)
         renderer.startRenderLoop()
       }
+      .onAppear {
+        appModel.immersiveSpaceState = .open
+      }
+      .onDisappear {
+        appModel.immersiveSpaceState = .closed
+      }
     }
     .immersionStyle(selection: .constant(.full), in: .full)
   }

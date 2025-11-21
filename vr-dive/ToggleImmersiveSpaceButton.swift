@@ -21,6 +21,10 @@ struct ToggleImmersiveSpaceButton: View {
         case .open:
           appModel.immersiveSpaceState = .inTransition
           await dismissImmersiveSpace()
+          if appModel.immersiveSpaceState == .inTransition {
+            // ImmersiveSpace.onDisappear() didn’t run (or hasn’t yet), so unblock the UI here.
+            appModel.immersiveSpaceState = .closed
+          }
         // Don't set immersiveSpaceState to .closed because there
         // are multiple paths to ImmersiveView.onDisappear().
         // Only set .closed in ImmersiveView.onDisappear().

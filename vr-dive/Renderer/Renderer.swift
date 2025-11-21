@@ -34,6 +34,7 @@ class Renderer {
   let pipelineState: MTLRenderPipelineState
   let arSession: ARKitSession
   let worldTracking: WorldTrackingProvider
+  private var lastKnownDeviceAnchor: ARKit.DeviceAnchor?
 
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
@@ -112,34 +113,38 @@ class Renderer {
 
       guard let frame = layerRenderer.queryNextFrame() else { continue }
 
+      frame.startUpdate()
+
+      let animationTime = Float(Date().timeIntervalSince(startTime))
+      let predictedTiming = frame.predictTiming()
+      let presentationTimestamp = presentationTimeInterval(from: predictedTiming)
+
+      frame.endUpdate()
+
+      let drawables = frame.queryDrawables()
+      guard !drawables.isEmpty else { continue }
+
+      var deviceAnchor: ARKit.DeviceAnchor?
+      if worldTracking.state == .running {
+        deviceAnchor = worldTracking.queryDeviceAnchor(
+          atTimestamp: presentationTimestamp ?? CACurrentMediaTime()
+        )
+        if let validAnchor = deviceAnchor {
+          lastKnownDeviceAnchor = validAnchor
+        }
+      }
+
+      let anchorToUse = deviceAnchor ?? lastKnownDeviceAnchor
+      if anchorToUse == nil, frameCount % 120 == 0 {
+        print("[Renderer] Waiting for reliable world tracking data...")
+      }
+
       autoreleasepool {
-        frame.startUpdate()
-
-        let animationTime = Float(Date().timeIntervalSince(startTime))
-        let predictedTiming = frame.predictTiming()
-        let presentationTimestamp = presentationTimeInterval(from: predictedTiming)
-
-        frame.endUpdate()
-
-        let drawables = frame.queryDrawables()
-        guard !drawables.isEmpty else { return }
-
-        var deviceAnchor: ARKit.DeviceAnchor?
-        if worldTracking.state == .running {
-          deviceAnchor = worldTracking.queryDeviceAnchor(
-            atTimestamp: presentationTimestamp ?? CACurrentMediaTime()
-          )
-        }
-
-        if deviceAnchor == nil && frameCount % 120 == 0 {
-          print("[Renderer] Waiting for reliable world tracking data...")
-        }
-
         frame.startSubmission()
         defer { frame.endSubmission() }
 
         for drawable in drawables {
-          if let anchor = deviceAnchor {
+          if let anchor = anchorToUse {
             render(drawable: drawable, deviceAnchor: anchor, time: animationTime)
           } else {
             presentDrawableWithoutRendering(drawable)

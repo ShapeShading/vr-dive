@@ -22,4 +22,11 @@ class AppModel {
       print("[AppModel] immersiveSpaceState changed: \(oldValue) -> \(immersiveSpaceState)")
     }
   }
+
+  let patternCoordinator = PatternCoordinator()
+  var patternMenuModel: PatternMenuModel
+
+  init() {
+    self.patternMenuModel = PatternMenuModel(coordinator: patternCoordinator)
+  }
 }

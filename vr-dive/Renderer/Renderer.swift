@@ -5,41 +5,6 @@ import MetalKit
 import Spatial
 import SwiftUI
 
-struct BackgroundUniforms {
-  var time: Float
-  var intensity: Float
-  var padding: SIMD2<Float> = .zero
-  var viewToWorldLeft: simd_float4x4 = matrix_identity_float4x4
-  var viewToWorldRight: simd_float4x4 = matrix_identity_float4x4
-}
-
-struct SceneUniforms {
-  var viewProjectionMatrixLeft: simd_float4x4
-  var viewProjectionMatrixRight: simd_float4x4
-  var time: Float
-  var layerCount: UInt32
-  var padding: SIMD2<Float> = .zero
-}
-
-struct SimulationUniforms {
-  var deltaTime: Float
-  var globalTime: Float
-  var objectCount: UInt32
-  var padding: UInt32 = 0
-}
-
-struct MeshVertex {
-  var position: SIMD3<Float>
-  var normal: SIMD3<Float>
-}
-
-struct ObjectState {
-  var positionAndType: SIMD4<Float>
-  var motionAndPhase: SIMD4<Float>
-  var scaleAndPadding: SIMD4<Float>
-  var homeAndJitter: SIMD4<Float>
-}
-
 struct VRConfiguration: CompositorLayerConfiguration {
   func makeConfiguration(
     capabilities: LayerRenderer.Capabilities, configuration: inout LayerRenderer.Configuration
@@ -60,57 +25,45 @@ class Renderer {
   let layerRenderer: LayerRenderer
   let device: MTLDevice
   let commandQueue: MTLCommandQueue
-  let backgroundPipelineState: MTLRenderPipelineState
-  let objectPipelineState: MTLRenderPipelineState
-  let computePipelineState: MTLComputePipelineState
-  let depthStencilState: MTLDepthStencilState
-  let meshVertexBuffer: MTLBuffer
-  let meshIndexBuffer: MTLBuffer
-  let meshIndexCount: Int
-  let objectStateBuffer: MTLBuffer
   let arSession: ARKitSession
   let worldTracking: WorldTrackingProvider
   let gameManager: GameManager
+  let patternCoordinator: PatternCoordinator
+  private var patternControllers: [VisualPatternKind: VisualPatternController] = [:]
+  private var activePatternKind: VisualPatternKind
   private var lastKnownDeviceAnchor: ARKit.DeviceAnchor?
-  private var lastSimulationTimestamp: Float = 0
   private var rigTransform: simd_float4x4 = matrix_identity_float4x4
   private var lastRigUpdateTime: Float = 0
-  private let objectCount = 48
-  private static let largeObjectScale: Float = 8.0
+  private static let cubeObjectCount = 48
+  private static let lorenzParticleCount = 200000
 
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
-  private static let maxViewCount = 2
+  static let maxViewCount = 2
 
-  private struct ViewRenderingData {
-    var leftViewProjection: simd_float4x4
-    var rightViewProjection: simd_float4x4
-    var viewports: [MTLViewport]
-    var renderTargetIndices: [UInt32]
-    var viewToWorldTransforms: [simd_float4x4]
-    var viewCount: Int
-  }
-
-  init(_ layerRenderer: LayerRenderer) {
+  init(_ layerRenderer: LayerRenderer, patternCoordinator: PatternCoordinator) {
     self.layerRenderer = layerRenderer
     self.device = layerRenderer.device
     self.commandQueue = self.device.makeCommandQueue()!
+    self.patternCoordinator = patternCoordinator
 
     let library = device.makeDefaultLibrary()!
-    self.backgroundPipelineState = try! Renderer.makeBackgroundPipelineState(
-      device: device, library: library)
-    self.objectPipelineState = try! Renderer.makeObjectPipelineState(
-      device: device, library: library)
-    self.computePipelineState = try! Renderer.makeComputePipelineState(
-      device: device, library: library)
-    self.depthStencilState = Renderer.makeDepthStencilState(device: device)
-
-    let geometry = Renderer.makeCubeGeometry(device: device)
-    self.meshVertexBuffer = geometry.vertexBuffer
-    self.meshIndexBuffer = geometry.indexBuffer
-    self.meshIndexCount = geometry.indexCount
-
-    self.objectStateBuffer = Renderer.makeInitialObjectStates(device: device, count: objectCount)
+    let controllers = Renderer.makePatternControllers(
+      device: device,
+      library: library,
+      cubeCount: Renderer.cubeObjectCount,
+      lorenzCount: Renderer.lorenzParticleCount
+    )
+    self.patternControllers = controllers
+    let requestedPattern = patternCoordinator.currentPattern()
+    if controllers[requestedPattern] != nil {
+      self.activePatternKind = requestedPattern
+    } else if let fallback = controllers.keys.first {
+      self.activePatternKind = fallback
+      patternCoordinator.setPattern(fallback)
+    } else {
+      fatalError("No render patterns available")
+    }
 
     self.arSession = ARKitSession()
     self.worldTracking = WorldTrackingProvider()
@@ -190,7 +143,6 @@ class Renderer {
         print("[Renderer] Waiting for reliable world tracking data...")
       }
 
-      simulateObjectsIfNeeded(currentTime: animationTime)
       if let anchor = anchorToUse {
         updateRigTransformIfNeeded(
           deviceAnchorTransform: anchor.originFromAnchorTransform,
@@ -222,6 +174,26 @@ class Renderer {
     return seconds + attoseconds
   }
 
+  private func resolveActivePatternController() -> VisualPatternController? {
+    let desiredPattern = patternCoordinator.currentPattern()
+    if desiredPattern != activePatternKind, let controller = patternControllers[desiredPattern] {
+      activePatternKind = desiredPattern
+      print("[Renderer] Switching to pattern: \(desiredPattern.rawValue)")
+      return controller
+    }
+
+    if let controller = patternControllers[activePatternKind] {
+      return controller
+    }
+
+    if let fallback = patternControllers.values.first {
+      activePatternKind = fallback.identifier
+      return fallback
+    }
+
+    return nil
+  }
+
   private func render(
     drawable: LayerRenderer.Drawable,
     deviceAnchor: ARKit.DeviceAnchor,
@@ -229,6 +201,11 @@ class Renderer {
   ) {
     let viewCount = resolvedViewCount(for: drawable)
     guard viewCount > 0 else { return }
+
+    guard let pattern = resolveActivePatternController() else { return }
+    let simulationContext = PatternSimulationContext(commandQueue: commandQueue, time: time)
+    pattern.updateSimulation(simulationContext)
+
     guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
 
     drawable.deviceAnchor = deviceAnchor
@@ -242,11 +219,13 @@ class Renderer {
     )
 
     if let renderPassDescriptor = makeRenderPassDescriptor(
-      for: drawable, viewCount: viewData.viewCount),
+      for: drawable,
+      viewCount: viewData.viewCount,
+      clearColor: pattern.preferredClearColor),
       let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
     {
-      encodeBackgroundPass(with: encoder, viewData: viewData, time: time)
-      encodeObjectPass(with: encoder, viewData: viewData, time: time)
+      let renderContext = PatternRenderContext(viewData: viewData, time: time)
+      pattern.encodeFrame(encoder: encoder, context: renderContext)
       encoder.endEncoding()
     }
 
@@ -260,16 +239,18 @@ class Renderer {
     commandBuffer.commit()
   }
 
-  private func makeRenderPassDescriptor(for drawable: LayerRenderer.Drawable, viewCount: Int)
-    -> MTLRenderPassDescriptor?
-  {
+  private func makeRenderPassDescriptor(
+    for drawable: LayerRenderer.Drawable,
+    viewCount: Int,
+    clearColor: MTLClearColor
+  ) -> MTLRenderPassDescriptor? {
     guard let colorTexture = drawable.colorTextures.first else { return nil }
     let descriptor = MTLRenderPassDescriptor()
     let colorAttachment = descriptor.colorAttachments[0] ?? MTLRenderPassColorAttachmentDescriptor()
     descriptor.colorAttachments[0] = colorAttachment
     colorAttachment.texture = colorTexture
     colorAttachment.loadAction = .clear
-    colorAttachment.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+    colorAttachment.clearColor = clearColor
     colorAttachment.storeAction = .store
     descriptor.renderTargetArrayLength = max(min(colorTexture.arrayLength, viewCount), 1)
 
@@ -287,83 +268,6 @@ class Renderer {
     }
 
     return descriptor
-  }
-
-  private func encodeBackgroundPass(
-    with encoder: MTLRenderCommandEncoder,
-    viewData: ViewRenderingData,
-    time: Float
-  ) {
-    var uniforms = BackgroundUniforms(time: time, intensity: 0.85)
-    uniforms.viewToWorldLeft = viewData.viewToWorldTransforms[0]
-    uniforms.viewToWorldRight = viewData.viewToWorldTransforms[min(viewData.viewCount - 1, 1)]
-
-    encoder.setRenderPipelineState(backgroundPipelineState)
-    applyViewConfiguration(on: encoder, using: viewData)
-    encoder.setVertexBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
-    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
-    encoder.drawPrimitives(
-      type: .triangle,
-      vertexStart: 0,
-      vertexCount: 3,
-      instanceCount: viewData.viewCount
-    )
-  }
-
-  private func applyViewConfiguration(
-    on encoder: MTLRenderCommandEncoder, using viewData: ViewRenderingData
-  ) {
-    if !viewData.viewports.isEmpty {
-      encoder.setViewports(viewData.viewports)
-    }
-
-    if viewData.viewCount > 1 {
-      var viewMappings = (0..<viewData.viewCount).map {
-        MTLVertexAmplificationViewMapping(
-          viewportArrayIndexOffset: UInt32($0),
-          renderTargetArrayIndexOffset: viewData.renderTargetIndices[$0]
-        )
-      }
-      encoder.setVertexAmplificationCount(viewData.viewCount, viewMappings: &viewMappings)
-    } else {
-      encoder.setVertexAmplificationCount(1, viewMappings: nil)
-    }
-  }
-
-  private func encodeObjectPass(
-    with encoder: MTLRenderCommandEncoder,
-    viewData: ViewRenderingData,
-    time: Float
-  ) {
-    encoder.setRenderPipelineState(objectPipelineState)
-    encoder.setDepthStencilState(depthStencilState)
-    encoder.setCullMode(.none)
-    encoder.setFrontFacing(.counterClockwise)
-    encoder.setTriangleFillMode(.fill)
-
-    encoder.setVertexBuffer(meshVertexBuffer, offset: 0, index: 0)
-    encoder.setVertexBuffer(objectStateBuffer, offset: 0, index: 1)
-
-    applyViewConfiguration(on: encoder, using: viewData)
-
-    var sceneUniforms = SceneUniforms(
-      viewProjectionMatrixLeft: viewData.leftViewProjection,
-      viewProjectionMatrixRight: viewData.rightViewProjection,
-      time: time,
-      layerCount: UInt32(viewData.viewCount)
-    )
-
-    encoder.setVertexBytes(&sceneUniforms, length: MemoryLayout<SceneUniforms>.stride, index: 2)
-    encoder.setFragmentBytes(&sceneUniforms, length: MemoryLayout<SceneUniforms>.stride, index: 0)
-
-    encoder.drawIndexedPrimitives(
-      type: .triangle,
-      indexCount: meshIndexCount,
-      indexType: .uint16,
-      indexBuffer: meshIndexBuffer,
-      indexBufferOffset: 0,
-      instanceCount: objectCount
-    )
   }
 
   private func resolvedViewCount(for drawable: LayerRenderer.Drawable) -> Int {
@@ -493,40 +397,6 @@ class Renderer {
     return projection * view
   }
 
-  private func simulateObjectsIfNeeded(currentTime: Float) {
-    let deltaTime = max(0, currentTime - lastSimulationTimestamp)
-    guard deltaTime > 0 else { return }
-
-    var uniforms = SimulationUniforms(
-      deltaTime: min(deltaTime, 1.0 / 30.0),
-      globalTime: currentTime,
-      objectCount: UInt32(objectCount)
-    )
-
-    guard let commandBuffer = commandQueue.makeCommandBuffer(),
-      let encoder = commandBuffer.makeComputeCommandEncoder()
-    else { return }
-
-    encoder.setComputePipelineState(computePipelineState)
-    encoder.setBuffer(objectStateBuffer, offset: 0, index: 0)
-    encoder.setBytes(&uniforms, length: MemoryLayout<SimulationUniforms>.stride, index: 1)
-
-    let threadWidth = min(computePipelineState.maxTotalThreadsPerThreadgroup, 32)
-    let threadsPerThreadgroup = MTLSize(width: threadWidth, height: 1, depth: 1)
-    let threadgroups = MTLSize(
-      width: (objectCount + threadWidth - 1) / threadWidth,
-      height: 1,
-      depth: 1
-    )
-
-    encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerThreadgroup)
-    encoder.endEncoding()
-    commandBuffer.commit()
-    commandBuffer.waitUntilCompleted()
-
-    lastSimulationTimestamp = currentTime
-  }
-
   private func updateRigTransformIfNeeded(deviceAnchorTransform: simd_float4x4, currentTime: Float)
   {
     let delta = max(0, currentTime - lastRigUpdateTime)
@@ -535,167 +405,32 @@ class Renderer {
       deltaTime: delta, headTransform: deviceAnchorTransform)
     lastRigUpdateTime = currentTime
   }
-}
 
-extension Renderer {
-  fileprivate static func makeBackgroundPipelineState(device: MTLDevice, library: MTLLibrary) throws
-    -> MTLRenderPipelineState
-  {
-    let descriptor = MTLRenderPipelineDescriptor()
-    descriptor.vertexFunction = library.makeFunction(name: "backgroundVertexShader")
-    descriptor.fragmentFunction = library.makeFunction(name: "backgroundFragmentShader")
-    descriptor.colorAttachments[0].pixelFormat = .rgba16Float
-    descriptor.depthAttachmentPixelFormat = .depth32Float
-    descriptor.inputPrimitiveTopology = .triangle
-    descriptor.maxVertexAmplificationCount = Renderer.maxViewCount
-    return try device.makeRenderPipelineState(descriptor: descriptor)
-  }
-
-  fileprivate static func makeObjectPipelineState(device: MTLDevice, library: MTLLibrary) throws
-    -> MTLRenderPipelineState
-  {
-    let descriptor = MTLRenderPipelineDescriptor()
-    descriptor.vertexFunction = library.makeFunction(name: "objectVertexShader")
-    descriptor.fragmentFunction = library.makeFunction(name: "objectFragmentShader")
-    descriptor.colorAttachments[0].pixelFormat = .rgba16Float
-    descriptor.depthAttachmentPixelFormat = .depth32Float
-    descriptor.inputPrimitiveTopology = .triangle
-
-    let vertexDescriptor = MTLVertexDescriptor()
-    vertexDescriptor.attributes[0].format = .float3
-    vertexDescriptor.attributes[0].offset = 0
-    vertexDescriptor.attributes[0].bufferIndex = 0
-    vertexDescriptor.attributes[1].format = .float3
-    vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
-    vertexDescriptor.attributes[1].bufferIndex = 0
-    vertexDescriptor.layouts[0].stride = MemoryLayout<MeshVertex>.stride
-    descriptor.vertexDescriptor = vertexDescriptor
-    descriptor.maxVertexAmplificationCount = Renderer.maxViewCount
-
-    return try device.makeRenderPipelineState(descriptor: descriptor)
-  }
-
-  fileprivate static func makeComputePipelineState(device: MTLDevice, library: MTLLibrary) throws
-    -> MTLComputePipelineState
-  {
-    let function = library.makeFunction(name: "simulateObjects")!
-    return try device.makeComputePipelineState(function: function)
-  }
-
-  fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
-    let descriptor = MTLDepthStencilDescriptor()
-    descriptor.depthCompareFunction = .less
-    descriptor.isDepthWriteEnabled = true
-    return device.makeDepthStencilState(descriptor: descriptor)!
-  }
-
-  fileprivate static func makeCubeGeometry(device: MTLDevice) -> (
-    vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int
-  ) {
-    let vertices: [MeshVertex] = [
-      // Front
-      MeshVertex(position: [-0.5, -0.5, 0.5], normal: [0, 0, 1]),
-      MeshVertex(position: [0.5, -0.5, 0.5], normal: [0, 0, 1]),
-      MeshVertex(position: [0.5, 0.5, 0.5], normal: [0, 0, 1]),
-      MeshVertex(position: [-0.5, 0.5, 0.5], normal: [0, 0, 1]),
-      // Back
-      MeshVertex(position: [-0.5, -0.5, -0.5], normal: [0, 0, -1]),
-      MeshVertex(position: [0.5, -0.5, -0.5], normal: [0, 0, -1]),
-      MeshVertex(position: [0.5, 0.5, -0.5], normal: [0, 0, -1]),
-      MeshVertex(position: [-0.5, 0.5, -0.5], normal: [0, 0, -1]),
-      // Left
-      MeshVertex(position: [-0.5, -0.5, -0.5], normal: [-1, 0, 0]),
-      MeshVertex(position: [-0.5, -0.5, 0.5], normal: [-1, 0, 0]),
-      MeshVertex(position: [-0.5, 0.5, 0.5], normal: [-1, 0, 0]),
-      MeshVertex(position: [-0.5, 0.5, -0.5], normal: [-1, 0, 0]),
-      // Right
-      MeshVertex(position: [0.5, -0.5, -0.5], normal: [1, 0, 0]),
-      MeshVertex(position: [0.5, -0.5, 0.5], normal: [1, 0, 0]),
-      MeshVertex(position: [0.5, 0.5, 0.5], normal: [1, 0, 0]),
-      MeshVertex(position: [0.5, 0.5, -0.5], normal: [1, 0, 0]),
-      // Top
-      MeshVertex(position: [-0.5, 0.5, 0.5], normal: [0, 1, 0]),
-      MeshVertex(position: [0.5, 0.5, 0.5], normal: [0, 1, 0]),
-      MeshVertex(position: [0.5, 0.5, -0.5], normal: [0, 1, 0]),
-      MeshVertex(position: [-0.5, 0.5, -0.5], normal: [0, 1, 0]),
-      // Bottom
-      MeshVertex(position: [-0.5, -0.5, 0.5], normal: [0, -1, 0]),
-      MeshVertex(position: [0.5, -0.5, 0.5], normal: [0, -1, 0]),
-      MeshVertex(position: [0.5, -0.5, -0.5], normal: [0, -1, 0]),
-      MeshVertex(position: [-0.5, -0.5, -0.5], normal: [0, -1, 0]),
-    ]
-
-    let indices: [UInt16] = [
-      0, 1, 2, 0, 2, 3,
-      4, 6, 5, 4, 7, 6,
-      8, 9, 10, 8, 10, 11,
-      12, 14, 13, 12, 15, 14,
-      16, 17, 18, 16, 18, 19,
-      20, 22, 21, 20, 23, 22,
-    ]
-
-    let vertexBuffer = device.makeBuffer(
-      bytes: vertices,
-      length: MemoryLayout<MeshVertex>.stride * vertices.count,
-      options: [.storageModeShared]
-    )!
-    let indexBuffer = device.makeBuffer(
-      bytes: indices,
-      length: MemoryLayout<UInt16>.stride * indices.count,
-      options: [.storageModeShared]
-    )!
-
-    return (vertexBuffer, indexBuffer, indices.count)
-  }
-
-  fileprivate static func makeInitialObjectStates(device: MTLDevice, count: Int) -> MTLBuffer {
-    var states: [ObjectState] = []
-    states.reserveCapacity(count)
-
-    let scaleBoost = Renderer.largeObjectScale
-
-    for i in 0..<count {
-      let type: Float = (i % 7 == 0) ? 1.0 : 0.0
-      let zRange: ClosedRange<Float> = -3.2...(-0.8)
-      let position = SIMD3<Float>(
-        Float.random(in: -1.5...1.5),
-        Float.random(in: -0.9...1.1),
-        Float.random(in: zRange)
-      )
-      let jitterBase: ClosedRange<Float> = 0.008...0.04
-      let motionAmplitude = SIMD3<Float>(
-        Float.random(in: jitterBase) * (type > 0.5 ? 1.2 : 1.0),
-        Float.random(in: jitterBase) * 1.5,
-        Float.random(in: jitterBase)
-      )
-      let scale = SIMD3<Float>(
-        Float.random(in: 0.15...0.35) * (type > 0.5 ? 1.8 : 1.0),
-        Float.random(in: 0.15...0.45),
-        Float.random(in: 0.15...0.35)
-      )
-      let phase = Float.random(in: 0...(.pi * 2))
-      let jitterRadius = Float.random(in: 0.04...0.12)
-
-      let scaledPosition = position * scaleBoost
-      let scaledAmplitude = motionAmplitude * scaleBoost
-      let scaledScale = scale * scaleBoost
-      let scaledJitter = jitterRadius * scaleBoost
-
-      states.append(
-        ObjectState(
-          positionAndType: SIMD4<Float>(scaledPosition, type),
-          motionAndPhase: SIMD4<Float>(scaledAmplitude, phase),
-          scaleAndPadding: SIMD4<Float>(scaledScale, 0),
-          homeAndJitter: SIMD4<Float>(scaledPosition, scaledJitter)
-        )
-      )
+  private static func makePatternControllers(
+    device: MTLDevice,
+    library: MTLLibrary,
+    cubeCount: Int,
+    lorenzCount: Int
+  ) -> [VisualPatternKind: VisualPatternController] {
+    var controllers: [VisualPatternKind: VisualPatternController] = [:]
+    do {
+      controllers[.cubeField] = try CubeFieldRenderer(
+        device: device, library: library, objectCount: cubeCount)
+    } catch {
+      fatalError("Failed to build cube pattern: \(error)")
     }
 
-    return device.makeBuffer(
-      bytes: states,
-      length: MemoryLayout<ObjectState>.stride * states.count,
-      options: [.storageModeShared]
-    )!
+    if let lorenz = try? LorenzRenderer(
+      device: device,
+      library: library,
+      particleCount: lorenzCount
+    ) {
+      controllers[.lorenzAttractor] = lorenz
+    } else {
+      print("[Renderer] Lorenz attractor pattern unavailable; continuing with base pattern only.")
+    }
+
+    return controllers
   }
 }
 

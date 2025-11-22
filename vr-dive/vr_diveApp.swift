@@ -23,10 +23,11 @@ struct vr_diveApp: App {
           .environment(appModel)
       }
     }
+    .defaultSize(width: 480, height: 260)
 
     ImmersiveSpace(id: appModel.immersiveSpaceID) {
       CompositorLayer(configuration: VRConfiguration()) { layerRenderer in
-        let renderer = Renderer(layerRenderer)
+        let renderer = Renderer(layerRenderer, patternCoordinator: appModel.patternCoordinator)
         renderer.startRenderLoop()
       }
       .onAppear {

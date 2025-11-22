@@ -4,6 +4,8 @@ import Observation
 enum VisualPatternKind: String, CaseIterable, Identifiable {
   case cubeField
   case lorenzAttractor
+  case fourWingAttractor
+  case aizawaAttractor
 
   var id: String { rawValue }
 
@@ -13,6 +15,10 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "立方体"
     case .lorenzAttractor:
       return "Lorenz 吸引子"
+    case .fourWingAttractor:
+      return "四翼吸引子"
+    case .aizawaAttractor:
+      return "Aizawa 吸引子"
     }
   }
 }

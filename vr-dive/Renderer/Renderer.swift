@@ -36,6 +36,8 @@ class Renderer {
   private var lastRigUpdateTime: Float = 0
   private static let cubeObjectCount = 48
   private static let lorenzParticleCount = 400000
+  private static let fourWingParticleCount = 400000
+  private static let aizawaParticleCount = 400000
 
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
@@ -52,7 +54,9 @@ class Renderer {
       device: device,
       library: library,
       cubeCount: Renderer.cubeObjectCount,
-      lorenzCount: Renderer.lorenzParticleCount
+      lorenzCount: Renderer.lorenzParticleCount,
+      fourWingCount: Renderer.fourWingParticleCount,
+      aizawaCount: Renderer.aizawaParticleCount
     )
     self.patternControllers = controllers
     let requestedPattern = patternCoordinator.currentPattern()
@@ -410,7 +414,9 @@ class Renderer {
     device: MTLDevice,
     library: MTLLibrary,
     cubeCount: Int,
-    lorenzCount: Int
+    lorenzCount: Int,
+    fourWingCount: Int,
+    aizawaCount: Int
   ) -> [VisualPatternKind: VisualPatternController] {
     var controllers: [VisualPatternKind: VisualPatternController] = [:]
     do {
@@ -428,6 +434,26 @@ class Renderer {
       controllers[.lorenzAttractor] = lorenz
     } else {
       print("[Renderer] Lorenz attractor pattern unavailable; continuing with base pattern only.")
+    }
+
+    if let fourWing = try? FourWingRenderer(
+      device: device,
+      library: library,
+      particleCount: fourWingCount
+    ) {
+      controllers[.fourWingAttractor] = fourWing
+    } else {
+      print("[Renderer] Four-Wing attractor pattern unavailable.")
+    }
+
+    if let aizawa = try? AizawaRenderer(
+      device: device,
+      library: library,
+      particleCount: aizawaCount
+    ) {
+      controllers[.aizawaAttractor] = aizawa
+    } else {
+      print("[Renderer] Aizawa attractor pattern unavailable.")
     }
 
     return controllers

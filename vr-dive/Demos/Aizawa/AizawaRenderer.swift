@@ -1,8 +1,8 @@
 import Metal
 import simd
 
-final class LorenzRenderer: VisualPatternController {
-  let identifier: VisualPatternKind = .lorenzAttractor
+final class AizawaRenderer: VisualPatternController {
+  let identifier: VisualPatternKind = .aizawaAttractor
   let preferredClearColor = MTLClearColor(red: 0.01, green: 0.01, blue: 0.02, alpha: 1)
 
   private let backgroundPipelineState: MTLRenderPipelineState
@@ -15,32 +15,35 @@ final class LorenzRenderer: VisualPatternController {
   private let particleStateBuffer: MTLBuffer
   private var lastSimulationTimestamp: Float = 0
   private let particleCount: Int
-  private let sigma: Float = 10.0
-  private let beta: Float = 8.0 / 3.0
-  private let rho: Float = 28.0
-  private let worldScale: Float = 0.24  // Larger scale (4x previous 0.06)
-  private let resetRadius: Float = 60.0  // Increased reset radius
-  private let noiseAmplitude: Float = 0.18
+  private let a: Float = 0.95
+  private let b: Float = 0.7
+  private let c: Float = 0.6
+  private let d: Float = 3.5
+  private let e: Float = 0.25
+  private let f: Float = 0.1
+  private let worldScale: Float = 2.4  // Scale for Aizawa attractor (8x larger)
+  private let resetRadius: Float = 10.0  // Adjusted for Aizawa's smaller scale
+  private let noiseAmplitude: Float = 0.03  // Reduced noise for stability
   private let minDeltaTime: Float = 1.0 / 600.0
   private let maxDeltaTime: Float = 1.0 / 45.0
-  private let damping: Float = 1.0  // No damping to preserve chaotic motion
+  private let damping: Float = 1.0
 
   init(device: MTLDevice, library: MTLLibrary, particleCount: Int) throws {
     self.particleCount = particleCount
-    backgroundPipelineState = try LorenzRenderer.makeBackgroundPipelineState(
+    backgroundPipelineState = try AizawaRenderer.makeBackgroundPipelineState(
       device: device, library: library)
-    objectPipelineState = try LorenzRenderer.makeObjectPipelineState(
+    objectPipelineState = try AizawaRenderer.makeObjectPipelineState(
       device: device, library: library)
-    computePipelineState = try LorenzRenderer.makeComputePipelineState(
+    computePipelineState = try AizawaRenderer.makeComputePipelineState(
       device: device, library: library)
-    depthStencilState = LorenzRenderer.makeDepthStencilState(device: device)
+    depthStencilState = AizawaRenderer.makeDepthStencilState(device: device)
 
-    let geometry = LorenzRenderer.makeTetraGeometry(device: device)
+    let geometry = AizawaRenderer.makeTetraGeometry(device: device)
     tetraVertexBuffer = geometry.vertexBuffer
     tetraIndexBuffer = geometry.indexBuffer
     tetraIndexCount = geometry.indexCount
 
-    particleStateBuffer = LorenzRenderer.makeInitialParticleStates(
+    particleStateBuffer = AizawaRenderer.makeInitialParticleStates(
       device: device,
       count: particleCount,
       worldScale: worldScale
@@ -49,18 +52,19 @@ final class LorenzRenderer: VisualPatternController {
 
   func updateSimulation(_ context: PatternSimulationContext) {
     let elapsed = max(0, context.time - lastSimulationTimestamp)
-    // Slow down simulation speed (0.05 is 1/4 of previous 0.2)
-    // This also reduces the integration step size, preventing collapse to fixed points
     let clampedDeltaTime = min(max(elapsed, minDeltaTime), maxDeltaTime) * 0.05
     guard clampedDeltaTime > 0 else { return }
 
-    var uniforms = LorenzUniforms(
+    var uniforms = AizawaUniforms(
       deltaTime: clampedDeltaTime,
       globalTime: context.time,
       particleCount: UInt32(particleCount),
-      sigma: sigma,
-      beta: beta,
-      rho: rho,
+      a: a,
+      b: b,
+      c: c,
+      d: d,
+      e: e,
+      f: f,
       damping: damping,
       worldScale: worldScale,
       resetRadius: resetRadius,
@@ -74,7 +78,7 @@ final class LorenzRenderer: VisualPatternController {
 
     encoder.setComputePipelineState(computePipelineState)
     encoder.setBuffer(particleStateBuffer, offset: 0, index: 0)
-    encoder.setBytes(&uniforms, length: MemoryLayout<LorenzUniforms>.stride, index: 1)
+    encoder.setBytes(&uniforms, length: MemoryLayout<AizawaUniforms>.stride, index: 1)
 
     let threadsPerGroup = min(computePipelineState.maxTotalThreadsPerThreadgroup, 64)
     let threadgroups = MTLSize(
@@ -93,7 +97,6 @@ final class LorenzRenderer: VisualPatternController {
   }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
-    // encodeBackground(with: encoder, context: context)
     encodeObjects(with: encoder, context: context)
   }
 
@@ -145,13 +148,13 @@ final class LorenzRenderer: VisualPatternController {
   }
 }
 
-extension LorenzRenderer {
+extension AizawaRenderer {
   fileprivate static func makeBackgroundPipelineState(device: MTLDevice, library: MTLLibrary) throws
     -> MTLRenderPipelineState
   {
     let descriptor = MTLRenderPipelineDescriptor()
-    descriptor.vertexFunction = library.makeFunction(name: "lorenzBackgroundVertexShader")
-    descriptor.fragmentFunction = library.makeFunction(name: "lorenzBackgroundFragmentShader")
+    descriptor.vertexFunction = library.makeFunction(name: "aizawaBackgroundVertexShader")
+    descriptor.fragmentFunction = library.makeFunction(name: "aizawaBackgroundFragmentShader")
     descriptor.colorAttachments[0].pixelFormat = .rgba16Float
     descriptor.depthAttachmentPixelFormat = .depth32Float
     descriptor.inputPrimitiveTopology = .triangle
@@ -163,8 +166,8 @@ extension LorenzRenderer {
     -> MTLRenderPipelineState
   {
     let descriptor = MTLRenderPipelineDescriptor()
-    descriptor.vertexFunction = library.makeFunction(name: "lorenzVertexShader")
-    descriptor.fragmentFunction = library.makeFunction(name: "lorenzFragmentShader")
+    descriptor.vertexFunction = library.makeFunction(name: "aizawaVertexShader")
+    descriptor.fragmentFunction = library.makeFunction(name: "aizawaFragmentShader")
     descriptor.colorAttachments[0].pixelFormat = .rgba16Float
     descriptor.depthAttachmentPixelFormat = .depth32Float
     descriptor.inputPrimitiveTopology = .triangle
@@ -186,7 +189,7 @@ extension LorenzRenderer {
   fileprivate static func makeComputePipelineState(device: MTLDevice, library: MTLLibrary) throws
     -> MTLComputePipelineState
   {
-    let function = library.makeFunction(name: "integrateLorenzAttractor")!
+    let function = library.makeFunction(name: "integrateAizawaAttractor")!
     return try device.makeComputePipelineState(function: function)
   }
 
@@ -200,7 +203,7 @@ extension LorenzRenderer {
   fileprivate static func makeTetraGeometry(device: MTLDevice) -> (
     vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int
   ) {
-    let h: Float = 0.03  // Minimum particle size for visibility
+    let h: Float = 0.03
     let vertices: [MeshVertex] = [
       MeshVertex(position: [0, h, 0], normal: [0, 1, 0]),
       MeshVertex(position: [-h, -h, h], normal: [-0.58, -0.58, 0.58]),
@@ -232,32 +235,33 @@ extension LorenzRenderer {
   fileprivate static func makeInitialParticleStates(
     device: MTLDevice, count: Int, worldScale: Float
   ) -> MTLBuffer {
-    // Lorenz parameters
-    let sigma: Float = 10.0
-    let beta: Float = 8.0 / 3.0
-    let rho: Float = 28.0
-    let dt: Float = 0.001  // Very small step size
+    // Aizawa parameters
+    let a: Float = 0.95
+    let b: Float = 0.7
+    let c: Float = 0.6
+    let d: Float = 3.5
+    let e: Float = 0.25
+    let f: Float = 0.1
+    let dt: Float = 0.001
 
-    // Starting point on Lorenz attractor
+    // Starting point
     var x: Float = 0.1
-    var y: Float = 0.0
-    var z: Float = 0.0
+    var y: Float = 0.1
+    var z: Float = 0.1
 
-    var states: [LorenzParticleState] = []
+    var states: [AizawaParticleState] = []
     states.reserveCapacity(count)
 
     for index in 0..<count {
-      // Current position on the Lorenz curve
       let rawPosition = SIMD3<Float>(x, y, z)
       let scaledPosition = rawPosition * worldScale
 
-      // 3% chance of being a "special" large, bright particle
       let isSpecial = Float.random(in: 0...1) < 0.03
       let scale: Float
       if isSpecial {
-        scale = Float.random(in: 0.18...0.27)  // Large particles
+        scale = Float.random(in: 0.18...0.27)
       } else {
-        scale = Float.random(in: 0.09...0.15)  // Normal particles with variation, larger minimum
+        scale = Float.random(in: 0.09...0.15)
       }
 
       let rotation = atan2(rawPosition.z, rawPosition.x)
@@ -267,17 +271,17 @@ extension LorenzRenderer {
         Float.random(in: 0...10_000)
       )
       states.append(
-        LorenzParticleState(
+        AizawaParticleState(
           positionAndScale: SIMD4<Float>(
             scaledPosition.x, scaledPosition.y, scaledPosition.z, scale),
           seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
         )
       )
 
-      // Integrate Lorenz equations with very small step to get next position
-      let dx = sigma * (y - x)
-      let dy = x * (rho - z) - y
-      let dz = x * y - beta * z
+      // Integrate Aizawa equations
+      let dx = (z - b) * x - d * y
+      let dy = d * x + (z - b) * y
+      let dz = c + a * z - (z * z * z) / 3.0 - (x * x + y * y) * (1.0 + e * z) + f * z * x * x * x
 
       x += dx * dt
       y += dy * dt
@@ -286,7 +290,7 @@ extension LorenzRenderer {
 
     return device.makeBuffer(
       bytes: states,
-      length: MemoryLayout<LorenzParticleState>.stride * states.count,
+      length: MemoryLayout<AizawaParticleState>.stride * states.count,
       options: [.storageModeShared]
     )!
   }

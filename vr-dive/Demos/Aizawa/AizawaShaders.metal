@@ -22,18 +22,21 @@ struct MeshVertex {
   float3 normal;
 };
 
-struct LorenzParticleState {
+struct AizawaParticleState {
   float4 positionAndScale;
   float4 seedAndPhase;
 };
 
-struct LorenzUniforms {
+struct AizawaUniforms {
   float deltaTime;
   float globalTime;
   uint particleCount;
-  float sigma;
-  float beta;
-  float rho;
+  float a;
+  float b;
+  float c;
+  float d;
+  float e;
+  float f;
   float damping;
   float worldScale;
   float resetRadius;
@@ -48,7 +51,7 @@ struct BackgroundVertexOut {
   uint layer [[render_target_array_index]];
 };
 
-struct LorenzVertexOut {
+struct AizawaVertexOut {
   float4 position [[position]];
   float3 normal;
   float3 worldPos;
@@ -68,36 +71,34 @@ makeBackgroundVertex(uint vertexID, uint instanceID,
   return out;
 }
 
-vertex BackgroundVertexOut lorenzBackgroundVertexShader(
+vertex BackgroundVertexOut aizawaBackgroundVertexShader(
     uint vertexID [[vertex_id]], uint instanceID [[instance_id]],
     constant BackgroundUniforms &uniforms [[buffer(0)]]) {
   return makeBackgroundVertex(vertexID, instanceID, uniforms);
 }
 
-fragment float4 lorenzBackgroundFragmentShader(
+fragment float4 aizawaBackgroundFragmentShader(
     BackgroundVertexOut in [[stage_in]],
     constant BackgroundUniforms &uniforms [[buffer(0)]]) {
-  // Simple dark background, no aurora
   return float4(0.005, 0.008, 0.012, 1.0);
 }
 
-vertex LorenzVertexOut lorenzVertexShader(
+vertex AizawaVertexOut aizawaVertexShader(
     ushort amplificationID [[amplification_id]],
     const device MeshVertex *vertices [[buffer(0)]],
-    const device LorenzParticleState *states [[buffer(1)]],
+    const device AizawaParticleState *states [[buffer(1)]],
     constant SceneUniforms &uniforms [[buffer(2)]], uint vertexID [[vertex_id]],
     uint instanceID [[instance_id]]) {
-  LorenzVertexOut out;
+  AizawaVertexOut out;
   uint layers = max(uniforms.layerCount, 1u);
   uint viewIndex = min((uint)amplificationID, layers - 1);
-  LorenzParticleState state = states[instanceID];
+  AizawaParticleState state = states[instanceID];
   MeshVertex vtx = vertices[vertexID];
 
   float phase = state.seedAndPhase.w;
   float c = cos(phase);
   float s = sin(phase);
 
-  // Rotate the particle mesh itself
   float3 rotatedMeshPos =
       float3(vtx.position.x * c - vtx.position.z * s, vtx.position.y,
              vtx.position.x * s + vtx.position.z * c);
@@ -105,18 +106,8 @@ vertex LorenzVertexOut lorenzVertexShader(
       float3(vtx.normal.x * c - vtx.normal.z * s, vtx.normal.y,
              vtx.normal.x * s + vtx.normal.z * c);
 
-  // Get simulation position (Lorenz space scaled to World space)
   float3 simPos = state.positionAndScale.xyz;
-
-  // Reorient the attractor:
-  // Lorenz Z (up) -> World Y
-  // Lorenz Y -> World Z
-  // Lorenz X -> World X
   float3 reorientedPos = float3(simPos.x, simPos.z, simPos.y);
-
-  // Offset to center it in front of the user
-  // Assuming scale ~0.06, center Z is ~25 * 0.06 = 1.5
-  // We want center at (0, 1.3, -1.5)
   float3 offset = float3(0.0, -0.2, -1.5);
   float3 finalCenterPos = reorientedPos + offset;
 
@@ -126,15 +117,15 @@ vertex LorenzVertexOut lorenzVertexShader(
                                            : uniforms.viewProjectionMatrixRight;
 
   out.position = viewProjection * worldPos;
-  out.normal = normalize(float3(rotatedMeshNormal.x, rotatedMeshNormal.z,
-                                rotatedMeshNormal.y)); // Rotate normal too
+  out.normal = normalize(
+      float3(rotatedMeshNormal.x, rotatedMeshNormal.z, rotatedMeshNormal.y));
   out.worldPos = position;
   out.objectScale = state.positionAndScale.w;
   out.layer = viewIndex;
   return out;
 }
 
-fragment float4 lorenzFragmentShader(LorenzVertexOut in [[stage_in]],
+fragment float4 aizawaFragmentShader(AizawaVertexOut in [[stage_in]],
                                      constant SceneUniforms &uniforms
                                      [[buffer(0)]]) {
   float3 normal = normalize(in.normal);
@@ -146,53 +137,57 @@ fragment float4 lorenzFragmentShader(LorenzVertexOut in [[stage_in]],
   float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0);
   float scaleFactor = saturate((in.objectScale - 0.04) * 8.0);
   float heightFactor = saturate((in.worldPos.y + 1.2) * 0.35);
-  float lobeFactor = saturate(abs(in.worldPos.x) * 0.4);
-  float3 cool = float3(0.12, 0.22, 0.38);
-  float3 warm = float3(0.58, 0.36, 0.2);
-  float3 baseColor = mix(cool, warm, lobeFactor);
-  // Increase brightness for larger particles
-  baseColor = mix(baseColor, float3(0.9, 0.95, 1.0),
+  float spiralFactor = saturate(length(in.worldPos.xz) * 0.25);
+
+  // Color scheme for Aizawa: green to gold
+  float3 cool = float3(0.15, 0.35, 0.22);
+  float3 warm = float3(0.55, 0.45, 0.15);
+  float3 baseColor = mix(cool, warm, spiralFactor);
+  baseColor = mix(baseColor, float3(0.9, 0.95, 0.85),
                   heightFactor * 0.5 + scaleFactor * 0.8);
 
-  // Add glow based on height and scale
   float glow = smoothstep(0.5, 1.0, heightFactor) * 0.15 + scaleFactor * 0.5;
   float3 metallic = baseColor * (0.25 + ndotl * 0.75) + glow;
-  float3 color = metallic + spec * float3(0.9, 0.95, 1.0) +
-                 fresnel * float3(0.25, 0.55, 0.95);
+  float3 color = metallic + spec * float3(0.95, 0.9, 0.8) +
+                 fresnel * float3(0.45, 0.55, 0.35);
   return float4(color, 1.0);
 }
 
-inline float3 lorenzDerivative(float3 p, float sigma, float beta, float rho) {
-  float3 d;
-  d.x = sigma * (p.y - p.x);
-  d.y = p.x * (rho - p.z) - p.y;
-  d.z = p.x * p.y - beta * p.z;
-  return d;
+inline float3 aizawaDerivative(float3 p, float a, float b, float c, float d,
+                               float e, float f) {
+  float3 d_out;
+  d_out.x = (p.z - b) * p.x - d * p.y;
+  d_out.y = d * p.x + (p.z - b) * p.y;
+  d_out.z = c + a * p.z - (p.z * p.z * p.z) / 3.0f -
+            (p.x * p.x + p.y * p.y) * (1.0f + e * p.z) +
+            f * p.z * p.x * p.x * p.x;
+  return d_out;
 }
 
-kernel void integrateLorenzAttractor(device LorenzParticleState *states
+kernel void integrateAizawaAttractor(device AizawaParticleState *states
                                      [[buffer(0)]],
-                                     constant LorenzUniforms &uniforms
+                                     constant AizawaUniforms &uniforms
                                      [[buffer(1)]],
                                      uint id [[thread_position_in_grid]]) {
   if (id >= uniforms.particleCount) {
     return;
   }
 
-  LorenzParticleState state = states[id];
+  AizawaParticleState state = states[id];
   float3 worldPosition = state.positionAndScale.xyz;
   float3 position = worldPosition / max(uniforms.worldScale, 1e-4f);
-  // Allow smaller dt for slow motion (down to 1/10000)
   float dt = clamp(uniforms.deltaTime, 1.0f / 10000.0f, 1.0f / 30.0f);
 
-  float3 k1 =
-      lorenzDerivative(position, uniforms.sigma, uniforms.beta, uniforms.rho);
-  float3 k2 = lorenzDerivative(position + 0.5f * dt * k1, uniforms.sigma,
-                               uniforms.beta, uniforms.rho);
-  float3 k3 = lorenzDerivative(position + 0.5f * dt * k2, uniforms.sigma,
-                               uniforms.beta, uniforms.rho);
-  float3 k4 = lorenzDerivative(position + dt * k3, uniforms.sigma,
-                               uniforms.beta, uniforms.rho);
+  float3 k1 = aizawaDerivative(position, uniforms.a, uniforms.b, uniforms.c,
+                               uniforms.d, uniforms.e, uniforms.f);
+  float3 k2 =
+      aizawaDerivative(position + 0.5f * dt * k1, uniforms.a, uniforms.b,
+                       uniforms.c, uniforms.d, uniforms.e, uniforms.f);
+  float3 k3 =
+      aizawaDerivative(position + 0.5f * dt * k2, uniforms.a, uniforms.b,
+                       uniforms.c, uniforms.d, uniforms.e, uniforms.f);
+  float3 k4 = aizawaDerivative(position + dt * k3, uniforms.a, uniforms.b,
+                               uniforms.c, uniforms.d, uniforms.e, uniforms.f);
   float3 next = position + (dt / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
 
   float3 seeds = state.seedAndPhase.xyz;
@@ -208,11 +203,8 @@ kernel void integrateLorenzAttractor(device LorenzParticleState *states
   bool invalid = !(isfinite(next.x) && isfinite(next.y) && isfinite(next.z));
   float len = length(next);
   if (invalid || len > uniforms.resetRadius) {
-    // Reset to a random point near the origin or on the attractor
-    // Using the seed to generate a pseudo-random position
     float sign = fmod(seeds.x + seeds.y, 2.0f) > 1.0f ? 1.0f : -1.0f;
-    next = float3(sign * (8.0f + sin(seeds.x) * 0.5f),
-                  8.5f + cos(seeds.y) * 1.5f, 27.0f + sin(seeds.z) * 1.5f);
+    next = float3(sign * 0.1f, 0.1f, 0.1f);
   }
 
   float3 worldNext = next * uniforms.worldScale;

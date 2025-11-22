@@ -3,96 +3,169 @@ import GameController
 import SwiftUI
 import simd
 
-struct Projectile {
-  var position: SIMD3<Float>
-  var velocity: SIMD3<Float>
-  var active: Bool
-  var radius: Float
-}
-
 @Observable
 class GameManager {
-  var cameraPosition: SIMD3<Float> = [0, 0, 0]
-  var cameraForward: SIMD3<Float> = [0, 0, -1]
-  var cameraRight: SIMD3<Float> = [1, 0, 0]
+  private struct ControllerState {
+    var leftStick: SIMD2<Float> = .zero
+    var rightStick: SIMD2<Float> = .zero
+    var buttonA: Bool = false
+  }
 
-  var projectiles: [Projectile] = []
+  private let controllerQueue = DispatchQueue(label: "vr-dive.controller.state")
+  private var controllerState = ControllerState()
+  private var lastInputLogTime: TimeInterval = 0
 
-  private var lastUpdateTime: TimeInterval = 0
+  private let movementSpeed: Float = 1.2
+  private let verticalSpeed: Float = 0.8
+  private let yawSpeed: Float = .pi / 2.0
+  private let deadZone: Float = 0.12
+
+  private(set) var playerOffset: SIMD3<Float> = .zero
+  private(set) var yawAngle: Float = 0
+  private(set) var rigTransform: simd_float4x4 = matrix_identity_float4x4
 
   init() {
     setupControllerObserver()
-    // Init projectiles pool
-    for _ in 0..<10 {
-      projectiles.append(
-        Projectile(position: [0, 0, 0], velocity: [0, 0, 0], active: false, radius: 0.1))
-    }
   }
 
   func setupControllerObserver() {
     NotificationCenter.default.addObserver(
       self, selector: #selector(controllerDidConnect), name: .GCControllerDidConnect, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(controllerDidDisconnect), name: .GCControllerDidDisconnect,
+      object: nil)
+
+    GCController.startWirelessControllerDiscovery(completionHandler: nil)
+    for controller in GCController.controllers() {
+      register(controller: controller)
+    }
   }
 
-  @objc func controllerDidConnect(notification: Notification) {
+  @objc private func controllerDidConnect(notification: Notification) {
     guard let controller = notification.object as? GCController else { return }
-    controller.extendedGamepad?.valueChangedHandler = { [weak self] (gamepad, element) in
-      self?.handleInput(gamepad: gamepad)
+    register(controller: controller)
+  }
+
+  @objc private func controllerDidDisconnect(notification: Notification) {
+    guard let controller = notification.object as? GCController else { return }
+    print("[GameManager] Controller disconnected: \(controller.vendorName ?? "Unknown Controller")")
+  }
+
+  private func register(controller: GCController) {
+    print("[GameManager] Controller connected: \(controller.vendorName ?? "Unknown Controller")")
+    guard let gamepad = controller.extendedGamepad else {
+      print("[GameManager] Connected controller has no extended gamepad profile")
+      return
+    }
+
+    gamepad.valueChangedHandler = { [weak self] gamepad, element in
+      self?.handleInput(gamepad: gamepad, element: element)
     }
   }
 
-  func handleInput(gamepad: GCExtendedGamepad) {
-    // Movement
-    let leftStick = gamepad.leftThumbstick
-    let speed: Float = 0.1
+  private func handleInput(gamepad: GCExtendedGamepad, element: GCControllerElement) {
+    let leftStick = SIMD2<Float>(
+      gamepad.leftThumbstick.xAxis.value, gamepad.leftThumbstick.yAxis.value)
+    let rightStick = SIMD2<Float>(
+      gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value)
+    let buttonA = gamepad.buttonA.isPressed
 
-    // Simple movement relative to camera orientation (which we need to update from ARKit or just manage here if we were fully virtual, but in VR we usually move the "rig" or offset)
-    // For this demo, we will update a "world offset" or "virtual position".
+    controllerQueue.sync {
+      controllerState.leftStick = leftStick
+      controllerState.rightStick = rightStick
+      controllerState.buttonA = buttonA
+    }
 
-    let moveDir = cameraForward * leftStick.yAxis.value + cameraRight * leftStick.xAxis.value
-    cameraPosition += moveDir * speed
+    logInputEvent(element: element, leftStick: leftStick, rightStick: rightStick, buttonA: buttonA)
+  }
 
-    // Shooting
-    if gamepad.buttonA.isPressed {
-      shoot()
+  private func logInputEvent(
+    element: GCControllerElement, leftStick: SIMD2<Float>, rightStick: SIMD2<Float>,
+    buttonA: Bool
+  ) {
+    let now = Date().timeIntervalSince1970
+    guard now - lastInputLogTime > 0.05 else { return }
+    lastInputLogTime = now
+
+    let elementName = String(describing: type(of: element))
+    let formattedLeft = String(format: "(%.2f, %.2f)", leftStick.x, leftStick.y)
+    let formattedRight = String(format: "(%.2f, %.2f)", rightStick.x, rightStick.y)
+    print(
+      "[GameManager] Input \(elementName) left=\(formattedLeft) right=\(formattedRight) A=\(buttonA)"
+    )
+  }
+
+  func updateRigState(deltaTime: Float, headTransform: simd_float4x4) -> simd_float4x4 {
+    controllerQueue.sync {
+      let planarForward = normalizedPlanarVector(-simd_make_float3(headTransform.columns.2))
+      let planarRight = normalizedPlanarVector(simd_make_float3(headTransform.columns.0))
+
+      let planarInput = applyDeadZone(controllerState.rightStick)
+      let verticalYawInput = applyDeadZone(controllerState.leftStick)
+
+      var displacement = SIMD3<Float>.zero
+      displacement -= planarForward * planarInput.y  // first-person: push forward to move forward (scene pulls back)
+      displacement -= planarRight * planarInput.x  // first-person: push left to strafe left (scene moves right)
+      playerOffset += displacement * movementSpeed * deltaTime
+      playerOffset.y -= verticalYawInput.y * verticalSpeed * deltaTime
+      yawAngle -= verticalYawInput.x * yawSpeed * deltaTime
+      yawAngle = wrapAngle(yawAngle)
+
+      rigTransform = buildRigTransform()
+      return rigTransform
     }
   }
 
-  func shoot() {
-    // Find inactive projectile
-    for i in 0..<projectiles.count {
-      if !projectiles[i].active {
-        projectiles[i].active = true
-        projectiles[i].position = cameraPosition + cameraForward * 0.5
-        projectiles[i].velocity = cameraForward * 0.5
-        break
-      }
-    }
+  func currentRigTransform() -> simd_float4x4 {
+    controllerQueue.sync { rigTransform }
   }
 
-  func update(time: Float, deltaTime: TimeInterval, headTransform: simd_float4x4) {
-    // Update camera vectors from head transform
-    // headTransform is Camera -> World
-    cameraForward = -simd_make_float3(headTransform.columns.2)
-    cameraRight = simd_make_float3(headTransform.columns.0)
-
-    // Update projectiles
-    for i in 0..<projectiles.count {
-      if projectiles[i].active {
-        projectiles[i].position += projectiles[i].velocity
-
-        // Simple collision with "fish" (hardcoded pos in shader for now, let's mirror it here)
-        let fishPos = SIMD3<Float>(sin(time) * 3.0, 0.0, cos(time) * 3.0 + 5.0)
-        if distance(projectiles[i].position, fishPos) < 0.6 {
-          // Bounce
-          projectiles[i].velocity *= -1.0
-        }
-
-        // Deactivate if too far
-        if length(projectiles[i].position - cameraPosition) > 20.0 {
-          projectiles[i].active = false
-        }
-      }
+  private func normalizedPlanarVector(_ vector: SIMD3<Float>) -> SIMD3<Float> {
+    var planar = SIMD3<Float>(vector.x, 0, vector.z)
+    let length = simd_length(planar)
+    if length < 0.0001 {
+      planar = SIMD3<Float>(0, 0, -1)
+      return planar
     }
+    return planar / length
+  }
+
+  private func applyDeadZone(_ input: SIMD2<Float>) -> SIMD2<Float> {
+    let magnitude = simd_length(input)
+    guard magnitude > deadZone else { return .zero }
+    let scaled = (magnitude - deadZone) / (1 - deadZone)
+    return (input / max(magnitude, 0.0001)) * scaled
+  }
+
+  private func wrapAngle(_ angle: Float) -> Float {
+    var value = angle
+    let twoPi: Float = .pi * 2
+    value = fmod(value, twoPi)
+    if value > .pi {
+      value -= twoPi
+    } else if value < -.pi {
+      value += twoPi
+    }
+    return value
+  }
+
+  private func buildRigTransform() -> simd_float4x4 {
+    let cosYaw = cos(-yawAngle)
+    let sinYaw = sin(-yawAngle)
+    let rotation = simd_float4x4(
+      SIMD4<Float>(cosYaw, 0, sinYaw, 0),
+      SIMD4<Float>(0, 1, 0, 0),
+      SIMD4<Float>(-sinYaw, 0, cosYaw, 0),
+      SIMD4<Float>(0, 0, 0, 1)
+    )
+
+    let translation = simd_float4x4(
+      SIMD4<Float>(1, 0, 0, 0),
+      SIMD4<Float>(0, 1, 0, 0),
+      SIMD4<Float>(0, 0, 1, 0),
+      SIMD4<Float>(-playerOffset.x, -playerOffset.y, -playerOffset.z, 1)
+    )
+
+    return rotation * translation
   }
 }

@@ -9,6 +9,8 @@ struct BackgroundUniforms {
   var time: Float
   var intensity: Float
   var padding: SIMD2<Float> = .zero
+  var viewToWorldLeft: simd_float4x4 = matrix_identity_float4x4
+  var viewToWorldRight: simd_float4x4 = matrix_identity_float4x4
 }
 
 struct SceneUniforms {
@@ -33,8 +35,9 @@ struct MeshVertex {
 
 struct ObjectState {
   var positionAndType: SIMD4<Float>
-  var velocityAndPhase: SIMD4<Float>
+  var motionAndPhase: SIMD4<Float>
   var scaleAndPadding: SIMD4<Float>
+  var homeAndJitter: SIMD4<Float>
 }
 
 struct VRConfiguration: CompositorLayerConfiguration {
@@ -67,8 +70,11 @@ class Renderer {
   let objectStateBuffer: MTLBuffer
   let arSession: ARKitSession
   let worldTracking: WorldTrackingProvider
+  let gameManager: GameManager
   private var lastKnownDeviceAnchor: ARKit.DeviceAnchor?
   private var lastSimulationTimestamp: Float = 0
+  private var rigTransform: simd_float4x4 = matrix_identity_float4x4
+  private var lastRigUpdateTime: Float = 0
   private let objectCount = 48
 
   var startTime: Date = Date()
@@ -80,6 +86,7 @@ class Renderer {
     var rightViewProjection: simd_float4x4
     var viewports: [MTLViewport]
     var renderTargetIndices: [UInt32]
+    var viewToWorldTransforms: [simd_float4x4]
     var viewCount: Int
   }
 
@@ -106,6 +113,7 @@ class Renderer {
 
     self.arSession = ARKitSession()
     self.worldTracking = WorldTrackingProvider()
+    self.gameManager = GameManager()
   }
 
   func startRenderLoop() {
@@ -182,6 +190,12 @@ class Renderer {
       }
 
       simulateObjectsIfNeeded(currentTime: animationTime)
+      if let anchor = anchorToUse {
+        updateRigTransformIfNeeded(
+          deviceAnchorTransform: anchor.originFromAnchorTransform,
+          currentTime: animationTime
+        )
+      }
 
       autoreleasepool {
         frame.startSubmission()
@@ -218,17 +232,20 @@ class Renderer {
 
     drawable.deviceAnchor = deviceAnchor
 
-    if let renderPassDescriptor = makeRenderPassDescriptor(for: drawable, viewCount: viewCount),
+    guard let colorTexture = drawable.colorTextures.first else { return }
+    let viewData = makeViewRenderingData(
+      drawable: drawable,
+      deviceAnchor: deviceAnchor,
+      colorTexture: colorTexture,
+      viewCount: viewCount
+    )
+
+    if let renderPassDescriptor = makeRenderPassDescriptor(
+      for: drawable, viewCount: viewData.viewCount),
       let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
     {
-      encodeBackgroundPass(with: encoder, viewCount: viewCount, time: time)
-      encodeObjectPass(
-        with: encoder,
-        drawable: drawable,
-        deviceAnchor: deviceAnchor,
-        viewCount: viewCount,
-        time: time
-      )
+      encodeBackgroundPass(with: encoder, viewData: viewData, time: time)
+      encodeObjectPass(with: encoder, viewData: viewData, time: time)
       encoder.endEncoding()
     }
 
@@ -272,39 +289,29 @@ class Renderer {
   }
 
   private func encodeBackgroundPass(
-    with encoder: MTLRenderCommandEncoder, viewCount: Int, time: Float
-  ) {
-    var uniforms = BackgroundUniforms(time: time, intensity: 0.85)
-    encoder.setRenderPipelineState(backgroundPipelineState)
-    encoder.setVertexBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
-    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
-    let layers = max(viewCount, 1)
-    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3, instanceCount: layers)
-  }
-
-  private func encodeObjectPass(
     with encoder: MTLRenderCommandEncoder,
-    drawable: LayerRenderer.Drawable,
-    deviceAnchor: ARKit.DeviceAnchor,
-    viewCount: Int,
+    viewData: ViewRenderingData,
     time: Float
   ) {
-    guard let colorTexture = drawable.colorTextures.first else { return }
-    encoder.setRenderPipelineState(objectPipelineState)
-    encoder.setDepthStencilState(depthStencilState)
-    encoder.setCullMode(.none)
-    encoder.setFrontFacing(.counterClockwise)
+    var uniforms = BackgroundUniforms(time: time, intensity: 0.85)
+    uniforms.viewToWorldLeft = viewData.viewToWorldTransforms[0]
+    uniforms.viewToWorldRight = viewData.viewToWorldTransforms[min(viewData.viewCount - 1, 1)]
 
-    encoder.setVertexBuffer(meshVertexBuffer, offset: 0, index: 0)
-    encoder.setVertexBuffer(objectStateBuffer, offset: 0, index: 1)
-
-    let viewData = makeViewRenderingData(
-      drawable: drawable,
-      deviceAnchor: deviceAnchor,
-      colorTexture: colorTexture,
-      viewCount: viewCount
+    encoder.setRenderPipelineState(backgroundPipelineState)
+    applyViewConfiguration(on: encoder, using: viewData)
+    encoder.setVertexBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
+    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
+    encoder.drawPrimitives(
+      type: .triangle,
+      vertexStart: 0,
+      vertexCount: 3,
+      instanceCount: viewData.viewCount
     )
+  }
 
+  private func applyViewConfiguration(
+    on encoder: MTLRenderCommandEncoder, using viewData: ViewRenderingData
+  ) {
     if !viewData.viewports.isEmpty {
       encoder.setViewports(viewData.viewports)
     }
@@ -320,6 +327,23 @@ class Renderer {
     } else {
       encoder.setVertexAmplificationCount(1, viewMappings: nil)
     }
+  }
+
+  private func encodeObjectPass(
+    with encoder: MTLRenderCommandEncoder,
+    viewData: ViewRenderingData,
+    time: Float
+  ) {
+    encoder.setRenderPipelineState(objectPipelineState)
+    encoder.setDepthStencilState(depthStencilState)
+    encoder.setCullMode(.none)
+    encoder.setFrontFacing(.counterClockwise)
+    encoder.setTriangleFillMode(.fill)
+
+    encoder.setVertexBuffer(meshVertexBuffer, offset: 0, index: 0)
+    encoder.setVertexBuffer(objectStateBuffer, offset: 0, index: 1)
+
+    applyViewConfiguration(on: encoder, using: viewData)
 
     var sceneUniforms = SceneUniforms(
       viewProjectionMatrixLeft: viewData.leftViewProjection,
@@ -359,6 +383,7 @@ class Renderer {
     var viewports: [MTLViewport] = []
     var matrices = Array(repeating: matrix_identity_float4x4, count: Renderer.maxViewCount)
     var renderTargetIndices: [UInt32] = []
+    var viewToWorldTransforms: [simd_float4x4] = []
     let desiredViewCount = max(min(viewCount, Renderer.maxViewCount), 1)
     let availableViews = drawable.views
     let sampledViewCount = min(desiredViewCount, availableViews.count)
@@ -369,11 +394,13 @@ class Renderer {
         let view = availableViews[index]
         let localTransform = view.transform
         let worldFromEye = deviceMatrix * localTransform
-        let viewMatrix = worldFromEye.inverse
+        let adjustedWorldFromEye = rigTransform * worldFromEye
+        let viewMatrix = adjustedWorldFromEye.inverse
         let projection = projectionMatrix(for: drawable, view: view, viewIndex: index)
         matrices[index] = projection * viewMatrix
         viewports.append(view.textureMap.viewport)
         renderTargetIndices.append(UInt32(view.textureMap.textureIndex))
+        viewToWorldTransforms.append(adjustedWorldFromEye)
       }
     }
 
@@ -389,14 +416,17 @@ class Renderer {
       )
       viewports.append(fallbackViewport)
       renderTargetIndices.append(0)
+      viewToWorldTransforms.append(rigTransform)
     }
 
     let fallbackMatrix = matrices[max(min(sampledViewCount - 1, Renderer.maxViewCount - 1), 0)]
     let fallbackRenderIndex = renderTargetIndices.last ?? 0
+    let fallbackTransform = viewToWorldTransforms.last ?? matrix_identity_float4x4
     if sampledViewCount < desiredViewCount {
       for index in sampledViewCount..<desiredViewCount {
         matrices[index] = fallbackMatrix
         renderTargetIndices.append(fallbackRenderIndex)
+        viewToWorldTransforms.append(fallbackTransform)
       }
     }
 
@@ -408,12 +438,17 @@ class Renderer {
       renderTargetIndices.append(renderTargetIndices.last ?? 0)
     }
 
+    while viewToWorldTransforms.count < desiredViewCount {
+      viewToWorldTransforms.append(viewToWorldTransforms.last ?? matrix_identity_float4x4)
+    }
+
     let rightIndex = desiredViewCount > 1 ? 1 : 0
     return ViewRenderingData(
       leftViewProjection: matrices[0],
       rightViewProjection: matrices[rightIndex],
       viewports: Array(viewports.prefix(desiredViewCount)),
       renderTargetIndices: Array(renderTargetIndices.prefix(desiredViewCount)),
+      viewToWorldTransforms: Array(viewToWorldTransforms.prefix(desiredViewCount)),
       viewCount: desiredViewCount
     )
   }
@@ -490,6 +525,15 @@ class Renderer {
 
     lastSimulationTimestamp = currentTime
   }
+
+  private func updateRigTransformIfNeeded(deviceAnchorTransform: simd_float4x4, currentTime: Float)
+  {
+    let delta = max(0, currentTime - lastRigUpdateTime)
+    guard delta > 0 else { return }
+    rigTransform = gameManager.updateRigState(
+      deltaTime: delta, headTransform: deviceAnchorTransform)
+    lastRigUpdateTime = currentTime
+  }
 }
 
 extension Renderer {
@@ -502,6 +546,7 @@ extension Renderer {
     descriptor.colorAttachments[0].pixelFormat = .rgba16Float
     descriptor.depthAttachmentPixelFormat = .depth32Float
     descriptor.inputPrimitiveTopology = .triangle
+    descriptor.maxVertexAmplificationCount = Renderer.maxViewCount
     return try device.makeRenderPipelineState(descriptor: descriptor)
   }
 
@@ -614,11 +659,11 @@ extension Renderer {
         Float.random(in: -0.9...1.1),
         Float.random(in: zRange)
       )
-      let baseSpeed: Float = type > 0.5 ? 0.15 : 0.1
-      let velocity = SIMD3<Float>(
-        Float.random(in: -baseSpeed...baseSpeed) * 0.1,
-        Float.random(in: -baseSpeed...baseSpeed) * 0.2,
-        Float.random(in: -baseSpeed...baseSpeed)
+      let jitterBase: ClosedRange<Float> = 0.008...0.04
+      let motionAmplitude = SIMD3<Float>(
+        Float.random(in: jitterBase) * (type > 0.5 ? 1.2 : 1.0),
+        Float.random(in: jitterBase) * 1.5,
+        Float.random(in: jitterBase)
       )
       let scale = SIMD3<Float>(
         Float.random(in: 0.15...0.35) * (type > 0.5 ? 1.8 : 1.0),
@@ -626,12 +671,14 @@ extension Renderer {
         Float.random(in: 0.15...0.35)
       )
       let phase = Float.random(in: 0...(.pi * 2))
+      let jitterRadius = Float.random(in: 0.04...0.12)
 
       states.append(
         ObjectState(
           positionAndType: SIMD4<Float>(position, type),
-          velocityAndPhase: SIMD4<Float>(velocity, phase),
-          scaleAndPadding: SIMD4<Float>(scale, 0)
+          motionAndPhase: SIMD4<Float>(motionAmplitude, phase),
+          scaleAndPadding: SIMD4<Float>(scale, 0),
+          homeAndJitter: SIMD4<Float>(position, jitterRadius)
         )
       )
     }

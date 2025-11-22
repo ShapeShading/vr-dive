@@ -13,9 +13,15 @@ A simple VR diving experience for Apple Vision Pro using CompositorServices and 
   - **Ruins**: Wood/Brown box.
   - **Ring**: Green rotating torus.
   - **Projectiles**: Red glowing spheres.
-- **Controller Support**: Supports Bluetooth Game Controllers (e.g., PS5 DualSense).
-  - **Left Stick**: Move camera (swim).
-  - **Button A (Cross)**: Shoot projectiles.
+- **手柄支持**：兼容蓝牙游戏手柄（如 PS5 DualSense）。
+  - **右摇杆**：以第一人称视角控制平移——向前推，画面后移（角色前进）；向左推，画面右移（角色左移）。
+  - **左摇杆**：同样采取第一人称方向——向前推，画面下移（角色上浮）；向左推，画面右转（角色左转）。
+  - **× 键（Button A）**：预留给后续交互。
+
+## 手柄映射与调试
+
+- DualSense 输入会在 Xcode 控制台输出（前缀为 `[GameManager]`），可用来确认模拟器或真机是否正确转发事件。
+- 运动通过额外挂载的“机位变换”实现，你可以一边自由转头观察环境，一边用左右摇杆微调潜艇的位置与朝向。
 
 ## How to Verify
 
@@ -36,13 +42,11 @@ A simple VR diving experience for Apple Vision Pro using CompositorServices and 
 1.  **Connect Controller**:
     - **Simulator**: Connect a supported game controller to your Mac via Bluetooth or USB. The Simulator should automatically detect it.
     - **Device**: Pair the PS5 controller with the Vision Pro via Bluetooth settings.
-2.  **Movement**:
-    - Use the **Left Thumbstick** to move the camera forward/backward and strafe left/right.
-    - You should see the scene moving relative to you.
-3.  **Shooting**:
-    - Press the **Cross (X)** button (mapped to Button A).
-    - You should see red spherical projectiles firing from your position in the direction you are looking.
-    - Projectiles will bounce off the "fish" if they hit it.
+2.  **移动体验**：
+
+- **右摇杆**控制第一人称平移（向前推=角色前进，向左推=角色左移）。
+- **左摇杆**的上下用于垂直移动、左右用于旋转，方向与第一人称保持一致（向前推=上浮，向左推=左转）。
+- Xcode 控制台会输出 `[GameManager] Input ...` 日志，可用来验证事件是否成功传递。
 
 ## Technical Details
 

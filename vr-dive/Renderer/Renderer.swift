@@ -76,6 +76,7 @@ class Renderer {
   private var rigTransform: simd_float4x4 = matrix_identity_float4x4
   private var lastRigUpdateTime: Float = 0
   private let objectCount = 48
+  private static let largeObjectScale: Float = 8.0
 
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
@@ -651,6 +652,8 @@ extension Renderer {
     var states: [ObjectState] = []
     states.reserveCapacity(count)
 
+    let scaleBoost = Renderer.largeObjectScale
+
     for i in 0..<count {
       let type: Float = (i % 7 == 0) ? 1.0 : 0.0
       let zRange: ClosedRange<Float> = -3.2...(-0.8)
@@ -673,12 +676,17 @@ extension Renderer {
       let phase = Float.random(in: 0...(.pi * 2))
       let jitterRadius = Float.random(in: 0.04...0.12)
 
+      let scaledPosition = position * scaleBoost
+      let scaledAmplitude = motionAmplitude * scaleBoost
+      let scaledScale = scale * scaleBoost
+      let scaledJitter = jitterRadius * scaleBoost
+
       states.append(
         ObjectState(
-          positionAndType: SIMD4<Float>(position, type),
-          motionAndPhase: SIMD4<Float>(motionAmplitude, phase),
-          scaleAndPadding: SIMD4<Float>(scale, 0),
-          homeAndJitter: SIMD4<Float>(position, jitterRadius)
+          positionAndType: SIMD4<Float>(scaledPosition, type),
+          motionAndPhase: SIMD4<Float>(scaledAmplitude, phase),
+          scaleAndPadding: SIMD4<Float>(scaledScale, 0),
+          homeAndJitter: SIMD4<Float>(scaledPosition, scaledJitter)
         )
       )
     }

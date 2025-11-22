@@ -97,19 +97,19 @@ class GameManager {
 
   func updateRigState(deltaTime: Float, headTransform: simd_float4x4) -> simd_float4x4 {
     controllerQueue.sync {
-      let planarForward = normalizedPlanarVector(-simd_make_float3(headTransform.columns.2))
-      let planarRight = normalizedPlanarVector(simd_make_float3(headTransform.columns.0))
-
+      _ = headTransform  // head pose available for future drift-compensation tweaks
       let planarInput = applyDeadZone(controllerState.rightStick)
       let verticalYawInput = applyDeadZone(controllerState.leftStick)
 
-      var displacement = SIMD3<Float>.zero
-      displacement -= planarForward * planarInput.y  // first-person: push forward to move forward (scene pulls back)
-      displacement -= planarRight * planarInput.x  // first-person: push left to strafe left (scene moves right)
-      playerOffset += displacement * movementSpeed * deltaTime
-      playerOffset.y -= verticalYawInput.y * verticalSpeed * deltaTime
       yawAngle -= verticalYawInput.x * yawSpeed * deltaTime
       yawAngle = wrapAngle(yawAngle)
+      let basis = movementBasisVectors()
+
+      var displacement = SIMD3<Float>.zero
+      displacement -= basis.forward * planarInput.y  // first-person: push forward to move forward (scene pulls back)
+      displacement -= basis.right * planarInput.x    // first-person: push left to strafe left (scene moves right)
+      playerOffset += displacement * movementSpeed * deltaTime
+      playerOffset.y -= verticalYawInput.y * verticalSpeed * deltaTime
 
       rigTransform = buildRigTransform()
       return rigTransform
@@ -120,14 +120,12 @@ class GameManager {
     controllerQueue.sync { rigTransform }
   }
 
-  private func normalizedPlanarVector(_ vector: SIMD3<Float>) -> SIMD3<Float> {
-    var planar = SIMD3<Float>(vector.x, 0, vector.z)
-    let length = simd_length(planar)
-    if length < 0.0001 {
-      planar = SIMD3<Float>(0, 0, -1)
-      return planar
-    }
-    return planar / length
+  private func movementBasisVectors() -> (forward: SIMD3<Float>, right: SIMD3<Float>) {
+    let cosYaw = cos(yawAngle)
+    let sinYaw = sin(yawAngle)
+    let forward = SIMD3<Float>(-sinYaw, 0, -cosYaw)
+    let right = SIMD3<Float>(cosYaw, 0, -sinYaw)
+    return (forward, right)
   }
 
   private func applyDeadZone(_ input: SIMD2<Float>) -> SIMD2<Float> {
@@ -166,6 +164,6 @@ class GameManager {
       SIMD4<Float>(-playerOffset.x, -playerOffset.y, -playerOffset.z, 1)
     )
 
-    return rotation * translation
+    return translation * rotation
   }
 }

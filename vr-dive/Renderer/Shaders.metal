@@ -127,9 +127,10 @@ float3 objectColor(float type, float3 pos, float time) {
 }
 
 fragment float4 objectFragmentShader(ObjectVertexOut in [[stage_in]],
-                                     constant SceneUniforms &uniforms
-                                     [[buffer(0)]]) {
+                                     constant SceneUniforms &uniforms [[buffer(0)]],
+                                     bool isFrontFacing [[front_facing]]) {
   float3 normal = normalize(in.normal);
+  normal = isFrontFacing ? normal : -normal;
   float3 lightDir = normalize(float3(0.4, 0.9, -0.2));
   float ndotl = abs(dot(normal, lightDir));
   float rim = pow(1.0 - abs(dot(normal, float3(0, 0, 1))), 2.0);

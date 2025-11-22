@@ -35,7 +35,7 @@ class Renderer {
   private var rigTransform: simd_float4x4 = matrix_identity_float4x4
   private var lastRigUpdateTime: Float = 0
   private static let cubeObjectCount = 48
-  private static let lorenzParticleCount = 200000
+  private static let lorenzParticleCount = 400000
 
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0

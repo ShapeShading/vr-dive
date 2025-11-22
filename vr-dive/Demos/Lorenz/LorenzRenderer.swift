@@ -200,7 +200,7 @@ extension LorenzRenderer {
   fileprivate static func makeTetraGeometry(device: MTLDevice) -> (
     vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int
   ) {
-    let h: Float = 0.015  // Even smaller particles for finer detail
+    let h: Float = 0.03  // Minimum particle size for visibility
     let vertices: [MeshVertex] = [
       MeshVertex(position: [0, h, 0], normal: [0, 1, 0]),
       MeshVertex(position: [-h, -h, h], normal: [-0.58, -0.58, 0.58]),
@@ -232,24 +232,32 @@ extension LorenzRenderer {
   fileprivate static func makeInitialParticleStates(
     device: MTLDevice, count: Int, worldScale: Float
   ) -> MTLBuffer {
+    // Lorenz parameters
+    let sigma: Float = 10.0
+    let beta: Float = 8.0 / 3.0
+    let rho: Float = 28.0
+    let dt: Float = 0.001  // Very small step size
+    
+    // Starting point on Lorenz attractor
+    var x: Float = 0.1
+    var y: Float = 0.0
+    var z: Float = 0.0
+    
     var states: [LorenzParticleState] = []
     states.reserveCapacity(count)
+    
     for index in 0..<count {
-      // Random distribution in a large volume
-      let rawPosition = SIMD3<Float>(
-        Float.random(in: -60...60),
-        Float.random(in: -60...60),
-        Float.random(in: -60...60)
-      )
+      // Current position on the Lorenz curve
+      let rawPosition = SIMD3<Float>(x, y, z)
       let scaledPosition = rawPosition * worldScale
 
       // 3% chance of being a "special" large, bright particle
       let isSpecial = Float.random(in: 0...1) < 0.03
       let scale: Float
       if isSpecial {
-        scale = Float.random(in: 0.10...0.15)  // Large particles
+        scale = Float.random(in: 0.18...0.27)  // Large particles
       } else {
-        scale = Float.random(in: 0.04...0.08)  // Normal particles with variation
+        scale = Float.random(in: 0.09...0.15)  // Normal particles with variation, larger minimum
       }
 
       let rotation = atan2(rawPosition.z, rawPosition.x)
@@ -265,6 +273,15 @@ extension LorenzRenderer {
           seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
         )
       )
+      
+      // Integrate Lorenz equations with very small step to get next position
+      let dx = sigma * (y - x)
+      let dy = x * (rho - z) - y
+      let dz = x * y - beta * z
+      
+      x += dx * dt
+      y += dy * dt
+      z += dz * dt
     }
 
     return device.makeBuffer(

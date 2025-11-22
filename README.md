@@ -14,8 +14,9 @@ A simple VR diving experience for Apple Vision Pro using CompositorServices and 
   - **Ring**: Green rotating torus.
   - **Projectiles**: Red glowing spheres.
 - **手柄支持**：兼容蓝牙游戏手柄（如 PS5 DualSense）。
-  - **右摇杆**：以第一人称视角控制平移——向前推，画面后移（角色前进）；向左推，画面右移（角色左移）。
-  - **左摇杆**：同样采取第一人称方向——向前推，画面下移（角色上浮）；向左推，画面右转（角色左转）。
+  - **左摇杆**：以第一人称视角控制前进/后退，并通过左右方向进行原地旋转（偏航）。
+  - **右摇杆**：上下负责上浮/下潜，左右负责平移（向左推=角色左移）。
+  - **L1 / R1**：按住即可开启加速模式，位移速度提升 5 倍、旋转速度提升 2 倍，方便快速 reposition。
   - **× 键（Button A）**：预留给后续交互。
 
 ## 手柄映射与调试
@@ -44,8 +45,9 @@ A simple VR diving experience for Apple Vision Pro using CompositorServices and 
     - **Device**: Pair the PS5 controller with the Vision Pro via Bluetooth settings.
 2.  **移动体验**：
 
-- **右摇杆**控制第一人称平移（向前推=角色前进，向左推=角色左移）。
-- **左摇杆**的上下用于垂直移动、左右用于旋转，方向与第一人称保持一致（向前推=上浮，向左推=左转）。
+- **左摇杆**控制前后推进与左右旋转（向左推=左转）。
+- **右摇杆**的上下负责垂直移动，左右负责水平平移（向左推=左移）。
+- **L1 / R1**可随时开启加速，位移 5×、旋转 2×，便于快速穿梭。
 - Xcode 控制台会输出 `[GameManager] Input ...` 日志，可用来验证事件是否成功传递。
 
 ## Technical Details

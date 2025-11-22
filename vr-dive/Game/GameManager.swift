@@ -9,6 +9,7 @@ class GameManager {
     var leftStick: SIMD2<Float> = .zero
     var rightStick: SIMD2<Float> = .zero
     var buttonA: Bool = false
+    var boostActive: Bool = false
   }
 
   private let controllerQueue = DispatchQueue(label: "vr-dive.controller.state")
@@ -19,6 +20,8 @@ class GameManager {
   private let verticalSpeed: Float = 0.8
   private let yawSpeed: Float = .pi / 2.0
   private let deadZone: Float = 0.12
+  private let boostMovementMultiplier: Float = 5.0
+  private let boostYawMultiplier: Float = 2.0
 
   private(set) var playerOffset: SIMD3<Float> = .zero
   private(set) var yawAngle: Float = 0
@@ -69,19 +72,23 @@ class GameManager {
     let rightStick = SIMD2<Float>(
       gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value)
     let buttonA = gamepad.buttonA.isPressed
+    let boostActive = gamepad.leftShoulder.isPressed || gamepad.rightShoulder.isPressed
 
     controllerQueue.sync {
       controllerState.leftStick = leftStick
       controllerState.rightStick = rightStick
       controllerState.buttonA = buttonA
+      controllerState.boostActive = boostActive
     }
 
-    logInputEvent(element: element, leftStick: leftStick, rightStick: rightStick, buttonA: buttonA)
+    logInputEvent(
+      element: element, leftStick: leftStick, rightStick: rightStick, buttonA: buttonA,
+      boost: boostActive)
   }
 
   private func logInputEvent(
     element: GCControllerElement, leftStick: SIMD2<Float>, rightStick: SIMD2<Float>,
-    buttonA: Bool
+    buttonA: Bool, boost: Bool
   ) {
     let now = Date().timeIntervalSince1970
     guard now - lastInputLogTime > 0.05 else { return }
@@ -91,25 +98,32 @@ class GameManager {
     let formattedLeft = String(format: "(%.2f, %.2f)", leftStick.x, leftStick.y)
     let formattedRight = String(format: "(%.2f, %.2f)", rightStick.x, rightStick.y)
     print(
-      "[GameManager] Input \(elementName) left=\(formattedLeft) right=\(formattedRight) A=\(buttonA)"
+      "[GameManager] Input \(elementName) left=\(formattedLeft) right=\(formattedRight) A=\(buttonA) boost=\(boost)"
     )
   }
 
   func updateRigState(deltaTime: Float, headTransform: simd_float4x4) -> simd_float4x4 {
     controllerQueue.sync {
       _ = headTransform  // head pose available for future drift-compensation tweaks
-      let planarInput = applyDeadZone(controllerState.rightStick)
-      let verticalYawInput = applyDeadZone(controllerState.leftStick)
+      let primaryStickInput = applyDeadZone(controllerState.leftStick)
+      let secondaryStickInput = applyDeadZone(controllerState.rightStick)
+      let movementMultiplier = controllerState.boostActive ? boostMovementMultiplier : 1.0
+      let yawMultiplier = controllerState.boostActive ? boostYawMultiplier : 1.0
 
-      yawAngle -= verticalYawInput.x * yawSpeed * deltaTime
+      let forwardInput = primaryStickInput.y
+      let yawInput = primaryStickInput.x
+      let strafeInput = secondaryStickInput.x
+      let verticalInput = secondaryStickInput.y
+
+      yawAngle -= yawInput * yawSpeed * yawMultiplier * deltaTime
       yawAngle = wrapAngle(yawAngle)
       let basis = movementBasisVectors()
 
       var displacement = SIMD3<Float>.zero
-      displacement -= basis.forward * planarInput.y  // first-person: push forward to move forward (scene pulls back)
-      displacement -= basis.right * planarInput.x    // first-person: push left to strafe left (scene moves right)
-      playerOffset += displacement * movementSpeed * deltaTime
-      playerOffset.y -= verticalYawInput.y * verticalSpeed * deltaTime
+      displacement -= basis.forward * forwardInput  // first-person: push forward to move forward (scene pulls back)
+      displacement -= basis.right * strafeInput     // strafing now follows the secondary (right) stick
+      playerOffset += displacement * movementSpeed * movementMultiplier * deltaTime
+      playerOffset.y -= verticalInput * verticalSpeed * movementMultiplier * deltaTime
 
       rigTransform = buildRigTransform()
       return rigTransform

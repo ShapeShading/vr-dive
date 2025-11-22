@@ -12,7 +12,8 @@ struct BackgroundUniforms {
 }
 
 struct SceneUniforms {
-  var viewProjectionMatrix: simd_float4x4
+  var viewProjectionMatrixLeft: simd_float4x4
+  var viewProjectionMatrixRight: simd_float4x4
   var time: Float
   var layerCount: UInt32
   var padding: SIMD2<Float> = .zero
@@ -72,6 +73,15 @@ class Renderer {
 
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
+  private static let maxViewCount = 2
+
+  private struct ViewRenderingData {
+    var leftViewProjection: simd_float4x4
+    var rightViewProjection: simd_float4x4
+    var viewports: [MTLViewport]
+    var renderTargetIndices: [UInt32]
+    var viewCount: Int
+  }
 
   init(_ layerRenderer: LayerRenderer) {
     self.layerRenderer = layerRenderer
@@ -79,9 +89,12 @@ class Renderer {
     self.commandQueue = self.device.makeCommandQueue()!
 
     let library = device.makeDefaultLibrary()!
-    self.backgroundPipelineState = try! Renderer.makeBackgroundPipelineState(device: device, library: library)
-    self.objectPipelineState = try! Renderer.makeObjectPipelineState(device: device, library: library)
-    self.computePipelineState = try! Renderer.makeComputePipelineState(device: device, library: library)
+    self.backgroundPipelineState = try! Renderer.makeBackgroundPipelineState(
+      device: device, library: library)
+    self.objectPipelineState = try! Renderer.makeObjectPipelineState(
+      device: device, library: library)
+    self.computePipelineState = try! Renderer.makeComputePipelineState(
+      device: device, library: library)
     self.depthStencilState = Renderer.makeDepthStencilState(device: device)
 
     let geometry = Renderer.makeCubeGeometry(device: device)
@@ -199,15 +212,23 @@ class Renderer {
     deviceAnchor: ARKit.DeviceAnchor,
     time: Float
   ) {
+    let viewCount = resolvedViewCount(for: drawable)
+    guard viewCount > 0 else { return }
     guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
 
     drawable.deviceAnchor = deviceAnchor
 
-    if let renderPassDescriptor = makeRenderPassDescriptor(for: drawable),
+    if let renderPassDescriptor = makeRenderPassDescriptor(for: drawable, viewCount: viewCount),
       let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
     {
-      encodeBackgroundPass(with: encoder, time: time)
-      encodeObjectPass(with: encoder, drawable: drawable, time: time)
+      encodeBackgroundPass(with: encoder, viewCount: viewCount, time: time)
+      encodeObjectPass(
+        with: encoder,
+        drawable: drawable,
+        deviceAnchor: deviceAnchor,
+        viewCount: viewCount,
+        time: time
+      )
       encoder.endEncoding()
     }
 
@@ -221,7 +242,7 @@ class Renderer {
     commandBuffer.commit()
   }
 
-  private func makeRenderPassDescriptor(for drawable: LayerRenderer.Drawable)
+  private func makeRenderPassDescriptor(for drawable: LayerRenderer.Drawable, viewCount: Int)
     -> MTLRenderPassDescriptor?
   {
     guard let colorTexture = drawable.colorTextures.first else { return nil }
@@ -232,7 +253,7 @@ class Renderer {
     colorAttachment.loadAction = .clear
     colorAttachment.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
     colorAttachment.storeAction = .store
-    descriptor.renderTargetArrayLength = colorTexture.arrayLength
+    descriptor.renderTargetArrayLength = max(min(colorTexture.arrayLength, viewCount), 1)
 
     if let depthTexture = drawable.depthTextures.first {
       let depthAttachment = descriptor.depthAttachment ?? MTLRenderPassDepthAttachmentDescriptor()
@@ -243,40 +264,69 @@ class Renderer {
       depthAttachment.clearDepth = 1.0
     }
 
+    if let rateMap = drawable.rasterizationRateMaps.first {
+      descriptor.rasterizationRateMap = rateMap
+    }
+
     return descriptor
   }
 
-  private func encodeBackgroundPass(with encoder: MTLRenderCommandEncoder, time: Float) {
+  private func encodeBackgroundPass(
+    with encoder: MTLRenderCommandEncoder, viewCount: Int, time: Float
+  ) {
     var uniforms = BackgroundUniforms(time: time, intensity: 0.85)
     encoder.setRenderPipelineState(backgroundPipelineState)
     encoder.setVertexBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
     encoder.setFragmentBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
-    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3, instanceCount: 2)
+    let layers = max(viewCount, 1)
+    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3, instanceCount: layers)
   }
 
   private func encodeObjectPass(
     with encoder: MTLRenderCommandEncoder,
     drawable: LayerRenderer.Drawable,
+    deviceAnchor: ARKit.DeviceAnchor,
+    viewCount: Int,
     time: Float
   ) {
     guard let colorTexture = drawable.colorTextures.first else { return }
     encoder.setRenderPipelineState(objectPipelineState)
     encoder.setDepthStencilState(depthStencilState)
-    encoder.setCullMode(.back)
+    encoder.setCullMode(.none)
     encoder.setFrontFacing(.counterClockwise)
 
     encoder.setVertexBuffer(meshVertexBuffer, offset: 0, index: 0)
     encoder.setVertexBuffer(objectStateBuffer, offset: 0, index: 1)
 
-    let aspect = Float(colorTexture.width) / Float(max(colorTexture.height, 1))
-    let projection = simd_float4x4.perspective(fovY: 60 * (.pi / 180), aspect: aspect, nearZ: 0.05, farZ: 20)
-    let view = simd_float4x4.lookAt(
-      eye: SIMD3<Float>(0, 0, 0.4),
-      center: SIMD3<Float>(0, 0, -1),
-      up: SIMD3<Float>(0, 1, 0)
+    let viewData = makeViewRenderingData(
+      drawable: drawable,
+      deviceAnchor: deviceAnchor,
+      colorTexture: colorTexture,
+      viewCount: viewCount
     )
-    let layerCount = UInt32(max(colorTexture.arrayLength, 1))
-    var sceneUniforms = SceneUniforms(viewProjectionMatrix: projection * view, time: time, layerCount: layerCount)
+
+    if !viewData.viewports.isEmpty {
+      encoder.setViewports(viewData.viewports)
+    }
+
+    if viewData.viewCount > 1 {
+      var viewMappings = (0..<viewData.viewCount).map {
+        MTLVertexAmplificationViewMapping(
+          viewportArrayIndexOffset: UInt32($0),
+          renderTargetArrayIndexOffset: viewData.renderTargetIndices[$0]
+        )
+      }
+      encoder.setVertexAmplificationCount(viewData.viewCount, viewMappings: &viewMappings)
+    } else {
+      encoder.setVertexAmplificationCount(1, viewMappings: nil)
+    }
+
+    var sceneUniforms = SceneUniforms(
+      viewProjectionMatrixLeft: viewData.leftViewProjection,
+      viewProjectionMatrixRight: viewData.rightViewProjection,
+      time: time,
+      layerCount: UInt32(viewData.viewCount)
+    )
 
     encoder.setVertexBytes(&sceneUniforms, length: MemoryLayout<SceneUniforms>.stride, index: 2)
     encoder.setFragmentBytes(&sceneUniforms, length: MemoryLayout<SceneUniforms>.stride, index: 0)
@@ -287,8 +337,124 @@ class Renderer {
       indexType: .uint16,
       indexBuffer: meshIndexBuffer,
       indexBufferOffset: 0,
-      instanceCount: objectCount * Int(layerCount)
+      instanceCount: objectCount
     )
+  }
+
+  private func resolvedViewCount(for drawable: LayerRenderer.Drawable) -> Int {
+    let textureArrayLength = drawable.colorTextures.first?.arrayLength ?? 1
+    let viewsCount = drawable.views.count
+    let limitedByTextures = min(textureArrayLength, Renderer.maxViewCount)
+    let limitedByViews = min(viewsCount, Renderer.maxViewCount)
+    let resolved = min(limitedByTextures, max(limitedByViews, 1))
+    return max(resolved, 1)
+  }
+
+  private func makeViewRenderingData(
+    drawable: LayerRenderer.Drawable,
+    deviceAnchor: ARKit.DeviceAnchor,
+    colorTexture: any MTLTexture,
+    viewCount: Int
+  ) -> ViewRenderingData {
+    var viewports: [MTLViewport] = []
+    var matrices = Array(repeating: matrix_identity_float4x4, count: Renderer.maxViewCount)
+    var renderTargetIndices: [UInt32] = []
+    let desiredViewCount = max(min(viewCount, Renderer.maxViewCount), 1)
+    let availableViews = drawable.views
+    let sampledViewCount = min(desiredViewCount, availableViews.count)
+
+    if sampledViewCount > 0 {
+      let deviceMatrix = deviceAnchor.originFromAnchorTransform
+      for index in 0..<sampledViewCount {
+        let view = availableViews[index]
+        let localTransform = view.transform
+        let worldFromEye = deviceMatrix * localTransform
+        let viewMatrix = worldFromEye.inverse
+        let projection = projectionMatrix(for: drawable, view: view, viewIndex: index)
+        matrices[index] = projection * viewMatrix
+        viewports.append(view.textureMap.viewport)
+        renderTargetIndices.append(UInt32(view.textureMap.textureIndex))
+      }
+    }
+
+    if viewports.isEmpty {
+      matrices[0] = fallbackViewProjection(for: colorTexture)
+      let fallbackViewport = MTLViewport(
+        originX: 0,
+        originY: 0,
+        width: Double(colorTexture.width),
+        height: Double(colorTexture.height),
+        znear: 0,
+        zfar: 1
+      )
+      viewports.append(fallbackViewport)
+      renderTargetIndices.append(0)
+    }
+
+    let fallbackMatrix = matrices[max(min(sampledViewCount - 1, Renderer.maxViewCount - 1), 0)]
+    let fallbackRenderIndex = renderTargetIndices.last ?? 0
+    if sampledViewCount < desiredViewCount {
+      for index in sampledViewCount..<desiredViewCount {
+        matrices[index] = fallbackMatrix
+        renderTargetIndices.append(fallbackRenderIndex)
+      }
+    }
+
+    while viewports.count < desiredViewCount {
+      viewports.append(viewports.last ?? viewports[0])
+    }
+
+    while renderTargetIndices.count < desiredViewCount {
+      renderTargetIndices.append(renderTargetIndices.last ?? 0)
+    }
+
+    let rightIndex = desiredViewCount > 1 ? 1 : 0
+    return ViewRenderingData(
+      leftViewProjection: matrices[0],
+      rightViewProjection: matrices[rightIndex],
+      viewports: Array(viewports.prefix(desiredViewCount)),
+      renderTargetIndices: Array(renderTargetIndices.prefix(desiredViewCount)),
+      viewCount: desiredViewCount
+    )
+  }
+
+  private func projectionMatrix(
+    for drawable: LayerRenderer.Drawable,
+    view: LayerRenderer.Drawable.View,
+    viewIndex: Int
+  ) -> simd_float4x4 {
+    if #available(visionOS 2.0, *) {
+      return drawable.computeProjection(convention: .rightUpBack, viewIndex: viewIndex)
+    } else {
+      let tangents = view.tangents
+      let depthRange = drawable.depthRange
+      let projective = ProjectiveTransform3D(
+        leftTangent: Double(tangents[0]),
+        rightTangent: Double(tangents[1]),
+        topTangent: Double(tangents[2]),
+        bottomTangent: Double(tangents[3]),
+        nearZ: Double(depthRange.x),
+        farZ: Double(depthRange.y),
+        reverseZ: true
+      )
+      return simd_float4x4(projective.matrix)
+    }
+  }
+
+  private func fallbackViewProjection(for colorTexture: any MTLTexture) -> simd_float4x4 {
+    let aspect = Float(colorTexture.width) / Float(max(colorTexture.height, 1))
+    let projection = simd_float4x4.perspective(
+      fovY: 60 * (.pi / 180),
+      aspect: aspect,
+      nearZ: 0.05,
+      farZ: 20
+    )
+    let view = simd_float4x4.lookAt(
+      eye: SIMD3<Float>(0, 0, 0.4),
+      center: SIMD3<Float>(0, 0, -1),
+      up: SIMD3<Float>(0, 1, 0)
+    )
+    return projection * view
   }
 
   private func simulateObjectsIfNeeded(currentTime: Float) {
@@ -326,8 +492,10 @@ class Renderer {
   }
 }
 
-private extension Renderer {
-  static func makeBackgroundPipelineState(device: MTLDevice, library: MTLLibrary) throws -> MTLRenderPipelineState {
+extension Renderer {
+  fileprivate static func makeBackgroundPipelineState(device: MTLDevice, library: MTLLibrary) throws
+    -> MTLRenderPipelineState
+  {
     let descriptor = MTLRenderPipelineDescriptor()
     descriptor.vertexFunction = library.makeFunction(name: "backgroundVertexShader")
     descriptor.fragmentFunction = library.makeFunction(name: "backgroundFragmentShader")
@@ -337,7 +505,9 @@ private extension Renderer {
     return try device.makeRenderPipelineState(descriptor: descriptor)
   }
 
-  static func makeObjectPipelineState(device: MTLDevice, library: MTLLibrary) throws -> MTLRenderPipelineState {
+  fileprivate static func makeObjectPipelineState(device: MTLDevice, library: MTLLibrary) throws
+    -> MTLRenderPipelineState
+  {
     let descriptor = MTLRenderPipelineDescriptor()
     descriptor.vertexFunction = library.makeFunction(name: "objectVertexShader")
     descriptor.fragmentFunction = library.makeFunction(name: "objectFragmentShader")
@@ -354,23 +524,28 @@ private extension Renderer {
     vertexDescriptor.attributes[1].bufferIndex = 0
     vertexDescriptor.layouts[0].stride = MemoryLayout<MeshVertex>.stride
     descriptor.vertexDescriptor = vertexDescriptor
+    descriptor.maxVertexAmplificationCount = Renderer.maxViewCount
 
     return try device.makeRenderPipelineState(descriptor: descriptor)
   }
 
-  static func makeComputePipelineState(device: MTLDevice, library: MTLLibrary) throws -> MTLComputePipelineState {
+  fileprivate static func makeComputePipelineState(device: MTLDevice, library: MTLLibrary) throws
+    -> MTLComputePipelineState
+  {
     let function = library.makeFunction(name: "simulateObjects")!
     return try device.makeComputePipelineState(function: function)
   }
 
-  static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
+  fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
     descriptor.depthCompareFunction = .less
     descriptor.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: descriptor)!
   }
 
-  static func makeCubeGeometry(device: MTLDevice) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
+  fileprivate static func makeCubeGeometry(device: MTLDevice) -> (
+    vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int
+  ) {
     let vertices: [MeshVertex] = [
       // Front
       MeshVertex(position: [-0.5, -0.5, 0.5], normal: [0, 0, 1]),
@@ -427,7 +602,7 @@ private extension Renderer {
     return (vertexBuffer, indexBuffer, indices.count)
   }
 
-  static func makeInitialObjectStates(device: MTLDevice, count: Int) -> MTLBuffer {
+  fileprivate static func makeInitialObjectStates(device: MTLDevice, count: Int) -> MTLBuffer {
     var states: [ObjectState] = []
     states.reserveCapacity(count)
 
@@ -469,8 +644,10 @@ private extension Renderer {
   }
 }
 
-private extension simd_float4x4 {
-  static func perspective(fovY: Float, aspect: Float, nearZ: Float, farZ: Float) -> simd_float4x4 {
+extension simd_float4x4 {
+  fileprivate static func perspective(fovY: Float, aspect: Float, nearZ: Float, farZ: Float)
+    -> simd_float4x4
+  {
     let yScale = 1 / tan(fovY * 0.5)
     let xScale = yScale / max(aspect, 0.1)
     let zRange = farZ - nearZ
@@ -485,7 +662,9 @@ private extension simd_float4x4 {
     )
   }
 
-  static func lookAt(eye: SIMD3<Float>, center: SIMD3<Float>, up: SIMD3<Float>) -> simd_float4x4 {
+  fileprivate static func lookAt(eye: SIMD3<Float>, center: SIMD3<Float>, up: SIMD3<Float>)
+    -> simd_float4x4
+  {
     let forward = simd_normalize(center - eye)
     let right = simd_normalize(simd_cross(forward, up))
     let correctedUp = simd_cross(right, forward)
@@ -502,5 +681,21 @@ private extension simd_float4x4 {
       SIMD4<Float>(right.z, correctedUp.z, -forward.z, 0),
       SIMD4<Float>(translation.x, translation.y, translation.z, 1)
     )
+  }
+
+  fileprivate init(_ matrix: simd_double4x4) {
+    self.init(
+      columns: (
+        SIMD4<Float>(matrix.columns.0),
+        SIMD4<Float>(matrix.columns.1),
+        SIMD4<Float>(matrix.columns.2),
+        SIMD4<Float>(matrix.columns.3)
+      ))
+  }
+}
+
+extension SIMD4 where Scalar == Float {
+  fileprivate init(_ vector: SIMD4<Double>) {
+    self.init(Float(vector.x), Float(vector.y), Float(vector.z), Float(vector.w))
   }
 }

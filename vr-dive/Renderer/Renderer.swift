@@ -31,6 +31,7 @@ class Renderer {
   let patternCoordinator: PatternCoordinator
   private var patternControllers: [VisualPatternKind: VisualPatternController] = [:]
   private var activePatternKind: VisualPatternKind
+  private let maxViewCount: Int
   private var lastKnownDeviceAnchor: ARKit.DeviceAnchor?
   private var rigTransform: simd_float4x4 = matrix_identity_float4x4
   private var lastRigUpdateTime: Float = 0
@@ -38,16 +39,17 @@ class Renderer {
   private static let lorenzParticleCount = 400000
   private static let fourWingParticleCount = 400000
   private static let aizawaParticleCount = 400000
+  private var didLogDrawableLayout = false
 
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
-  static let maxViewCount = 2
 
   init(_ layerRenderer: LayerRenderer, patternCoordinator: PatternCoordinator) {
     self.layerRenderer = layerRenderer
     self.device = layerRenderer.device
     self.commandQueue = self.device.makeCommandQueue()!
     self.patternCoordinator = patternCoordinator
+    self.maxViewCount = max(1, layerRenderer.properties.viewCount)
 
     let library = device.makeDefaultLibrary()!
     let controllers = Renderer.makePatternControllers(
@@ -56,7 +58,8 @@ class Renderer {
       cubeCount: Renderer.cubeObjectCount,
       lorenzCount: Renderer.lorenzParticleCount,
       fourWingCount: Renderer.fourWingParticleCount,
-      aizawaCount: Renderer.aizawaParticleCount
+      aizawaCount: Renderer.aizawaParticleCount,
+      maxViewCount: maxViewCount
     )
     self.patternControllers = controllers
     let requestedPattern = patternCoordinator.currentPattern()
@@ -101,6 +104,7 @@ class Renderer {
         print("[Renderer] Layer renderer invalidated, exiting")
         break
       }
+
       guard layerRenderer.state == .running else {
         if frameCount == 0 {
           print(
@@ -113,59 +117,98 @@ class Renderer {
 
       if frameCount == 0 {
         print("[Renderer] First frame rendering...")
-      }
-      if frameCount % 60 == 0 {
+      } else if frameCount % 60 == 0 {
         print("[Renderer] Frame \(frameCount) rendered")
       }
-      frameCount += 1
 
       guard let frame = layerRenderer.queryNextFrame() else { continue }
 
-      frame.startUpdate()
-
-      let animationTime = Float(Date().timeIntervalSince(startTime))
-      let predictedTiming = frame.predictTiming()
-      let presentationTimestamp = presentationTimeInterval(from: predictedTiming)
-
-      frame.endUpdate()
-
-      let drawables = frame.queryDrawables()
-      guard !drawables.isEmpty else { continue }
-
-      var deviceAnchor: ARKit.DeviceAnchor?
-      if worldTracking.state == .running {
-        deviceAnchor = worldTracking.queryDeviceAnchor(
-          atTimestamp: presentationTimestamp ?? CACurrentMediaTime()
-        )
-        if let validAnchor = deviceAnchor {
-          lastKnownDeviceAnchor = validAnchor
-        }
-      }
-
-      let anchorToUse = deviceAnchor ?? lastKnownDeviceAnchor
-      if anchorToUse == nil, frameCount % 120 == 0 {
-        print("[Renderer] Waiting for reliable world tracking data...")
-      }
-
-      if let anchor = anchorToUse {
-        updateRigTransformIfNeeded(
-          deviceAnchorTransform: anchor.originFromAnchorTransform,
-          currentTime: animationTime
-        )
-      }
+      var shouldSkipFrame = false
 
       autoreleasepool {
-        frame.startSubmission()
-        defer { frame.endSubmission() }
+        frame.startUpdate()
 
-        for drawable in drawables {
-          if let anchor = anchorToUse {
-            render(drawable: drawable, deviceAnchor: anchor, time: animationTime)
-          } else {
-            presentDrawableWithoutRendering(drawable)
+        let animationTime = Float(Date().timeIntervalSince(startTime))
+        let predictedTiming = frame.predictTiming()
+        let presentationTimestamp = presentationTimeInterval(from: predictedTiming)
+        let drawables = frame.queryDrawables()
+
+        guard !drawables.isEmpty else {
+          frame.endUpdate()
+          shouldSkipFrame = true
+          return
+        }
+
+        var deviceAnchor: ARKit.DeviceAnchor?
+        if worldTracking.state == .running {
+          deviceAnchor = worldTracking.queryDeviceAnchor(
+            atTimestamp: presentationTimestamp ?? CACurrentMediaTime()
+          )
+          if let validAnchor = deviceAnchor {
+            lastKnownDeviceAnchor = validAnchor
           }
         }
+
+        let anchorToUse = deviceAnchor ?? lastKnownDeviceAnchor
+        if let anchor = anchorToUse {
+          updateRigTransformIfNeeded(
+            deviceAnchorTransform: anchor.originFromAnchorTransform,
+            currentTime: animationTime
+          )
+        } else if frameCount % 120 == 0 {
+          print("[Renderer] Waiting for reliable world tracking data...")
+        }
+
+        let pattern = resolveActivePatternController()
+
+        if patternCoordinator.shouldReset() {
+          pattern?.resetToInitialState()
+          patternCoordinator.clearResetFlag()
+        }
+
+        if let activePattern = pattern, !patternCoordinator.isPaused() {
+          let simulationContext = PatternSimulationContext(
+            commandQueue: commandQueue,
+            time: animationTime
+          )
+          activePattern.updateSimulation(simulationContext)
+        }
+
+        var pendingCommands: [(LayerRenderer.Drawable, MTLCommandBuffer)] = []
+        for drawable in drawables {
+          if let commandBuffer = encodeDrawable(
+            drawable: drawable,
+            pattern: pattern,
+            deviceAnchor: anchorToUse,
+            time: animationTime
+          ) {
+            pendingCommands.append((drawable, commandBuffer))
+          }
+        }
+
+        frame.endUpdate()
+
+        guard !pendingCommands.isEmpty else {
+          shouldSkipFrame = true
+          return
+        }
+
+        frame.startSubmission()
+
+        for (drawable, commandBuffer) in pendingCommands {
+          drawable.deviceAnchor = anchorToUse
+          drawable.encodePresent(commandBuffer: commandBuffer)
+          commandBuffer.commit()
+        }
+
+        frame.endSubmission()
       }
+
+      if shouldSkipFrame {
+        continue
+      }
+
+      frameCount += 1
     }
   }
 
@@ -198,59 +241,68 @@ class Renderer {
     return nil
   }
 
-  private func render(
+  private func encodeDrawable(
     drawable: LayerRenderer.Drawable,
-    deviceAnchor: ARKit.DeviceAnchor,
+    pattern: VisualPatternController?,
+    deviceAnchor: ARKit.DeviceAnchor?,
     time: Float
-  ) {
+  ) -> MTLCommandBuffer? {
     let viewCount = resolvedViewCount(for: drawable)
-    guard viewCount > 0 else { return }
+    guard viewCount > 0 else { return nil }
+    guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+    guard let colorTexture = drawable.colorTextures.first else { return nil }
 
-    guard let pattern = resolveActivePatternController() else { return }
-    
-    // Check for reset request
-    if patternCoordinator.shouldReset() {
-      pattern.resetToInitialState()
-      patternCoordinator.clearResetFlag()
-    }
-    
-    // Only update simulation if not paused
-    if !patternCoordinator.isPaused() {
-      let simulationContext = PatternSimulationContext(commandQueue: commandQueue, time: time)
-      pattern.updateSimulation(simulationContext)
-    }
-
-    guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
-
-    drawable.deviceAnchor = deviceAnchor
-
-    guard let colorTexture = drawable.colorTextures.first else { return }
-    let viewData = makeViewRenderingData(
-      drawable: drawable,
-      deviceAnchor: deviceAnchor,
-      colorTexture: colorTexture,
-      viewCount: viewCount
-    )
-
-    if let renderPassDescriptor = makeRenderPassDescriptor(
-      for: drawable,
-      viewCount: viewData.viewCount,
-      clearColor: pattern.preferredClearColor),
-      let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
-    {
-      let renderContext = PatternRenderContext(viewData: viewData, time: time)
-      pattern.encodeFrame(encoder: encoder, context: renderContext)
-      encoder.endEncoding()
+    if !didLogDrawableLayout {
+      didLogDrawableLayout = true
+      print(
+        "[Renderer] Drawable layout: colorTextures=\(drawable.colorTextures.count) depthTextures=\(drawable.depthTextures.count) views=\(drawable.views.count)"
+      )
+      for (index, texture) in drawable.colorTextures.enumerated() {
+        print(
+          "[Renderer]  colorTexture[\(index)] size=\(texture.width)x\(texture.height) layers=\(texture.arrayLength)"
+        )
+      }
+      for (index, depthTexture) in drawable.depthTextures.enumerated() {
+        print(
+          "[Renderer]  depthTexture[\(index)] size=\(depthTexture.width)x\(depthTexture.height) layers=\(depthTexture.arrayLength)"
+        )
+      }
+      for (index, view) in drawable.views.enumerated() {
+        let viewport = view.textureMap.viewport
+        let textureMap = view.textureMap
+        print(
+          "[Renderer]  view[\(index)] texIndex=\(textureMap.textureIndex) slice=\(textureMap.sliceIndex) viewport=(\(viewport.originX), \(viewport.originY), \(viewport.width), \(viewport.height))"
+        )
+      }
     }
 
-    drawable.encodePresent(commandBuffer: commandBuffer)
-    commandBuffer.commit()
-  }
+    let clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
-  private func presentDrawableWithoutRendering(_ drawable: LayerRenderer.Drawable) {
-    guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
-    drawable.encodePresent(commandBuffer: commandBuffer)
-    commandBuffer.commit()
+    guard
+      let descriptor = makeRenderPassDescriptor(
+        for: drawable,
+        viewCount: viewCount,
+        clearColor: clearColor
+      ),
+      let sceneEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
+    else { return nil }
+
+    if let activePattern = pattern, let anchor = deviceAnchor ?? lastKnownDeviceAnchor {
+      let viewData = makeViewRenderingData(
+        drawable: drawable,
+        deviceAnchor: anchor,
+        colorTexture: colorTexture,
+        viewCount: viewCount
+      )
+      let sceneContext = PatternRenderContext(
+        viewData: viewData,
+        time: time
+      )
+      activePattern.encodeFrame(encoder: sceneEncoder, context: sceneContext)
+    }
+
+    sceneEncoder.endEncoding()
+    return commandBuffer
   }
 
   private func makeRenderPassDescriptor(
@@ -260,26 +312,24 @@ class Renderer {
   ) -> MTLRenderPassDescriptor? {
     guard let colorTexture = drawable.colorTextures.first else { return nil }
     let descriptor = MTLRenderPassDescriptor()
-    let colorAttachment = descriptor.colorAttachments[0] ?? MTLRenderPassColorAttachmentDescriptor()
-    descriptor.colorAttachments[0] = colorAttachment
-    colorAttachment.texture = colorTexture
-    colorAttachment.loadAction = .clear
-    colorAttachment.clearColor = clearColor
-    colorAttachment.storeAction = .store
-    descriptor.renderTargetArrayLength = max(min(colorTexture.arrayLength, viewCount), 1)
+
+    descriptor.colorAttachments[0].texture = colorTexture
+    descriptor.colorAttachments[0].loadAction = .clear
+    descriptor.colorAttachments[0].clearColor = clearColor
+    descriptor.colorAttachments[0].storeAction = .store
 
     if let depthTexture = drawable.depthTextures.first {
-      let depthAttachment = descriptor.depthAttachment ?? MTLRenderPassDepthAttachmentDescriptor()
-      descriptor.depthAttachment = depthAttachment
-      depthAttachment.texture = depthTexture
-      depthAttachment.loadAction = .clear
-      depthAttachment.storeAction = .store
-      depthAttachment.clearDepth = 1.0
+      descriptor.depthAttachment.texture = depthTexture
+      descriptor.depthAttachment.loadAction = .clear
+      descriptor.depthAttachment.storeAction = .store
+      descriptor.depthAttachment.clearDepth = 0.0
     }
 
-    if let rateMap = drawable.rasterizationRateMaps.first {
-      descriptor.rasterizationRateMap = rateMap
-    }
+    descriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
+    
+    // Always clear every slice in the drawable's texture, otherwise untouched
+    // foveation tiles stay black.
+    descriptor.renderTargetArrayLength = colorTexture.arrayLength
 
     return descriptor
   }
@@ -287,8 +337,8 @@ class Renderer {
   private func resolvedViewCount(for drawable: LayerRenderer.Drawable) -> Int {
     let textureArrayLength = drawable.colorTextures.first?.arrayLength ?? 1
     let viewsCount = drawable.views.count
-    let limitedByTextures = min(textureArrayLength, Renderer.maxViewCount)
-    let limitedByViews = min(viewsCount, Renderer.maxViewCount)
+    let limitedByTextures = min(textureArrayLength, maxViewCount)
+    let limitedByViews = min(viewsCount, maxViewCount)
     let resolved = min(limitedByTextures, max(limitedByViews, 1))
     return max(resolved, 1)
   }
@@ -300,10 +350,10 @@ class Renderer {
     viewCount: Int
   ) -> ViewRenderingData {
     var viewports: [MTLViewport] = []
-    var matrices = Array(repeating: matrix_identity_float4x4, count: Renderer.maxViewCount)
-    var renderTargetIndices: [UInt32] = []
+    var matrices = Array(repeating: matrix_identity_float4x4, count: maxViewCount)
+    var renderTargetLayers: [UInt32] = []
     var viewToWorldTransforms: [simd_float4x4] = []
-    let desiredViewCount = max(min(viewCount, Renderer.maxViewCount), 1)
+    let desiredViewCount = max(min(viewCount, maxViewCount), 1)
     let availableViews = drawable.views
     let sampledViewCount = min(desiredViewCount, availableViews.count)
 
@@ -317,8 +367,9 @@ class Renderer {
         let viewMatrix = adjustedWorldFromEye.inverse
         let projection = projectionMatrix(for: drawable, view: view, viewIndex: index)
         matrices[index] = projection * viewMatrix
-        viewports.append(view.textureMap.viewport)
-        renderTargetIndices.append(UInt32(view.textureMap.textureIndex))
+        let textureMap = view.textureMap
+        viewports.append(textureMap.viewport)
+        renderTargetLayers.append(UInt32(textureMap.sliceIndex))
         viewToWorldTransforms.append(adjustedWorldFromEye)
       }
     }
@@ -334,17 +385,17 @@ class Renderer {
         zfar: 1
       )
       viewports.append(fallbackViewport)
-      renderTargetIndices.append(0)
+      renderTargetLayers.append(0)
       viewToWorldTransforms.append(rigTransform)
     }
 
-    let fallbackMatrix = matrices[max(min(sampledViewCount - 1, Renderer.maxViewCount - 1), 0)]
-    let fallbackRenderIndex = renderTargetIndices.last ?? 0
+    let fallbackMatrix = matrices[max(min(sampledViewCount - 1, maxViewCount - 1), 0)]
+    let fallbackRenderLayer = renderTargetLayers.last ?? 0
     let fallbackTransform = viewToWorldTransforms.last ?? matrix_identity_float4x4
     if sampledViewCount < desiredViewCount {
       for index in sampledViewCount..<desiredViewCount {
         matrices[index] = fallbackMatrix
-        renderTargetIndices.append(fallbackRenderIndex)
+        renderTargetLayers.append(fallbackRenderLayer)
         viewToWorldTransforms.append(fallbackTransform)
       }
     }
@@ -353,20 +404,18 @@ class Renderer {
       viewports.append(viewports.last ?? viewports[0])
     }
 
-    while renderTargetIndices.count < desiredViewCount {
-      renderTargetIndices.append(renderTargetIndices.last ?? 0)
+    while renderTargetLayers.count < desiredViewCount {
+      renderTargetLayers.append(renderTargetLayers.last ?? 0)
     }
 
     while viewToWorldTransforms.count < desiredViewCount {
       viewToWorldTransforms.append(viewToWorldTransforms.last ?? matrix_identity_float4x4)
     }
 
-    let rightIndex = desiredViewCount > 1 ? 1 : 0
     return ViewRenderingData(
-      leftViewProjection: matrices[0],
-      rightViewProjection: matrices[rightIndex],
+      viewProjectionMatrices: Array(matrices.prefix(desiredViewCount)),
       viewports: Array(viewports.prefix(desiredViewCount)),
-      renderTargetIndices: Array(renderTargetIndices.prefix(desiredViewCount)),
+      renderTargetLayers: Array(renderTargetLayers.prefix(desiredViewCount)),
       viewToWorldTransforms: Array(viewToWorldTransforms.prefix(desiredViewCount)),
       viewCount: desiredViewCount
     )
@@ -426,12 +475,13 @@ class Renderer {
     cubeCount: Int,
     lorenzCount: Int,
     fourWingCount: Int,
-    aizawaCount: Int
+    aizawaCount: Int,
+    maxViewCount: Int
   ) -> [VisualPatternKind: VisualPatternController] {
     var controllers: [VisualPatternKind: VisualPatternController] = [:]
     do {
       controllers[.cubeField] = try CubeFieldRenderer(
-        device: device, library: library, objectCount: cubeCount)
+        device: device, library: library, objectCount: cubeCount, maxViewCount: maxViewCount)
     } catch {
       fatalError("Failed to build cube pattern: \(error)")
     }
@@ -439,7 +489,8 @@ class Renderer {
     if let lorenz = try? LorenzRenderer(
       device: device,
       library: library,
-      particleCount: lorenzCount
+      particleCount: lorenzCount,
+      maxViewCount: maxViewCount
     ) {
       controllers[.lorenzAttractor] = lorenz
     } else {
@@ -449,7 +500,8 @@ class Renderer {
     if let fourWing = try? FourWingRenderer(
       device: device,
       library: library,
-      particleCount: fourWingCount
+      particleCount: fourWingCount,
+      maxViewCount: maxViewCount
     ) {
       controllers[.fourWingAttractor] = fourWing
     } else {
@@ -459,7 +511,8 @@ class Renderer {
     if let aizawa = try? AizawaRenderer(
       device: device,
       library: library,
-      particleCount: aizawaCount
+      particleCount: aizawaCount,
+      maxViewCount: maxViewCount
     ) {
       controllers[.aizawaAttractor] = aizawa
     } else {

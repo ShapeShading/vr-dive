@@ -54,12 +54,13 @@ struct ControlButtonsView: View {
         Label("Reset", systemImage: "arrow.counterclockwise")
       }
       .buttonStyle(.bordered)
-      
+
       Button(action: {
         model.isPaused.toggle()
       }) {
-        Label(model.isPaused ? "Resume" : "Pause", 
-              systemImage: model.isPaused ? "play.fill" : "pause.fill")
+        Label(
+          model.isPaused ? "Resume" : "Pause",
+          systemImage: model.isPaused ? "play.fill" : "pause.fill")
       }
       .buttonStyle(.bordered)
     }

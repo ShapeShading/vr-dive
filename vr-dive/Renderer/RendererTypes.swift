@@ -2,17 +2,7 @@ import Metal
 import MetalKit
 import simd
 
-struct BackgroundUniforms {
-  var time: Float
-  var intensity: Float
-  var padding: SIMD2<Float> = .zero
-  var viewToWorldLeft: simd_float4x4 = matrix_identity_float4x4
-  var viewToWorldRight: simd_float4x4 = matrix_identity_float4x4
-}
-
 struct SceneUniforms {
-  var viewProjectionMatrixLeft: simd_float4x4
-  var viewProjectionMatrixRight: simd_float4x4
   var time: Float
   var layerCount: UInt32
   var padding: SIMD2<Float> = .zero
@@ -24,10 +14,9 @@ struct MeshVertex {
 }
 
 struct ViewRenderingData {
-  var leftViewProjection: simd_float4x4
-  var rightViewProjection: simd_float4x4
+  var viewProjectionMatrices: [simd_float4x4]
   var viewports: [MTLViewport]
-  var renderTargetIndices: [UInt32]
+  var renderTargetLayers: [UInt32]
   var viewToWorldTransforms: [simd_float4x4]
   var viewCount: Int
 }
@@ -50,7 +39,7 @@ struct PatternRenderContext {
       var viewMappings = (0..<viewData.viewCount).map {
         MTLVertexAmplificationViewMapping(
           viewportArrayIndexOffset: UInt32($0),
-          renderTargetArrayIndexOffset: viewData.renderTargetIndices[$0]
+          renderTargetArrayIndexOffset: viewData.renderTargetLayers[$0]
         )
       }
       encoder.setVertexAmplificationCount(viewData.viewCount, viewMappings: &viewMappings)

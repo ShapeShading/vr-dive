@@ -36,23 +36,23 @@ final class PatternCoordinator {
   func setPattern(_ pattern: VisualPatternKind) {
     queue.async(flags: .barrier) { self._current = pattern }
   }
-  
+
   func isPaused() -> Bool {
     queue.sync { _isPaused }
   }
-  
+
   func setPaused(_ paused: Bool) {
     queue.async(flags: .barrier) { self._isPaused = paused }
   }
-  
+
   func shouldReset() -> Bool {
     queue.sync { _shouldReset }
   }
-  
+
   func triggerReset() {
     queue.async(flags: .barrier) { self._shouldReset = true }
   }
-  
+
   func clearResetFlag() {
     queue.async(flags: .barrier) { self._shouldReset = false }
   }
@@ -66,7 +66,7 @@ final class PatternMenuModel {
       coordinator.setPattern(selectedPattern)
     }
   }
-  
+
   var isPaused: Bool = false {
     didSet {
       coordinator.setPaused(isPaused)
@@ -85,7 +85,7 @@ final class PatternMenuModel {
     selectedPattern = coordinator.currentPattern()
     isPaused = coordinator.isPaused()
   }
-  
+
   func reset() {
     coordinator.triggerReset()
   }

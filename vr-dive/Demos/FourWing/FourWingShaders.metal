@@ -1,17 +1,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-struct BackgroundUniforms {
-  float time;
-  float intensity;
-  float2 padding;
-  float4x4 viewToWorldLeft;
-  float4x4 viewToWorldRight;
-};
-
 struct SceneUniforms {
-  float4x4 viewProjectionMatrixLeft;
-  float4x4 viewProjectionMatrixRight;
   float time;
   uint layerCount;
   float2 padding;
@@ -41,51 +31,22 @@ struct FourWingUniforms {
   float padding;
 };
 
-struct BackgroundVertexOut {
-  float4 position [[position]];
-  float4 clipPosition;
-  float2 uv;
-  uint layer [[render_target_array_index]];
-};
-
 struct FourWingVertexOut {
   float4 position [[position]];
-  float3 normal [[flat]];  // Use flat interpolation for uniform color per triangle
+  float3 normal
+      [[flat]]; // Use flat interpolation for uniform color per triangle
   float3 worldPos;
   float objectScale;
-  uint layer [[render_target_array_index]];
+  // uint layer [[render_target_array_index]]; // Removed
 };
-
-static inline BackgroundVertexOut
-makeBackgroundVertex(uint vertexID, uint instanceID,
-                     constant BackgroundUniforms &uniforms) {
-  BackgroundVertexOut out;
-  float2 positions[3] = {float2(-1, -1), float2(3, -1), float2(-1, 3)};
-  out.position = float4(positions[vertexID], 0.0, 1.0);
-  out.clipPosition = out.position;
-  out.uv = positions[vertexID] * 0.5 + 0.5;
-  out.layer = instanceID;
-  return out;
-}
-
-vertex BackgroundVertexOut fourWingBackgroundVertexShader(
-    uint vertexID [[vertex_id]], uint instanceID [[instance_id]],
-    constant BackgroundUniforms &uniforms [[buffer(0)]]) {
-  return makeBackgroundVertex(vertexID, instanceID, uniforms);
-}
-
-fragment float4 fourWingBackgroundFragmentShader(
-    BackgroundVertexOut in [[stage_in]],
-    constant BackgroundUniforms &uniforms [[buffer(0)]]) {
-  return float4(0.005, 0.008, 0.012, 1.0);
-}
-
 vertex FourWingVertexOut fourWingVertexShader(
-    ushort amplificationID [[amplification_id]],
-    const device MeshVertex *vertices [[buffer(0)]],
-    const device FourWingParticleState *states [[buffer(1)]],
-    constant SceneUniforms &uniforms [[buffer(2)]], uint vertexID [[vertex_id]],
-    uint instanceID [[instance_id]]) {
+  ushort amplificationID [[amplification_id]],
+  const device MeshVertex *vertices [[buffer(0)]],
+  const device FourWingParticleState *states [[buffer(1)]],
+  constant SceneUniforms &uniforms [[buffer(2)]],
+  constant float4x4 *viewProjectionMatrices [[buffer(3)]],
+  uint vertexID [[vertex_id]],
+  uint instanceID [[instance_id]]) {
   FourWingVertexOut out;
   uint layers = max(uniforms.layerCount, 1u);
   uint viewIndex = min((uint)amplificationID, layers - 1);
@@ -110,15 +71,14 @@ vertex FourWingVertexOut fourWingVertexShader(
 
   float3 position = finalCenterPos + rotatedMeshPos * state.positionAndScale.w;
   float4 worldPos = float4(position, 1.0);
-  float4x4 viewProjection = viewIndex == 0 ? uniforms.viewProjectionMatrixLeft
-                                           : uniforms.viewProjectionMatrixRight;
+  float4x4 viewProjection = viewProjectionMatrices[viewIndex];
 
   out.position = viewProjection * worldPos;
   out.normal = normalize(
       float3(rotatedMeshNormal.x, rotatedMeshNormal.z, rotatedMeshNormal.y));
   out.worldPos = position;
   out.objectScale = state.positionAndScale.w;
-  out.layer = viewIndex;
+  // out.layer = viewIndex; // Removed
   return out;
 }
 
@@ -135,7 +95,7 @@ fragment float4 fourWingFragmentShader(FourWingVertexOut in [[stage_in]],
   float scaleFactor = saturate((in.objectScale - 0.04) * 8.0);
 
   // Color based on normal direction
-  float3 baseColor = abs(normal) * 0.8 + 0.2;  // Map normal xyz to rgb
+  float3 baseColor = abs(normal) * 0.8 + 0.2; // Map normal xyz to rgb
   baseColor = mix(baseColor, float3(0.85, 0.92, 1.0), scaleFactor * 0.5);
 
   float glow = scaleFactor * 0.3;

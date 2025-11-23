@@ -17,7 +17,6 @@ class GameManager {
   private var lastInputLogTime: TimeInterval = 0
 
   private let movementSpeed: Float = 1.2
-  private let verticalSpeed: Float = 0.8
   private let yawSpeed: Float = .pi / 2.0
   private let deadZone: Float = 0.12
   private let boostMovementMultiplier: Float = 5.0
@@ -104,7 +103,6 @@ class GameManager {
 
   func updateRigState(deltaTime: Float, headTransform: simd_float4x4) -> simd_float4x4 {
     controllerQueue.sync {
-      _ = headTransform  // head pose available for future drift-compensation tweaks
       let primaryStickInput = applyDeadZone(controllerState.leftStick)
       let secondaryStickInput = applyDeadZone(controllerState.rightStick)
       let movementMultiplier = controllerState.boostActive ? boostMovementMultiplier : 1.0
@@ -119,13 +117,36 @@ class GameManager {
       let turnSpeedReduction = 1.0 - abs(yawInput) * 0.5
       yawAngle -= yawInput * yawSpeed * yawMultiplier * turnSpeedReduction * deltaTime
       yawAngle = wrapAngle(yawAngle)
-      let basis = movementBasisVectors()
+
+      // Calculate Rig Rotation (Tracking -> World rotation)
+      let cosYaw = cos(-yawAngle)
+      let sinYaw = sin(-yawAngle)
+      let rigRotation = simd_float3x3(
+        SIMD3<Float>(cosYaw, 0, sinYaw),
+        SIMD3<Float>(0, 1, 0),
+        SIMD3<Float>(-sinYaw, 0, cosYaw)
+      )
+
+      // Extract Head vectors in Tracking Space
+      // Column 0: Right, 1: Up, 2: Backward (-Forward)
+      let headRight = SIMD3<Float>(
+        headTransform.columns.0.x, headTransform.columns.0.y, headTransform.columns.0.z)
+      let headUp = SIMD3<Float>(
+        headTransform.columns.1.x, headTransform.columns.1.y, headTransform.columns.1.z)
+      let headForward = -SIMD3<Float>(
+        headTransform.columns.2.x, headTransform.columns.2.y, headTransform.columns.2.z)
+
+      // Transform to World Space
+      let worldForward = rigRotation * headForward
+      let worldRight = rigRotation * headRight
+      let worldUp = rigRotation * headUp
 
       var displacement = SIMD3<Float>.zero
-      displacement -= basis.forward * forwardInput  // first-person: push forward to move forward (scene pulls back)
-      displacement -= basis.right * strafeInput  // strafing now follows the secondary (right) stick
+      displacement -= worldForward * forwardInput
+      displacement -= worldRight * strafeInput
+      displacement -= worldUp * verticalInput
+
       playerOffset += displacement * movementSpeed * movementMultiplier * deltaTime
-      playerOffset.y -= verticalInput * verticalSpeed * movementMultiplier * deltaTime
 
       rigTransform = buildRigTransform()
       return rigTransform
@@ -134,14 +155,6 @@ class GameManager {
 
   func currentRigTransform() -> simd_float4x4 {
     controllerQueue.sync { rigTransform }
-  }
-
-  private func movementBasisVectors() -> (forward: SIMD3<Float>, right: SIMD3<Float>) {
-    let cosYaw = cos(yawAngle)
-    let sinYaw = sin(yawAngle)
-    let forward = SIMD3<Float>(-sinYaw, 0, -cosYaw)
-    let right = SIMD3<Float>(cosYaw, 0, -sinYaw)
-    return (forward, right)
   }
 
   private func applyDeadZone(_ input: SIMD2<Float>) -> SIMD2<Float> {

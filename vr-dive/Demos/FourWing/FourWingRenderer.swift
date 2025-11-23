@@ -3,15 +3,14 @@ import simd
 
 final class FourWingRenderer: VisualPatternController {
   let identifier: VisualPatternKind = .fourWingAttractor
-  let preferredClearColor = MTLClearColor(red: 0.01, green: 0.01, blue: 0.02, alpha: 1)
+  let preferredClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
-  private let backgroundPipelineState: MTLRenderPipelineState
   private let objectPipelineState: MTLRenderPipelineState
   private let computePipelineState: MTLComputePipelineState
   private let depthStencilState: MTLDepthStencilState
-  private let tetraVertexBuffer: MTLBuffer
-  private let tetraIndexBuffer: MTLBuffer
-  private let tetraIndexCount: Int
+  private let meshVertexBuffer: MTLBuffer
+  private let meshIndexBuffer: MTLBuffer
+  private let meshIndexCount: Int
   private let particleStateBuffer: MTLBuffer
   private var lastSimulationTimestamp: Float = 0
   private let particleCount: Int
@@ -25,22 +24,22 @@ final class FourWingRenderer: VisualPatternController {
   private let minDeltaTime: Float = 1.0 / 600.0
   private let maxDeltaTime: Float = 1.0 / 45.0
   private let damping: Float = 1.0
+  private let maxViewCount: Int
 
-  init(device: MTLDevice, library: MTLLibrary, particleCount: Int) throws {
+  init(device: MTLDevice, library: MTLLibrary, particleCount: Int, maxViewCount: Int) throws {
     self.particleCount = particleCount
     self.device = device
-    backgroundPipelineState = try FourWingRenderer.makeBackgroundPipelineState(
-      device: device, library: library)
+    self.maxViewCount = max(1, maxViewCount)
     objectPipelineState = try FourWingRenderer.makeObjectPipelineState(
-      device: device, library: library)
+      device: device, library: library, maxViewCount: self.maxViewCount)
     computePipelineState = try FourWingRenderer.makeComputePipelineState(
       device: device, library: library)
     depthStencilState = FourWingRenderer.makeDepthStencilState(device: device)
 
-    let geometry = FourWingRenderer.makeTetraGeometry(device: device)
-    tetraVertexBuffer = geometry.vertexBuffer
-    tetraIndexBuffer = geometry.indexBuffer
-    tetraIndexCount = geometry.indexCount
+    let geometry = MeshGeometryFactory.makeOctahedron(device: device)
+    meshVertexBuffer = geometry.vertexBuffer
+    meshIndexBuffer = geometry.indexBuffer
+    meshIndexCount = geometry.indexCount
 
     particleStateBuffer = FourWingRenderer.makeInitialParticleStates(
       device: device,
@@ -91,7 +90,7 @@ final class FourWingRenderer: VisualPatternController {
 
     lastSimulationTimestamp = context.time
   }
-  
+
   func resetToInitialState() {
     let newBuffer = FourWingRenderer.makeInitialParticleStates(
       device: device,
@@ -110,48 +109,39 @@ final class FourWingRenderer: VisualPatternController {
     encodeObjects(with: encoder, context: context)
   }
 
-  private func encodeBackground(
-    with encoder: MTLRenderCommandEncoder, context: PatternRenderContext
-  ) {
-    var uniforms = BackgroundUniforms(time: context.time * 0.5, intensity: 0.65)
-    let transforms = context.viewData.viewToWorldTransforms
-    uniforms.viewToWorldLeft = transforms[0]
-    uniforms.viewToWorldRight = transforms[min(context.viewData.viewCount - 1, 1)]
-
-    encoder.setRenderPipelineState(backgroundPipelineState)
-    context.applyViewConfiguration(on: encoder)
-    encoder.setVertexBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
-    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<BackgroundUniforms>.stride, index: 0)
-    encoder.drawPrimitives(
-      type: .triangle, vertexStart: 0, vertexCount: 3, instanceCount: context.viewData.viewCount)
-  }
-
   private func encodeObjects(with encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
     encoder.setRenderPipelineState(objectPipelineState)
     encoder.setDepthStencilState(depthStencilState)
     encoder.setCullMode(.none)
     encoder.setFrontFacing(.counterClockwise)
 
-    encoder.setVertexBuffer(tetraVertexBuffer, offset: 0, index: 0)
+    encoder.setVertexBuffer(meshVertexBuffer, offset: 0, index: 0)
     encoder.setVertexBuffer(particleStateBuffer, offset: 0, index: 1)
 
     context.applyViewConfiguration(on: encoder)
 
     var sceneUniforms = SceneUniforms(
-      viewProjectionMatrixLeft: context.viewData.leftViewProjection,
-      viewProjectionMatrixRight: context.viewData.rightViewProjection,
       time: context.time,
       layerCount: UInt32(context.viewData.viewCount)
     )
+    var viewMatrices = context.viewData.viewProjectionMatrices
+    if viewMatrices.isEmpty {
+      viewMatrices = [matrix_identity_float4x4]
+    }
 
     encoder.setVertexBytes(&sceneUniforms, length: MemoryLayout<SceneUniforms>.stride, index: 2)
+    viewMatrices.withUnsafeBytes {
+      if let baseAddress = $0.baseAddress, $0.count > 0 {
+        encoder.setVertexBytes(baseAddress, length: $0.count, index: 3)
+      }
+    }
     encoder.setFragmentBytes(&sceneUniforms, length: MemoryLayout<SceneUniforms>.stride, index: 0)
 
     encoder.drawIndexedPrimitives(
       type: .triangle,
-      indexCount: tetraIndexCount,
+      indexCount: meshIndexCount,
       indexType: .uint16,
-      indexBuffer: tetraIndexBuffer,
+      indexBuffer: meshIndexBuffer,
       indexBufferOffset: 0,
       instanceCount: particleCount
     )
@@ -159,26 +149,18 @@ final class FourWingRenderer: VisualPatternController {
 }
 
 extension FourWingRenderer {
-  fileprivate static func makeBackgroundPipelineState(device: MTLDevice, library: MTLLibrary) throws
-    -> MTLRenderPipelineState
-  {
-    let descriptor = MTLRenderPipelineDescriptor()
-    descriptor.vertexFunction = library.makeFunction(name: "fourWingBackgroundVertexShader")
-    descriptor.fragmentFunction = library.makeFunction(name: "fourWingBackgroundFragmentShader")
-    descriptor.colorAttachments[0].pixelFormat = .rgba16Float
-    descriptor.depthAttachmentPixelFormat = .depth32Float
-    descriptor.inputPrimitiveTopology = .triangle
-    descriptor.maxVertexAmplificationCount = Renderer.maxViewCount
-    return try device.makeRenderPipelineState(descriptor: descriptor)
-  }
-
-  fileprivate static func makeObjectPipelineState(device: MTLDevice, library: MTLLibrary) throws
+  fileprivate static func makeObjectPipelineState(
+    device: MTLDevice,
+    library: MTLLibrary,
+    maxViewCount: Int
+  ) throws
     -> MTLRenderPipelineState
   {
     let descriptor = MTLRenderPipelineDescriptor()
     descriptor.vertexFunction = library.makeFunction(name: "fourWingVertexShader")
     descriptor.fragmentFunction = library.makeFunction(name: "fourWingFragmentShader")
     descriptor.colorAttachments[0].pixelFormat = .rgba16Float
+    descriptor.colorAttachments[0].isBlendingEnabled = false  // Disable blending for opaque rendering
     descriptor.depthAttachmentPixelFormat = .depth32Float
     descriptor.inputPrimitiveTopology = .triangle
 
@@ -191,7 +173,7 @@ extension FourWingRenderer {
     vertexDescriptor.attributes[1].bufferIndex = 0
     vertexDescriptor.layouts[0].stride = MemoryLayout<MeshVertex>.stride
     descriptor.vertexDescriptor = vertexDescriptor
-    descriptor.maxVertexAmplificationCount = Renderer.maxViewCount
+    descriptor.maxVertexAmplificationCount = max(maxViewCount, 1)
 
     return try device.makeRenderPipelineState(descriptor: descriptor)
   }
@@ -205,41 +187,9 @@ extension FourWingRenderer {
 
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
-    descriptor.depthCompareFunction = .less
+    descriptor.depthCompareFunction = .greater
     descriptor.isDepthWriteEnabled = true  // Enable depth write for correct occlusion
     return device.makeDepthStencilState(descriptor: descriptor)!
-  }
-
-  fileprivate static func makeTetraGeometry(device: MTLDevice) -> (
-    vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int
-  ) {
-    let h: Float = 0.03
-    let vertices: [MeshVertex] = [
-      MeshVertex(position: [0, h, 0], normal: [0, 1, 0]),
-      MeshVertex(position: [-h, -h, h], normal: [-0.58, -0.58, 0.58]),
-      MeshVertex(position: [h, -h, h], normal: [0.58, -0.58, 0.58]),
-      MeshVertex(position: [0, -h, -h], normal: [0, -0.58, -0.58]),
-    ]
-
-    let indices: [UInt16] = [
-      0, 1, 2,
-      0, 2, 3,
-      0, 3, 1,
-      1, 3, 2,
-    ]
-
-    let vertexBuffer = device.makeBuffer(
-      bytes: vertices,
-      length: MemoryLayout<MeshVertex>.stride * vertices.count,
-      options: [.storageModeShared]
-    )!
-    let indexBuffer = device.makeBuffer(
-      bytes: indices,
-      length: MemoryLayout<UInt16>.stride * indices.count,
-      options: [.storageModeShared]
-    )!
-
-    return (vertexBuffer, indexBuffer, indices.count)
   }
 
   fileprivate static func makeInitialParticleStates(
@@ -263,8 +213,9 @@ extension FourWingRenderer {
       var x: Float = Float.random(in: -0.5...0.5)
       var y: Float = Float.random(in: -0.5...0.5)
       var z: Float = Float.random(in: -0.5...0.5)
-      
-      let groupSize = (groupIndex == numGroups - 1) ? (count - groupIndex * particlesPerGroup) : particlesPerGroup
+
+      let groupSize =
+        (groupIndex == numGroups - 1) ? (count - groupIndex * particlesPerGroup) : particlesPerGroup
 
       for _ in 0..<groupSize {
         // Current position in attractor space
@@ -304,7 +255,7 @@ extension FourWingRenderer {
         z += dz * dt
       }
     }
-    
+
     return device.makeBuffer(
       bytes: states,
       length: MemoryLayout<FourWingParticleState>.stride * states.count,

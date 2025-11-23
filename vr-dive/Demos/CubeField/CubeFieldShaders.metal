@@ -1,17 +1,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-struct BackgroundUniforms {
-  float time;
-  float intensity;
-  float2 padding;
-  float4x4 viewToWorldLeft;
-  float4x4 viewToWorldRight;
-};
-
 struct SceneUniforms {
-  float4x4 viewProjectionMatrixLeft;
-  float4x4 viewProjectionMatrixRight;
   float time;
   uint layerCount;
   float2 padding;
@@ -36,71 +26,22 @@ struct ObjectState {
   float4 homeAndJitter;
 };
 
-struct BackgroundVertexOut {
-  float4 position [[position]];
-  float4 clipPosition;
-  float2 uv;
-  uint layer [[render_target_array_index]];
-};
-
 struct ObjectVertexOut {
   float4 position [[position]];
   float3 normal;
   float3 worldPos;
-  uint layer [[render_target_array_index]];
+  // uint layer [[render_target_array_index]]; // Removed
   float objectType;
 };
 
-static inline BackgroundVertexOut
-makeBackgroundVertex(uint vertexID, uint instanceID,
-                     constant BackgroundUniforms &uniforms) {
-  BackgroundVertexOut out;
-  float2 positions[3] = {float2(-1, -1), float2(3, -1), float2(-1, 3)};
-  out.position = float4(positions[vertexID], 0.0, 1.0);
-  out.clipPosition = out.position;
-  out.uv = positions[vertexID] * 0.5 + 0.5;
-  out.layer = instanceID;
-  return out;
-}
-
-vertex BackgroundVertexOut backgroundVertexShader(
-    uint vertexID [[vertex_id]], uint instanceID [[instance_id]],
-    constant BackgroundUniforms &uniforms [[buffer(0)]]) {
-  return makeBackgroundVertex(vertexID, instanceID, uniforms);
-}
-
-float3 shallowSeaGradient(float3 worldDir, float t, float intensity) {
-  float upFactor = saturate(worldDir.y * 0.5 + 0.5);
-  float lateral = saturate(length(worldDir.xz));
-  float3 surfaceColor = float3(0.1, 0.32, 0.45);
-  float3 depthColor = float3(0.005, 0.04, 0.08);
-  float wave = 0.03 * sin(t * 0.35 + worldDir.x * 5.0 + worldDir.z * 3.0);
-  float mixFactor = clamp(upFactor + wave, 0.0, 1.0);
-  float glow = smoothstep(0.2, 0.7, upFactor) * 0.12;
-  float3 tint = float3(0.05, -0.02, -0.04) * lateral;
-  float3 color = mix(depthColor, surfaceColor, mixFactor) + glow;
-  return (color + tint) * intensity;
-}
-
-fragment float4 backgroundFragmentShader(BackgroundVertexOut in [[stage_in]],
-                                         constant BackgroundUniforms &uniforms
-                                         [[buffer(0)]]) {
-  float4x4 viewToWorld =
-      in.layer == 0 ? uniforms.viewToWorldLeft : uniforms.viewToWorldRight;
-  float2 ndc = in.clipPosition.xy / in.clipPosition.w;
-  float4 eyeRay = float4(ndc, -1.0, 0.0);
-  float3 worldDir = normalize((viewToWorld * eyeRay).xyz);
-  float3 color =
-      shallowSeaGradient(worldDir, uniforms.time, uniforms.intensity);
-  return float4(color, 1.0);
-}
-
 vertex ObjectVertexOut objectVertexShader(
-    ushort amplificationID [[amplification_id]],
-    const device MeshVertex *vertices [[buffer(0)]],
-    const device ObjectState *states [[buffer(1)]],
-    constant SceneUniforms &uniforms [[buffer(2)]], uint vertexID [[vertex_id]],
-    uint instanceID [[instance_id]]) {
+  ushort amplificationID [[amplification_id]],
+  const device MeshVertex *vertices [[buffer(0)]],
+  const device ObjectState *states [[buffer(1)]],
+  constant SceneUniforms &uniforms [[buffer(2)]],
+  constant float4x4 *viewProjectionMatrices [[buffer(3)]],
+  uint vertexID [[vertex_id]],
+  uint instanceID [[instance_id]]) {
   ObjectVertexOut out;
   uint layers = max(uniforms.layerCount, 1u);
   uint objectIndex = instanceID;
@@ -111,25 +52,37 @@ vertex ObjectVertexOut objectVertexShader(
   float3 position =
       state.positionAndType.xyz + vtx.position * state.scaleAndPadding.xyz;
   float4 worldPos = float4(position, 1.0);
-  float4x4 viewProjection = viewIndex == 0 ? uniforms.viewProjectionMatrixLeft
-                                           : uniforms.viewProjectionMatrixRight;
+  float4x4 viewProjection = viewProjectionMatrices[viewIndex];
   out.position = viewProjection * worldPos;
   out.normal = vtx.normal;
   out.worldPos = position;
   out.objectType = state.positionAndType.w;
-  out.layer = viewIndex;
+  // out.layer = viewIndex; // Removed
   return out;
 }
 
-float3 objectColor(float type, float3 pos, float time) {
-  if (type > 0.5) {
-    float hue = 0.52 + 0.05 * sin(time + pos.x);
-    return mix(float3(0.1, 0.35, 0.45), float3(0.18, 0.5, 0.62),
-               0.5 + 0.5 * sin(hue));
+float3 objectColor(float type, float3 pos) {
+  float variant = clamp(round(type), 0.0, 2.0);
+  const float3 penumbra = float3(0.038, 0.048, 0.06);
+  const float3 cool = float3(0.08, 0.09, 0.11);
+  const float3 warm = float3(0.12, 0.11, 0.1);
+  const float3 highlight = float3(0.16, 0.17, 0.19);
+
+  float heightMix = saturate((pos.y + 5.0) / 10.0);
+  float depthMix = saturate((-pos.z - 0.5) / 4.0);
+  float edgeLift = smoothstep(0.0, 1.0, depthMix);
+
+  float3 base;
+  if (variant < 0.5) {
+    base = mix(penumbra, cool, 0.35 + 0.45 * heightMix);
+  } else if (variant < 1.5) {
+    base = mix(penumbra, warm, 0.4 + 0.3 * depthMix + 0.15 * heightMix);
+  } else {
+    base = mix(cool, highlight, 0.4 + 0.4 * heightMix + 0.2 * depthMix);
   }
-  float variation =
-      0.2 * sin(pos.x * 2.0 + time) + 0.1 * cos(pos.y * 3.0 - time * 0.5);
-  return float3(0.05, 0.2, 0.28) + variation;
+
+  base += float3(0.01, 0.012, 0.014) * edgeLift;
+  return base;
 }
 
 fragment float4 objectFragmentShader(ObjectVertexOut in [[stage_in]],
@@ -141,8 +94,8 @@ fragment float4 objectFragmentShader(ObjectVertexOut in [[stage_in]],
   float3 lightDir = normalize(float3(0.4, 0.9, -0.2));
   float ndotl = abs(dot(normal, lightDir));
   float rim = pow(1.0 - abs(dot(normal, float3(0, 0, 1))), 2.0);
-  float3 baseColor = objectColor(in.objectType, in.worldPos, uniforms.time);
-  float3 color = baseColor * (0.35 + ndotl * 0.65) + rim * 0.1;
+  float3 baseColor = objectColor(in.objectType, in.worldPos);
+  float3 color = baseColor * (0.35 + ndotl * 0.65) + rim * 0.08;
   return float4(color, 0.95);
 }
 
@@ -155,28 +108,62 @@ kernel void simulateObjects(device ObjectState *states [[buffer(0)]],
 
   ObjectState state = states[id];
   float dt = uniforms.deltaTime;
-  float scaledDt = dt * 0.1125;
-  float type = state.positionAndType.w;
+  float scaledDt = dt * 0.11;
+  float shapeType = clamp(state.positionAndType.w, 0.0, 2.0);
 
   float3 amplitude = state.motionAndPhase.xyz;
-  float phase = state.motionAndPhase.w + scaledDt * (0.35 + 0.35 * type);
+  float phase = state.motionAndPhase.w;
   float3 home = state.homeAndJitter.xyz;
   float jitterRadius = state.homeAndJitter.w;
 
-  float3 swirl = float3(sin(phase * 1.3 + home.x), cos(phase * 0.8 + home.y),
-                        sin(phase * 1.15 + home.z)) *
-                 amplitude;
+  float3 flowWeights;
+  float phaseSpeed;
+  float lift;
+  float bobScale;
+  float jitterScale;
+
+  if (shapeType < 0.5) {
+    flowWeights = float3(0.9, 0.8, 0.9);
+    phaseSpeed = 0.32;
+    lift = 0.05;
+    bobScale = 0.75;
+    jitterScale = 0.35;
+  } else if (shapeType < 1.5) {
+    flowWeights = float3(0.55, 1.6, 0.55);
+    phaseSpeed = 0.24;
+    lift = 0.12;
+    bobScale = 1.05;
+    jitterScale = 0.48;
+  } else {
+    flowWeights = float3(1.25, 1.1, 1.25);
+    phaseSpeed = 0.42;
+    lift = 0.1;
+    bobScale = 1.2;
+    jitterScale = 0.55;
+  }
+
+  phase += scaledDt * phaseSpeed;
+
+  float3 swirl = float3(
+                    sin(phase * (0.9 + 0.15 * flowWeights.x) + home.x),
+                    cos(phase * (0.7 + 0.2 * flowWeights.y) + home.y),
+                    sin(phase * (1.05 + 0.15 * flowWeights.z) + home.z)) *
+                 (amplitude * flowWeights);
 
   float3 current = float3(
-      sin(uniforms.globalTime * 0.18 + home.y) * jitterRadius * 0.35, 0.0,
-      cos(uniforms.globalTime * 0.15 + home.x) * jitterRadius * 0.4);
+      sin(uniforms.globalTime * 0.2 + home.y) * jitterRadius * jitterScale,
+      0.0,
+      cos(uniforms.globalTime * 0.17 + home.x) * jitterRadius * jitterScale);
 
-  float lift = mix(0.02, 0.09, type);
-  float bob = sin(phase * 0.6 + home.z) * jitterRadius * 0.8;
+  if (shapeType >= 0.5 && shapeType < 1.5) {
+    current.y = sin(uniforms.globalTime * 0.1 + home.z) * jitterRadius * 0.5;
+  }
+
+  float bob = sin(phase * (0.4 + 0.15 * flowWeights.y) + home.z) * jitterRadius * bobScale;
 
   float3 position = home;
   position.x += swirl.x + current.x;
-  position.y += swirl.y + current.y + bob + lift;
+  position.y += swirl.y * 0.5 + current.y + bob + lift;
   position.z += swirl.z + current.z;
 
   float3 displacement = position - home;
@@ -189,7 +176,7 @@ kernel void simulateObjects(device ObjectState *states [[buffer(0)]],
     position = home + displacement;
   }
 
-  state.positionAndType = float4(position, type);
+  state.positionAndType = float4(position, shapeType);
   state.motionAndPhase.w = phase;
   states[id] = state;
 }

@@ -35,13 +35,12 @@ struct ObjectVertexOut {
 };
 
 vertex ObjectVertexOut objectVertexShader(
-  ushort amplificationID [[amplification_id]],
-  const device MeshVertex *vertices [[buffer(0)]],
-  const device ObjectState *states [[buffer(1)]],
-  constant SceneUniforms &uniforms [[buffer(2)]],
-  constant float4x4 *viewProjectionMatrices [[buffer(3)]],
-  uint vertexID [[vertex_id]],
-  uint instanceID [[instance_id]]) {
+    ushort amplificationID [[amplification_id]],
+    const device MeshVertex *vertices [[buffer(0)]],
+    const device ObjectState *states [[buffer(1)]],
+    constant SceneUniforms &uniforms [[buffer(2)]],
+    constant float4x4 *viewProjectionMatrices [[buffer(3)]],
+    uint vertexID [[vertex_id]], uint instanceID [[instance_id]]) {
   ObjectVertexOut out;
   uint layers = max(uniforms.layerCount, 1u);
   uint objectIndex = instanceID;
@@ -144,22 +143,21 @@ kernel void simulateObjects(device ObjectState *states [[buffer(0)]],
 
   phase += scaledDt * phaseSpeed;
 
-  float3 swirl = float3(
-                    sin(phase * (0.9 + 0.15 * flowWeights.x) + home.x),
-                    cos(phase * (0.7 + 0.2 * flowWeights.y) + home.y),
-                    sin(phase * (1.05 + 0.15 * flowWeights.z) + home.z)) *
+  float3 swirl = float3(sin(phase * (0.9 + 0.15 * flowWeights.x) + home.x),
+                        cos(phase * (0.7 + 0.2 * flowWeights.y) + home.y),
+                        sin(phase * (1.05 + 0.15 * flowWeights.z) + home.z)) *
                  (amplitude * flowWeights);
 
   float3 current = float3(
-      sin(uniforms.globalTime * 0.2 + home.y) * jitterRadius * jitterScale,
-      0.0,
+      sin(uniforms.globalTime * 0.2 + home.y) * jitterRadius * jitterScale, 0.0,
       cos(uniforms.globalTime * 0.17 + home.x) * jitterRadius * jitterScale);
 
   if (shapeType >= 0.5 && shapeType < 1.5) {
     current.y = sin(uniforms.globalTime * 0.1 + home.z) * jitterRadius * 0.5;
   }
 
-  float bob = sin(phase * (0.4 + 0.15 * flowWeights.y) + home.z) * jitterRadius * bobScale;
+  float bob = sin(phase * (0.4 + 0.15 * flowWeights.y) + home.z) *
+              jitterRadius * bobScale;
 
   float3 position = home;
   position.x += swirl.x + current.x;

@@ -44,13 +44,12 @@ struct AizawaVertexOut {
   // routing
 };
 vertex AizawaVertexOut aizawaVertexShader(
-  ushort amplificationID [[amplification_id]],
-  const device MeshVertex *vertices [[buffer(0)]],
-  const device AizawaParticleState *states [[buffer(1)]],
-  constant SceneUniforms &uniforms [[buffer(2)]],
-  constant float4x4 *viewProjectionMatrices [[buffer(3)]],
-  uint vertexID [[vertex_id]],
-  uint instanceID [[instance_id]]) {
+    ushort amplificationID [[amplification_id]],
+    const device MeshVertex *vertices [[buffer(0)]],
+    const device AizawaParticleState *states [[buffer(1)]],
+    constant SceneUniforms &uniforms [[buffer(2)]],
+    constant float4x4 *viewProjectionMatrices [[buffer(3)]],
+    uint vertexID [[vertex_id]], uint instanceID [[instance_id]]) {
   AizawaVertexOut out;
   uint layers = max(uniforms.layerCount, 1u);
   uint viewIndex = min((uint)amplificationID, layers - 1);

@@ -326,7 +326,7 @@ class Renderer {
     }
 
     descriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
-    
+
     // Always clear every slice in the drawable's texture, otherwise untouched
     // foveation tiles stay black.
     descriptor.renderTargetArrayLength = colorTexture.arrayLength
@@ -517,6 +517,16 @@ class Renderer {
       controllers[.aizawaAttractor] = aizawa
     } else {
       print("[Renderer] Aizawa attractor pattern unavailable.")
+    }
+
+    if let pagoda = try? PagodaRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.pagoda] = pagoda
+    } else {
+      print("[Renderer] Pagoda pattern unavailable.")
     }
 
     return controllers

@@ -43,7 +43,7 @@ final class CubeFieldRenderer: VisualPatternController {
     shapeMeshes = [
       .block: CubeFieldRenderer.makeCubeGeometry(device: device),
       .column: CubeFieldRenderer.makeColumnGeometry(device: device),
-      .crystal: CubeFieldRenderer.makeCrystalGeometry(device: device)
+      .crystal: CubeFieldRenderer.makeCrystalGeometry(device: device),
     ]
     shapeRanges = CubeFieldRenderer.makeShapeRanges(totalCount: objectCount)
 

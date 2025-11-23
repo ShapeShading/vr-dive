@@ -66,4 +66,5 @@ protocol VisualPatternController: AnyObject {
 
   func updateSimulation(_ context: PatternSimulationContext)
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext)
+  func resetToInitialState()
 }

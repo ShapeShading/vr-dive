@@ -50,7 +50,7 @@ struct BackgroundVertexOut {
 
 struct LorenzVertexOut {
   float4 position [[position]];
-  float3 normal;
+  float3 normal [[flat]];  // Use flat interpolation for uniform color per triangle
   float3 worldPos;
   float objectScale;
   uint layer [[render_target_array_index]];
@@ -145,17 +145,13 @@ fragment float4 lorenzFragmentShader(LorenzVertexOut in [[stage_in]],
   float spec = pow(max(dot(normal, halfVec), 0.0), 48.0);
   float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0);
   float scaleFactor = saturate((in.objectScale - 0.04) * 8.0);
-  float heightFactor = saturate((in.worldPos.y + 1.2) * 0.35);
-  float lobeFactor = saturate(abs(in.worldPos.x) * 0.4);
-  float3 cool = float3(0.12, 0.22, 0.38);
-  float3 warm = float3(0.58, 0.36, 0.2);
-  float3 baseColor = mix(cool, warm, lobeFactor);
+  
+  // Color based on normal direction
+  float3 baseColor = abs(normal) * 0.8 + 0.2;  // Map normal xyz to rgb
   // Increase brightness for larger particles
-  baseColor = mix(baseColor, float3(0.9, 0.95, 1.0),
-                  heightFactor * 0.5 + scaleFactor * 0.8);
+  baseColor = mix(baseColor, float3(0.9, 0.95, 1.0), scaleFactor * 0.5);
 
-  // Add glow based on height and scale
-  float glow = smoothstep(0.5, 1.0, heightFactor) * 0.15 + scaleFactor * 0.5;
+  float glow = scaleFactor * 0.3;
   float3 metallic = baseColor * (0.25 + ndotl * 0.75) + glow;
   float3 color = metallic + spec * float3(0.9, 0.95, 1.0) +
                  fresnel * float3(0.25, 0.55, 0.95);

@@ -15,6 +15,7 @@ final class LorenzRenderer: VisualPatternController {
   private let particleStateBuffer: MTLBuffer
   private var lastSimulationTimestamp: Float = 0
   private let particleCount: Int
+  private let device: MTLDevice
   private let sigma: Float = 10.0
   private let beta: Float = 8.0 / 3.0
   private let rho: Float = 28.0
@@ -27,6 +28,7 @@ final class LorenzRenderer: VisualPatternController {
 
   init(device: MTLDevice, library: MTLLibrary, particleCount: Int) throws {
     self.particleCount = particleCount
+    self.device = device
     backgroundPipelineState = try LorenzRenderer.makeBackgroundPipelineState(
       device: device, library: library)
     objectPipelineState = try LorenzRenderer.makeObjectPipelineState(
@@ -49,9 +51,8 @@ final class LorenzRenderer: VisualPatternController {
 
   func updateSimulation(_ context: PatternSimulationContext) {
     let elapsed = max(0, context.time - lastSimulationTimestamp)
-    // Slow down simulation speed (0.05 is 1/4 of previous 0.2)
-    // This also reduces the integration step size, preventing collapse to fixed points
-    let clampedDeltaTime = min(max(elapsed, minDeltaTime), maxDeltaTime) * 0.05
+    // Speed up simulation for better visual effect
+    let clampedDeltaTime = min(max(elapsed, minDeltaTime), maxDeltaTime) * 0.2
     guard clampedDeltaTime > 0 else { return }
 
     var uniforms = LorenzUniforms(
@@ -90,6 +91,21 @@ final class LorenzRenderer: VisualPatternController {
     commandBuffer.waitUntilCompleted()
 
     lastSimulationTimestamp = context.time
+  }
+  
+  func resetToInitialState() {
+    let newBuffer = LorenzRenderer.makeInitialParticleStates(
+      device: device,
+      count: particleCount,
+      worldScale: worldScale
+    )
+    // Copy new initial states to existing buffer
+    memcpy(
+      particleStateBuffer.contents(),
+      newBuffer.contents(),
+      MemoryLayout<LorenzParticleState>.stride * particleCount
+    )
+    lastSimulationTimestamp = 0
   }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
@@ -193,7 +209,7 @@ extension LorenzRenderer {
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
     descriptor.depthCompareFunction = .less
-    descriptor.isDepthWriteEnabled = false  // Disable depth write for correct particle rendering
+    descriptor.isDepthWriteEnabled = true  // Enable depth write for correct occlusion
     return device.makeDepthStencilState(descriptor: descriptor)!
   }
 
@@ -232,56 +248,64 @@ extension LorenzRenderer {
   fileprivate static func makeInitialParticleStates(
     device: MTLDevice, count: Int, worldScale: Float
   ) -> MTLBuffer {
-    // Lorenz parameters
+    // Lorenz parameters (same as shader)
     let sigma: Float = 10.0
     let beta: Float = 8.0 / 3.0
     let rho: Float = 28.0
-    let dt: Float = 0.001  // Very small step size
+    let dt: Float = 0.001  // Small step for trajectory
 
-    // Starting point on Lorenz attractor
-    var x: Float = 0.1
-    var y: Float = 0.0
-    var z: Float = 0.0
+    // Create 16 trajectory groups
+    let numGroups = 16
+    let particlesPerGroup = count / numGroups
 
     var states: [LorenzParticleState] = []
     states.reserveCapacity(count)
 
-    for index in 0..<count {
-      // Current position on the Lorenz curve
-      let rawPosition = SIMD3<Float>(x, y, z)
-      let scaledPosition = rawPosition * worldScale
+    for groupIndex in 0..<numGroups {
+      // Random starting point in attractor space (not scaled)
+      var x: Float = Float.random(in: -10...10)
+      var y: Float = Float.random(in: -10...10)
+      var z: Float = Float.random(in: 20...35)
+      
+      let groupSize = (groupIndex == numGroups - 1) ? (count - groupIndex * particlesPerGroup) : particlesPerGroup
 
-      // 3% chance of being a "special" large, bright particle
-      let isSpecial = Float.random(in: 0...1) < 0.03
-      let scale: Float
-      if isSpecial {
-        scale = Float.random(in: 0.18...0.27)  // Large particles
-      } else {
-        scale = Float.random(in: 0.09...0.15)  // Normal particles with variation, larger minimum
-      }
+      for _ in 0..<groupSize {
+        // Current position in attractor space
+        let attractorPosition = SIMD3<Float>(x, y, z)
+        // Scale to world space
+        let worldPosition = attractorPosition * worldScale
 
-      let rotation = atan2(rawPosition.z, rawPosition.x)
-      let seed = SIMD3<Float>(
-        Float.random(in: 0...10_000),
-        Float.random(in: 0...10_000),
-        Float.random(in: 0...10_000)
-      )
-      states.append(
-        LorenzParticleState(
-          positionAndScale: SIMD4<Float>(
-            scaledPosition.x, scaledPosition.y, scaledPosition.z, scale),
-          seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
+        let isSpecial = Float.random(in: 0...1) < 0.03
+        let scale: Float
+        if isSpecial {
+          scale = Float.random(in: 0.18...0.27)
+        } else {
+          scale = Float.random(in: 0.09...0.15)
+        }
+
+        let rotation = atan2(attractorPosition.z, attractorPosition.x)
+        let seed = SIMD3<Float>(
+          Float.random(in: 0...10_000),
+          Float.random(in: 0...10_000),
+          Float.random(in: 0...10_000)
         )
-      )
+        states.append(
+          LorenzParticleState(
+            positionAndScale: SIMD4<Float>(
+              worldPosition.x, worldPosition.y, worldPosition.z, scale),
+            seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
+          )
+        )
 
-      // Integrate Lorenz equations with very small step to get next position
-      let dx = sigma * (y - x)
-      let dy = x * (rho - z) - y
-      let dz = x * y - beta * z
+        // Integrate Lorenz equations in attractor space
+        let dx = sigma * (y - x)
+        let dy = x * (rho - z) - y
+        let dz = x * y - beta * z
 
-      x += dx * dt
-      y += dy * dt
-      z += dz * dt
+        x += dx * dt
+        y += dy * dt
+        z += dz * dt
+      }
     }
 
     return device.makeBuffer(

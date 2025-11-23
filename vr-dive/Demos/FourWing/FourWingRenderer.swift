@@ -15,10 +15,11 @@ final class FourWingRenderer: VisualPatternController {
   private let particleStateBuffer: MTLBuffer
   private var lastSimulationTimestamp: Float = 0
   private let particleCount: Int
+  private let device: MTLDevice
   private let a: Float = 0.2
   private let b: Float = 0.01
   private let c: Float = -0.4
-  private let worldScale: Float = 1.2  // Scale for Four-Wing attractor (8x larger)
+  private let worldScale: Float = 4.8  // Scale for Four-Wing attractor (4x larger for better visibility)
   private let resetRadius: Float = 15.0  // Adjusted for Four-Wing's smaller scale
   private let noiseAmplitude: Float = 0.05  // Reduced noise for stability
   private let minDeltaTime: Float = 1.0 / 600.0
@@ -27,6 +28,7 @@ final class FourWingRenderer: VisualPatternController {
 
   init(device: MTLDevice, library: MTLLibrary, particleCount: Int) throws {
     self.particleCount = particleCount
+    self.device = device
     backgroundPipelineState = try FourWingRenderer.makeBackgroundPipelineState(
       device: device, library: library)
     objectPipelineState = try FourWingRenderer.makeObjectPipelineState(
@@ -49,7 +51,7 @@ final class FourWingRenderer: VisualPatternController {
 
   func updateSimulation(_ context: PatternSimulationContext) {
     let elapsed = max(0, context.time - lastSimulationTimestamp)
-    let clampedDeltaTime = min(max(elapsed, minDeltaTime), maxDeltaTime) * 0.05
+    let clampedDeltaTime = min(max(elapsed, minDeltaTime), maxDeltaTime) * 0.2
     guard clampedDeltaTime > 0 else { return }
 
     var uniforms = FourWingUniforms(
@@ -88,6 +90,20 @@ final class FourWingRenderer: VisualPatternController {
     commandBuffer.waitUntilCompleted()
 
     lastSimulationTimestamp = context.time
+  }
+  
+  func resetToInitialState() {
+    let newBuffer = FourWingRenderer.makeInitialParticleStates(
+      device: device,
+      count: particleCount,
+      worldScale: worldScale
+    )
+    memcpy(
+      particleStateBuffer.contents(),
+      newBuffer.contents(),
+      MemoryLayout<FourWingParticleState>.stride * particleCount
+    )
+    lastSimulationTimestamp = 0
   }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
@@ -190,7 +206,7 @@ extension FourWingRenderer {
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
     descriptor.depthCompareFunction = .less
-    descriptor.isDepthWriteEnabled = false  // Disable depth write for correct particle rendering
+    descriptor.isDepthWriteEnabled = true  // Enable depth write for correct occlusion
     return device.makeDepthStencilState(descriptor: descriptor)!
   }
 
@@ -229,56 +245,66 @@ extension FourWingRenderer {
   fileprivate static func makeInitialParticleStates(
     device: MTLDevice, count: Int, worldScale: Float
   ) -> MTLBuffer {
-    // Four-Wing parameters
+    // Four-Wing parameters (same as shader)
     let a: Float = 0.2
     let b: Float = 0.01
     let c: Float = -0.4
-    let dt: Float = 0.001
+    let dt: Float = 0.01  // Step for trajectory
 
-    // Starting point
-    var x: Float = 0.1
-    var y: Float = 0.1
-    var z: Float = 0.1
+    // Create 16 trajectory groups
+    let numGroups = 16
+    let particlesPerGroup = count / numGroups
 
     var states: [FourWingParticleState] = []
     states.reserveCapacity(count)
 
-    for index in 0..<count {
-      let rawPosition = SIMD3<Float>(x, y, z)
-      let scaledPosition = rawPosition * worldScale
+    for groupIndex in 0..<numGroups {
+      // Random starting point in attractor space (not scaled)
+      var x: Float = Float.random(in: -0.5...0.5)
+      var y: Float = Float.random(in: -0.5...0.5)
+      var z: Float = Float.random(in: -0.5...0.5)
+      
+      let groupSize = (groupIndex == numGroups - 1) ? (count - groupIndex * particlesPerGroup) : particlesPerGroup
 
-      let isSpecial = Float.random(in: 0...1) < 0.03
-      let scale: Float
-      if isSpecial {
-        scale = Float.random(in: 0.18...0.27)
-      } else {
-        scale = Float.random(in: 0.09...0.15)
-      }
+      for _ in 0..<groupSize {
+        // Current position in attractor space
+        let attractorPosition = SIMD3<Float>(x, y, z)
+        // Scale to world space
+        let worldPosition = attractorPosition * worldScale
 
-      let rotation = atan2(rawPosition.z, rawPosition.x)
-      let seed = SIMD3<Float>(
-        Float.random(in: 0...10_000),
-        Float.random(in: 0...10_000),
-        Float.random(in: 0...10_000)
-      )
-      states.append(
-        FourWingParticleState(
-          positionAndScale: SIMD4<Float>(
-            scaledPosition.x, scaledPosition.y, scaledPosition.z, scale),
-          seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
+        let isSpecial = Float.random(in: 0...1) < 0.03
+        let scale: Float
+        if isSpecial {
+          scale = Float.random(in: 0.18...0.27)
+        } else {
+          scale = Float.random(in: 0.09...0.15)
+        }
+
+        let rotation = atan2(attractorPosition.z, attractorPosition.x)
+        let seed = SIMD3<Float>(
+          Float.random(in: 0...10_000),
+          Float.random(in: 0...10_000),
+          Float.random(in: 0...10_000)
         )
-      )
+        states.append(
+          FourWingParticleState(
+            positionAndScale: SIMD4<Float>(
+              worldPosition.x, worldPosition.y, worldPosition.z, scale),
+            seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
+          )
+        )
 
-      // Integrate Four-Wing equations
-      let dx = a * x + y * z
-      let dy = b * x + c * y - x * z
-      let dz = -z - x * y
+        // Integrate Four-Wing equations in attractor space
+        let dx = a * x + y * z
+        let dy = b * x + c * y - x * z
+        let dz = -z - x * y
 
-      x += dx * dt
-      y += dy * dt
-      z += dz * dt
+        x += dx * dt
+        y += dy * dt
+        z += dz * dt
+      }
     }
-
+    
     return device.makeBuffer(
       bytes: states,
       length: MemoryLayout<FourWingParticleState>.stride * states.count,

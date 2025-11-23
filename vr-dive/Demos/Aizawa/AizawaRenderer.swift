@@ -15,13 +15,14 @@ final class AizawaRenderer: VisualPatternController {
   private let particleStateBuffer: MTLBuffer
   private var lastSimulationTimestamp: Float = 0
   private let particleCount: Int
+  private let device: MTLDevice
   private let a: Float = 0.95
   private let b: Float = 0.7
   private let c: Float = 0.6
   private let d: Float = 3.5
   private let e: Float = 0.25
   private let f: Float = 0.1
-  private let worldScale: Float = 2.4  // Scale for Aizawa attractor (8x larger)
+  private let worldScale: Float = 4.8  // Scale for Aizawa attractor
   private let resetRadius: Float = 10.0  // Adjusted for Aizawa's smaller scale
   private let noiseAmplitude: Float = 0.03  // Reduced noise for stability
   private let minDeltaTime: Float = 1.0 / 600.0
@@ -30,6 +31,7 @@ final class AizawaRenderer: VisualPatternController {
 
   init(device: MTLDevice, library: MTLLibrary, particleCount: Int) throws {
     self.particleCount = particleCount
+    self.device = device
     backgroundPipelineState = try AizawaRenderer.makeBackgroundPipelineState(
       device: device, library: library)
     objectPipelineState = try AizawaRenderer.makeObjectPipelineState(
@@ -52,7 +54,7 @@ final class AizawaRenderer: VisualPatternController {
 
   func updateSimulation(_ context: PatternSimulationContext) {
     let elapsed = max(0, context.time - lastSimulationTimestamp)
-    let clampedDeltaTime = min(max(elapsed, minDeltaTime), maxDeltaTime) * 0.05
+    let clampedDeltaTime = min(max(elapsed, minDeltaTime), maxDeltaTime) * 0.2
     guard clampedDeltaTime > 0 else { return }
 
     var uniforms = AizawaUniforms(
@@ -94,6 +96,20 @@ final class AizawaRenderer: VisualPatternController {
     commandBuffer.waitUntilCompleted()
 
     lastSimulationTimestamp = context.time
+  }
+  
+  func resetToInitialState() {
+    let newBuffer = AizawaRenderer.makeInitialParticleStates(
+      device: device,
+      count: particleCount,
+      worldScale: worldScale
+    )
+    memcpy(
+      particleStateBuffer.contents(),
+      newBuffer.contents(),
+      MemoryLayout<AizawaParticleState>.stride * particleCount
+    )
+    lastSimulationTimestamp = 0
   }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
@@ -196,7 +212,7 @@ extension AizawaRenderer {
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
     descriptor.depthCompareFunction = .less
-    descriptor.isDepthWriteEnabled = false  // Disable depth write for correct particle rendering
+    descriptor.isDepthWriteEnabled = true  // Enable depth write for correct occlusion
     return device.makeDepthStencilState(descriptor: descriptor)!
   }
 
@@ -235,59 +251,69 @@ extension AizawaRenderer {
   fileprivate static func makeInitialParticleStates(
     device: MTLDevice, count: Int, worldScale: Float
   ) -> MTLBuffer {
-    // Aizawa parameters
+    // Aizawa parameters (same as shader)
     let a: Float = 0.95
     let b: Float = 0.7
     let c: Float = 0.6
     let d: Float = 3.5
     let e: Float = 0.25
     let f: Float = 0.1
-    let dt: Float = 0.001
+    let dt: Float = 0.01  // Step for trajectory
 
-    // Starting point
-    var x: Float = 0.1
-    var y: Float = 0.1
-    var z: Float = 0.1
+    // Create 16 trajectory groups
+    let numGroups = 16
+    let particlesPerGroup = count / numGroups
 
     var states: [AizawaParticleState] = []
     states.reserveCapacity(count)
 
-    for index in 0..<count {
-      let rawPosition = SIMD3<Float>(x, y, z)
-      let scaledPosition = rawPosition * worldScale
+    for groupIndex in 0..<numGroups {
+      // Random starting point in attractor space (not scaled)
+      var x: Float = Float.random(in: -0.5...0.5)
+      var y: Float = Float.random(in: -0.5...0.5)
+      var z: Float = Float.random(in: -0.5...0.5)
+      
+      let groupSize = (groupIndex == numGroups - 1) ? (count - groupIndex * particlesPerGroup) : particlesPerGroup
 
-      let isSpecial = Float.random(in: 0...1) < 0.03
-      let scale: Float
-      if isSpecial {
-        scale = Float.random(in: 0.18...0.27)
-      } else {
-        scale = Float.random(in: 0.09...0.15)
-      }
+      for _ in 0..<groupSize {
+        // Current position in attractor space
+        let attractorPosition = SIMD3<Float>(x, y, z)
+        // Scale to world space
+        let worldPosition = attractorPosition * worldScale
 
-      let rotation = atan2(rawPosition.z, rawPosition.x)
-      let seed = SIMD3<Float>(
-        Float.random(in: 0...10_000),
-        Float.random(in: 0...10_000),
-        Float.random(in: 0...10_000)
-      )
-      states.append(
-        AizawaParticleState(
-          positionAndScale: SIMD4<Float>(
-            scaledPosition.x, scaledPosition.y, scaledPosition.z, scale),
-          seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
+        let isSpecial = Float.random(in: 0...1) < 0.03
+        let scale: Float
+        if isSpecial {
+          scale = Float.random(in: 0.18...0.27)
+        } else {
+          scale = Float.random(in: 0.09...0.15)
+        }
+
+        let rotation = atan2(attractorPosition.z, attractorPosition.x)
+        let seed = SIMD3<Float>(
+          Float.random(in: 0...10_000),
+          Float.random(in: 0...10_000),
+          Float.random(in: 0...10_000)
         )
-      )
+        states.append(
+          AizawaParticleState(
+            positionAndScale: SIMD4<Float>(
+              worldPosition.x, worldPosition.y, worldPosition.z, scale),
+            seedAndPhase: SIMD4<Float>(seed.x, seed.y, seed.z, rotation)
+          )
+        )
 
-      // Integrate Aizawa equations
-      let dx = (z - b) * x - d * y
-      let dy = d * x + (z - b) * y
-      let dz = c + a * z - (z * z * z) / 3.0 - (x * x + y * y) * (1.0 + e * z) + f * z * x * x * x
+        // Integrate Aizawa equations in attractor space
+        let dx = (z - b) * x - d * y
+        let dy = d * x + (z - b) * y
+        let dz = c + a * z - (z * z * z) / 3.0 - (x * x + y * y) * (1.0 + e * z) + f * z * x * x * x
 
-      x += dx * dt
-      y += dy * dt
-      z += dz * dt
+        x += dx * dt
+        y += dy * dt
+        z += dz * dt
+      }
     }
-
+    
     return device.makeBuffer(
       bytes: states,
       length: MemoryLayout<AizawaParticleState>.stride * states.count,

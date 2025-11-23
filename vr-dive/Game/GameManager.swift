@@ -115,13 +115,15 @@ class GameManager {
       let strafeInput = secondaryStickInput.x
       let verticalInput = secondaryStickInput.y
 
-      yawAngle -= yawInput * yawSpeed * yawMultiplier * deltaTime
+      // Reduce turning speed by half when actively turning
+      let turnSpeedReduction = 1.0 - abs(yawInput) * 0.5
+      yawAngle -= yawInput * yawSpeed * yawMultiplier * turnSpeedReduction * deltaTime
       yawAngle = wrapAngle(yawAngle)
       let basis = movementBasisVectors()
 
       var displacement = SIMD3<Float>.zero
       displacement -= basis.forward * forwardInput  // first-person: push forward to move forward (scene pulls back)
-      displacement -= basis.right * strafeInput     // strafing now follows the secondary (right) stick
+      displacement -= basis.right * strafeInput  // strafing now follows the secondary (right) stick
       playerOffset += displacement * movementSpeed * movementMultiplier * deltaTime
       playerOffset.y -= verticalInput * verticalSpeed * movementMultiplier * deltaTime
 

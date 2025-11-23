@@ -15,9 +15,11 @@ final class CubeFieldRenderer: VisualPatternController {
   private let objectStateBuffer: MTLBuffer
   private var lastSimulationTimestamp: Float = 0
   private let objectCount: Int
+  private let device: MTLDevice
 
   init(device: MTLDevice, library: MTLLibrary, objectCount: Int) throws {
     self.objectCount = objectCount
+    self.device = device
     backgroundPipelineState = try CubeFieldRenderer.makeBackgroundPipelineState(
       device: device, library: library)
     objectPipelineState = try CubeFieldRenderer.makeObjectPipelineState(
@@ -68,6 +70,19 @@ final class CubeFieldRenderer: VisualPatternController {
 
     lastSimulationTimestamp = context.time
   }
+  
+  func resetToInitialState() {
+    let newBuffer = CubeFieldRenderer.makeInitialObjectStates(
+      device: device,
+      count: objectCount
+    )
+    memcpy(
+      objectStateBuffer.contents(),
+      newBuffer.contents(),
+      MemoryLayout<ObjectState>.stride * objectCount
+    )
+    lastSimulationTimestamp = 0
+  }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
     encodeBackground(with: encoder, context: context)
@@ -93,7 +108,7 @@ final class CubeFieldRenderer: VisualPatternController {
   private func encodeObjects(with encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
     encoder.setRenderPipelineState(objectPipelineState)
     encoder.setDepthStencilState(depthStencilState)
-    encoder.setCullMode(.none)
+    encoder.setCullMode(.back)  // Enable back-face culling for correct rendering
     encoder.setFrontFacing(.counterClockwise)
     encoder.setTriangleFillMode(.fill)
 

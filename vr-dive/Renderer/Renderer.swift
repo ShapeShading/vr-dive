@@ -207,8 +207,18 @@ class Renderer {
     guard viewCount > 0 else { return }
 
     guard let pattern = resolveActivePatternController() else { return }
-    let simulationContext = PatternSimulationContext(commandQueue: commandQueue, time: time)
-    pattern.updateSimulation(simulationContext)
+    
+    // Check for reset request
+    if patternCoordinator.shouldReset() {
+      pattern.resetToInitialState()
+      patternCoordinator.clearResetFlag()
+    }
+    
+    // Only update simulation if not paused
+    if !patternCoordinator.isPaused() {
+      let simulationContext = PatternSimulationContext(commandQueue: commandQueue, time: time)
+      pattern.updateSimulation(simulationContext)
+    }
 
     guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
 

@@ -24,6 +24,7 @@ final class PongWars3DRenderer: VisualPatternController {
   private static let worldSize: Float = 4.0
   private static let ballCount: UInt32 = 8
   private static let voxelSize: Float = worldSize / Float(gridSize)
+  private static let edgeRebuildFrequency: Int = 10  // Rebuild edges every N frames
   
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.device = device
@@ -82,9 +83,9 @@ final class PongWars3DRenderer: VisualPatternController {
     
     lastSimulationTimestamp = context.time
     
-    // Rebuild edges every 10 frames to reflect voxel ownership changes
+    // Rebuild edges periodically to reflect voxel ownership changes
     edgeRebuildCounter += 1
-    if edgeRebuildCounter >= 10 {
+    if edgeRebuildCounter >= PongWars3DRenderer.edgeRebuildFrequency {
       needsEdgeRebuild = true
       edgeRebuildCounter = 0
     }
@@ -217,12 +218,6 @@ final class PongWars3DRenderer: VisualPatternController {
       )
     }
   }
-}
-
-// Helper structs for edge rendering
-struct EdgeVertex {
-  var position: SIMD3<Float>
-  var color: SIMD3<Float>
 }
 
 // Static helper methods

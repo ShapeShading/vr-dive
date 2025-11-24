@@ -31,3 +31,9 @@ struct PongWarsSceneUniforms {
   var layerCount: UInt32
   var padding: SIMD2<Float>
 }
+
+// Edge vertex for wireframe rendering
+struct EdgeVertex {
+  var position: SIMD3<Float>
+  var color: SIMD3<Float>
+}

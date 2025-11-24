@@ -1,6 +1,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// Physics constants
+constant float MIN_VELOCITY_THRESHOLD = 0.001;  // Minimum velocity to detect stuck balls
+constant float VOXEL_COLLISION_THRESHOLD = 0.75;  // Squared distance threshold for ball-voxel collision (3/4)
+
 struct BallState {
   float4 position;      // xyz = position, w = region index
   float4 velocity;      // xyz = velocity, w = radius
@@ -141,7 +145,7 @@ kernel void simulatePongWarsBalls(
           float3 voxelCenter = (float3(checkCoord) + 0.5) * uniforms.voxelSize - halfWorld;
           float3 toVoxel = voxelCenter - newPos;
           float distSq = dot(toVoxel, toVoxel);
-          float voxelRadiusSq = uniforms.voxelSize * uniforms.voxelSize * 0.75; // 0.75 ≈ 3/4, collision threshold for cube
+          float voxelRadiusSq = uniforms.voxelSize * uniforms.voxelSize * VOXEL_COLLISION_THRESHOLD;
           
           // If ball is close to voxel and voxel is not owned by ball
           if (distSq < voxelRadiusSq && currentOwner != ballOwner) {
@@ -180,7 +184,7 @@ kernel void simulatePongWarsBalls(
   float speed = length(vel);
   float minSpeed = 1.0;
   float maxSpeed = 3.0;
-  if (speed < 0.001) {
+  if (speed < MIN_VELOCITY_THRESHOLD) {
     // Prevent zero velocity - reinitialize with random direction
     vel = float3(
       (fract(sin(uniforms.globalTime * 91.8732 + float(id))) - 0.5) * 2.0,

@@ -141,12 +141,12 @@ kernel void simulatePongWarsBalls(
           float3 voxelCenter = (float3(checkCoord) + 0.5) * uniforms.voxelSize - halfWorld;
           float3 toVoxel = voxelCenter - newPos;
           float distSq = dot(toVoxel, toVoxel);
-          float voxelRadiusSq = uniforms.voxelSize * uniforms.voxelSize * 0.75; // sqrt(3)/2 * voxelSize
+          float voxelRadiusSq = uniforms.voxelSize * uniforms.voxelSize * 0.75; // 0.75 = (sqrt(3)/2)^2 for cube diagonal
           
           // If ball is close to voxel and voxel is not owned by ball
           if (distSq < voxelRadiusSq && currentOwner != ballOwner) {
-            // Convert voxel to ball's color
-            voxels[voxelIndex].ownerAndFlags = ballOwner;
+            // Convert voxel to ball's color (atomic operation to prevent race conditions)
+            atomic_store_explicit((device atomic_uint*)&voxels[voxelIndex].ownerAndFlags, ballOwner, memory_order_relaxed);
             
             // Bounce ball based on which side was hit
             float3 normal = normalize(toVoxel);
@@ -180,7 +180,15 @@ kernel void simulatePongWarsBalls(
   float speed = length(vel);
   float minSpeed = 1.0;
   float maxSpeed = 3.0;
-  if (speed < minSpeed) {
+  if (speed < 0.001) {
+    // Prevent zero velocity - reinitialize with random direction
+    vel = float3(
+      (fract(sin(uniforms.globalTime * 91.8732 + float(id))) - 0.5) * 2.0,
+      (fract(sin(uniforms.globalTime * 63.2941 + float(id))) - 0.5) * 2.0,
+      (fract(sin(uniforms.globalTime * 37.5648 + float(id))) - 0.5) * 2.0
+    );
+    vel = normalize(vel) * minSpeed;
+  } else if (speed < minSpeed) {
     vel = normalize(vel) * minSpeed;
   } else if (speed > maxSpeed) {
     vel = normalize(vel) * maxSpeed;

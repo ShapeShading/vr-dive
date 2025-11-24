@@ -519,6 +519,16 @@ class Renderer {
       print("[Renderer] Aizawa attractor pattern unavailable.")
     }
 
+    if let pongWars = try? PongWars3DRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.pongWars3D] = pongWars
+    } else {
+      print("[Renderer] Pong Wars 3D pattern unavailable.")
+    }
+
     return controllers
   }
 }

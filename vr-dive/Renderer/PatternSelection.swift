@@ -2,6 +2,7 @@ import Foundation
 import Observation
 
 enum VisualPatternKind: String, CaseIterable, Identifiable {
+  case pongWar
   case cubeField
   case lorenzAttractor
   case fourWingAttractor
@@ -12,6 +13,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
 
   var displayName: String {
     switch self {
+    case .pongWar:
+      return "PongWar"
     case .cubeField:
       return "立方体"
     case .lorenzAttractor:
@@ -28,7 +31,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .lorenzAttractor
+  private var _current: VisualPatternKind = .pongWar
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
 

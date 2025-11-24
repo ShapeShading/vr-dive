@@ -486,6 +486,16 @@ class Renderer {
       fatalError("Failed to build cube pattern: \(error)")
     }
 
+    if let pongWar = try? PongWarRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.pongWar] = pongWar
+    } else {
+      print("[Renderer] PongWar pattern unavailable.")
+    }
+
     if let lorenz = try? LorenzRenderer(
       device: device,
       library: library,

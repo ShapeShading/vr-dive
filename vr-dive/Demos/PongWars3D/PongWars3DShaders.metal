@@ -141,7 +141,7 @@ kernel void simulatePongWarsBalls(
           float3 voxelCenter = (float3(checkCoord) + 0.5) * uniforms.voxelSize - halfWorld;
           float3 toVoxel = voxelCenter - newPos;
           float distSq = dot(toVoxel, toVoxel);
-          float voxelRadiusSq = uniforms.voxelSize * uniforms.voxelSize * 0.75; // 0.75 = (sqrt(3)/2)^2 for cube diagonal
+          float voxelRadiusSq = uniforms.voxelSize * uniforms.voxelSize * 0.75; // 0.75 ≈ 3/4, collision threshold for cube
           
           // If ball is close to voxel and voxel is not owned by ball
           if (distSq < voxelRadiusSq && currentOwner != ballOwner) {

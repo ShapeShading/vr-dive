@@ -153,10 +153,9 @@ final class PongWars3DRenderer: VisualPatternController {
   }
   
   private func rebuildEdgeGeometry() {
-    // Read voxel data from buffer
+    // Read voxel data from buffer (work directly with buffer to avoid copying)
     let voxelCount = Int(PongWars3DRenderer.gridSize * PongWars3DRenderer.gridSize * PongWars3DRenderer.gridSize)
     let voxelPtr = voxelDataBuffer.contents().bindMemory(to: VoxelData.self, capacity: voxelCount)
-    let voxelArray = Array(UnsafeBufferPointer(start: voxelPtr, count: voxelCount))
     
     // Generate edge vertices
     var vertices: [EdgeVertex] = []
@@ -167,10 +166,10 @@ final class PongWars3DRenderer: VisualPatternController {
       for y in 0..<Int(PongWars3DRenderer.gridSize) {
         for x in 0..<Int(PongWars3DRenderer.gridSize) {
           let index = x + y * Int(PongWars3DRenderer.gridSize) + z * Int(PongWars3DRenderer.gridSize) * Int(PongWars3DRenderer.gridSize)
-          let owner = voxelArray[index].ownerAndFlags & 0xFF
+          let owner = voxelPtr[index].ownerAndFlags & 0xFF
           
           // Check if this voxel is on a boundary
-          let isEdge = PongWars3DRenderer.isEdgeVoxel(x: x, y: y, z: z, voxelArray: voxelArray, gridSize: Int(PongWars3DRenderer.gridSize))
+          let isEdge = PongWars3DRenderer.isEdgeVoxel(x: x, y: y, z: z, voxelPtr: voxelPtr, gridSize: Int(PongWars3DRenderer.gridSize))
           
           if isEdge {
             let color = PongWars3DRenderer.colorForRegion(Int(owner))
@@ -373,9 +372,9 @@ extension PongWars3DRenderer {
     return colors[region % colors.count]
   }
   
-  fileprivate static func isEdgeVoxel(x: Int, y: Int, z: Int, voxelArray: [VoxelData], gridSize: Int) -> Bool {
+  fileprivate static func isEdgeVoxel(x: Int, y: Int, z: Int, voxelPtr: UnsafePointer<VoxelData>, gridSize: Int) -> Bool {
     let centerIndex = x + y * gridSize + z * gridSize * gridSize
-    let centerOwner = voxelArray[centerIndex].ownerAndFlags & 0xFF
+    let centerOwner = voxelPtr[centerIndex].ownerAndFlags & 0xFF
     
     // Check 6 neighbors
     let offsets: [(Int, Int, Int)] = [
@@ -394,7 +393,7 @@ extension PongWars3DRenderer {
       }
       
       let neighborIndex = nx + ny * gridSize + nz * gridSize * gridSize
-      let neighborOwner = voxelArray[neighborIndex].ownerAndFlags & 0xFF
+      let neighborOwner = voxelPtr[neighborIndex].ownerAndFlags & 0xFF
       
       if neighborOwner != centerOwner {
         return true // Different color neighbor

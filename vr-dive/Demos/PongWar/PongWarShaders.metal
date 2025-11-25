@@ -10,8 +10,8 @@ struct SceneUniforms {
 struct MeshVertex {
   float3 position;
   float3 normal;
-  float3 axisMask;    // 棱的方向
-  float3 faceMask;    // faceMask.x = 该棱所属的两个面的掩码
+  float3 axisMask; // 棱的方向
+  float3 faceMask; // faceMask.x = 该棱所属的两个面的掩码
 };
 
 struct PongWarInstanceState {
@@ -51,7 +51,7 @@ vertex PongWarVertexOut pongWarVertexShader(
   float3 meshPos = meshVertex.position;
   float3 meshNormal = meshVertex.normal;
   float3 axisMask = meshVertex.axisMask;
-  float edgeFaceMask = meshVertex.faceMask.x;  // 该棱所属的两个面
+  float edgeFaceMask = meshVertex.faceMask.x; // 该棱所属的两个面
   float time = scene.time;
 
   float isSphere = state.edgeData.w;
@@ -61,17 +61,18 @@ vertex PongWarVertexOut pongWarVertexShader(
 
   if (isSphere < 0.5) {
     // 立方体：根据边界掩码判断这条棱是否需要显示
-    float boundaryMask = state.edgeData.y;  // 6个面的颜色边界状态
-    float outerMask = state.edgeData.z;     // 6个面的外边界状态
+    float nearness = state.edgeData.x;     // 小球接近度 (0=远, 1=近)
+    float boundaryMask = state.edgeData.y; // 6个面的颜色边界状态
+    float outerMask = state.edgeData.z; // 6个面的外边界状态（动态）
     int bmask = int(boundaryMask);
     int omask = int(outerMask);
     int emask = int(edgeFaceMask);
-    
-    // 如果棱所属的两个面中至少有一个是颜色边界面，则用粗棱
+
+    // 如果棱所属的两个面中至少有一个是颜色边界面，则显示边界棱
     bool isBoundaryEdge = (bmask & emask) != 0;
     // 如果棱所属的两个面中至少有一个是外边界面，则显示外边界棱
     bool isOuterEdge = (omask & emask) != 0;
-    
+
     if (!isBoundaryEdge && !isOuterEdge) {
       // 既不是颜色边界也不是外边界，不显示
       out.position = float4(0, 0, -1, 0);
@@ -83,17 +84,23 @@ vertex PongWarVertexOut pongWarVertexShader(
       out.thickness = 0;
       return out;
     }
-    
-    // 外边界棱用较细的粗细，颜色边界棱用正常粗细
-    thickness = isBoundaryEdge ? 1.0 : 0.5;
-    
-    // 粗棱向内收缩margin，确保不同颜色的棱不接触
-    float margin = isBoundaryEdge ? 0.08 : 0.04;
-    float3 marginScale = float3(1.0 - margin * 2.0);
-    
+
+    // 粗细控制：
+    // - 外边界棱：1.0（延伸到立方体边缘，无margin）
+    // - 颜色边界棱：0.95（略微分开，避免重合）
+    if (isOuterEdge && !isBoundaryEdge) {
+      thickness = 1.0; // 外边界棱，满尺寸到边缘
+    } else {
+      // 颜色边界棱：略小于满尺寸，保持微小间隙
+      thickness = 0.95;
+    }
+
+    // 不需要margin，棱直接延伸到立方体边缘
+    // 这样相邻不同颜色的棱会紧靠在一起
+
     // 缩放棱的粗细
     float3 axisScale = axisMask + (float3(1.0) - axisMask) * thickness;
-    scaledPos = meshPos * axisScale * marginScale;
+    scaledPos = meshPos * axisScale;
     scaledNormal = normalize(meshNormal / fmax(axisScale, float3(0.0001)));
     scaledPos *= state.positionAndScale.w;
   } else {
@@ -117,8 +124,8 @@ vertex PongWarVertexOut pongWarVertexShader(
   out.worldPos = finalPos;
   out.color = state.color.rgb;
   out.type = isSphere;
-  // interior: 0 = 颜色边界棱, 0.5 = 外边界棱, 1 = 内部细棱（不显示）
-  out.interior = isSphere < 0.5 ? (thickness < 0.6 ? 0.5 : 0.0) : 0.0;
+  // interior: 0 = 颜色边界棱, 0.5 = 外边界棱
+  out.interior = isSphere < 0.5 ? (thickness < 0.4 ? 0.5 : 0.0) : 0.0;
   out.thickness = thickness;
   return out;
 }
@@ -138,14 +145,24 @@ fragment float4 pongWarFragmentShader(PongWarVertexOut in [[stage_in]],
   float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
 
   // 外边界棱用较暗的颜色，颜色边界棱用正常颜色
-  float outerDim = in.interior > 0.3 ? 0.4 : 1.0;  // 外边界棱变暗
+  float outerDim = in.interior > 0.3 ? 0.5 : 1.0; // 外边界棱变暗
   float3 baseColor = in.color * outerDim;
-  float edgeGlow = uniforms.edgeHighlight + (uniforms.baseGlow - uniforms.edgeHighlight) * in.interior;
-  float glow = edgeGlow + (uniforms.ballGlow - edgeGlow) * in.type;
-  float baseDiffuse = 0.4 + in.thickness * 0.15;
-  float diffuseStrength = baseDiffuse + (0.7 - baseDiffuse) * in.type;
-  float3 lit = baseColor * (0.25 + ndotl * diffuseStrength);
-  float3 color = lit + spec * float3(0.3) * glow + fresnel * glow * 0.3;
+  
+  // 提高基础亮度，让颜色更鲜明
+  float ambient = 0.5;  // 提高环境光
+  float diffuse = ndotl * 0.5;  // 漫反射
+  float3 lit = baseColor * (ambient + diffuse);
+  
+  // 高光和菲涅尔效果
+  float3 specColor = float3(0.4) * spec;
+  float3 fresnelColor = baseColor * fresnel * 0.2;
+  
+  float3 color = lit + specColor + fresnelColor;
+  
+  // 对于小球，增加自发光效果
+  if (in.type > 0.5) {
+    color = baseColor * 0.8 + color * 0.4;  // 小球更亮
+  }
 
   return float4(color, 1.0);
 }

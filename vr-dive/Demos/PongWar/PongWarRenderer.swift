@@ -51,17 +51,12 @@ final class PongWarRenderer: VisualPatternController {
   private let boundaryEdgeScale: Float = 0.65
   private let interiorEdgeScale: Float = 0.012
 
-  // 8种高对比度颜色（在黑色背景上清晰可辨，彼此差异最大化）
-  // 使用色轮均匀分布 + 亮度变化，确保任意两色都有足够对比
+  // 4种颜色：白、红、绿、蓝
   private let zoneColors: [SIMD3<Float>] = [
-    PongWarRenderer.colorFromHex("#FF3333"),  // 0: 亮红
-    PongWarRenderer.colorFromHex("#33AAFF"),  // 1: 天蓝
-    PongWarRenderer.colorFromHex("#33FF55"),  // 2: 亮绿
-    PongWarRenderer.colorFromHex("#FFAA22"),  // 3: 橙色
-    PongWarRenderer.colorFromHex("#AA44FF"),  // 4: 亮紫
-    PongWarRenderer.colorFromHex("#22DDDD"),  // 5: 青色
-    PongWarRenderer.colorFromHex("#FF55AA"),  // 6: 玫红
-    PongWarRenderer.colorFromHex("#FFFF44"),  // 7: 亮黄
+    PongWarRenderer.colorFromHex("#FFFFFF"),  // 0: 白
+    PongWarRenderer.colorFromHex("#FF2222"),  // 1: 红
+    PongWarRenderer.colorFromHex("#22FF44"),  // 2: 绿
+    PongWarRenderer.colorFromHex("#2288FF"),  // 3: 蓝
   ]
 
   private lazy var effectUniforms = PongWarUniforms(
@@ -138,7 +133,7 @@ final class PongWarRenderer: VisualPatternController {
       return
     }
 
-    let clampedDelta = max(1.0 / 240.0, min(elapsed, 1.0 / 45.0))
+    let clampedDelta = max(1.0 / 240.0, min(elapsed, 1.0 / 45.0)) * context.speedMultiplier
     integrateBalls(deltaTime: clampedDelta)
     updateSphereInstances()
 
@@ -171,47 +166,45 @@ final class PongWarRenderer: VisualPatternController {
     lastSimulationTimestamp = context.time
   }
   
-  /// 更新外边界棱的可见性：只有当小球接近特定小立方体时才显示该立方体的外边界棱
+  /// 更新外边界棱的可见性以及小球接近度
   func updateOuterBoundaryVisibility() {
-    let threshold = cellSize * 1.0  // 小球距离小立方体一个格子长度以内才显示
+    let outerThreshold = cellSize * 1.0   // 外边界显示阈值
+    let nearThreshold = cellSize * 0.8    // 小球接近阈值（粗棱变粗）
     
-    // 重置所有外边界显示状态
-    for i in cubeStates.indices {
-      cubeStates[i].edgeData.z = 0
-    }
-    
-    // 对每个边界上的小立方体，检查是否有小球足够近
+    // 对每个立方体，检查是否有小球足够近
     for idx in 0..<cubeStates.count {
       let (x, y, z) = PongWarRenderer.indices(for: idx, grid: gridDimension)
-      
-      // 计算该立方体的外边界掩码（哪些面在大立方体边界上）
-      var outerMask: UInt8 = 0
-      if x == 0 { outerMask |= 1 << 0 }                    // -X面
-      if x == gridDimension - 1 { outerMask |= 1 << 1 }   // +X面
-      if y == 0 { outerMask |= 1 << 2 }                    // -Y面
-      if y == gridDimension - 1 { outerMask |= 1 << 3 }   // +Y面
-      if z == 0 { outerMask |= 1 << 4 }                    // -Z面
-      if z == gridDimension - 1 { outerMask |= 1 << 5 }   // +Z面
-      
-      // 如果不是边界立方体，跳过
-      if outerMask == 0 { continue }
       
       // 获取该立方体的中心位置
       let ps = cubeStates[idx].positionAndScale
       let cubePos = SIMD3<Float>(ps.x, ps.y, ps.z)
       
-      // 检查是否有小球足够近
-      var activeMask: UInt8 = 0
+      // 计算最近小球的距离
+      var minDist: Float = Float.greatestFiniteMagnitude
       for ball in balls {
         let dist = simd_distance(ball.position, cubePos)
-        if dist < threshold {
-          // 小球足够近，显示该立方体的外边界棱
-          activeMask = outerMask
-          break
-        }
+        minDist = min(minDist, dist)
       }
       
-      cubeStates[idx].edgeData.z = Float(activeMask)
+      // edgeData.x: 小球接近度 (0 = 远, 1 = 近)
+      let nearness: Float = minDist < nearThreshold ? 1.0 : 0.0
+      cubeStates[idx].edgeData.x = nearness
+      
+      // 计算该立方体的外边界掩码（哪些面在大立方体边界上）
+      var outerMask: UInt8 = 0
+      if x == 0 { outerMask |= 1 << 0 }
+      if x == gridDimension - 1 { outerMask |= 1 << 1 }
+      if y == 0 { outerMask |= 1 << 2 }
+      if y == gridDimension - 1 { outerMask |= 1 << 3 }
+      if z == 0 { outerMask |= 1 << 4 }
+      if z == gridDimension - 1 { outerMask |= 1 << 5 }
+      
+      // 外边界棱只在小球足够近时显示
+      if outerMask != 0 && minDist < outerThreshold {
+        cubeStates[idx].edgeData.z = Float(outerMask)
+      } else {
+        cubeStates[idx].edgeData.z = 0
+      }
     }
   }
 
@@ -339,22 +332,18 @@ private extension PongWarRenderer {
     halfWorld: Float,
     colors: [SIMD3<Float>]
   ) -> [PongWarBall] {
-    precondition(colors.count >= 8)
+    precondition(colors.count >= 4)
     var balls: [PongWarBall] = []
-    balls.reserveCapacity(8)
+    balls.reserveCapacity(4)
 
-    // offsets顺序必须与zoneIndex匹配：index = (xBit<<2) | (yBit<<1) | zBit
-    // 0: x<0,y<0,z<0  1: x<0,y<0,z>0  2: x<0,y>0,z<0  3: x<0,y>0,z>0
-    // 4: x>0,y<0,z<0  5: x>0,y<0,z>0  6: x>0,y>0,z<0  7: x>0,y>0,z>0
+    // offsets顺序必须与zoneIndex匹配：
+    // 0: x>0, y<0 (右下)  1: x>0, y>0 (右上)
+    // 2: x<0, z<0 (左后)  3: x<0, z>0 (左前)
     let offsets: [SIMD3<Float>] = [
-      SIMD3(-0.5, -0.5, -0.5),  // 0: ---
-      SIMD3(-0.5, -0.5,  0.5),  // 1: --+
-      SIMD3(-0.5,  0.5, -0.5),  // 2: -+-
-      SIMD3(-0.5,  0.5,  0.5),  // 3: -++
-      SIMD3( 0.5, -0.5, -0.5),  // 4: +--
-      SIMD3( 0.5, -0.5,  0.5),  // 5: +-+
-      SIMD3( 0.5,  0.5, -0.5),  // 6: ++-
-      SIMD3( 0.5,  0.5,  0.5),  // 7: +++
+      SIMD3( 0.5, -0.5,  0.0),  // 0: 右下
+      SIMD3( 0.5,  0.5,  0.0),  // 1: 右上
+      SIMD3(-0.5,  0.0, -0.5),  // 2: 左后
+      SIMD3(-0.5,  0.0,  0.5),  // 3: 左前
     ]
 
     for (index, offset) in offsets.enumerated() {
@@ -382,12 +371,27 @@ private extension PongWarRenderer {
   }
 
   func integrateBalls(deltaTime: Float) {
+    // 计算每个区域占有的立方体数量
+    let zoneCounts = countCubesPerZone()
+    
     for idx in balls.indices {
-      updateBall(at: idx, deltaTime: deltaTime)
+      updateBall(at: idx, deltaTime: deltaTime, zoneCounts: zoneCounts)
     }
   }
+  
+  /// 统计每个区域占有的立方体数量
+  func countCubesPerZone() -> [Int] {
+    var counts = [Int](repeating: 0, count: 4)
+    for zone in cubeZones {
+      let idx = Int(zone)
+      if idx < 4 {
+        counts[idx] += 1
+      }
+    }
+    return counts
+  }
 
-  func updateBall(at index: Int, deltaTime: Float) {
+  func updateBall(at index: Int, deltaTime: Float, zoneCounts: [Int]) {
     var ball = balls[index]
     let ballZone = UInt8(ball.zoneIndex)
     
@@ -456,12 +460,25 @@ private extension PongWarRenderer {
       Float.random(in: -velocityNoise...velocityNoise)
     ) * deltaTime
     
+    // 根据占有立方体数量调整目标速度
+    // 使用平方根关系，让少格子时速度很慢，多格子时速度适中
+    // 总共 4096 格子，初始每个区域 512 格
+    let cubeCount = zoneCounts[ball.zoneIndex]
+    let ratio = Float(cubeCount) / 4096.0  // 0 ~ 1
+    // 速度 = 0.5 + 5.5 * sqrt(ratio)
+    // ratio=0 → 0.5, ratio=0.125(512格) → 2.44, ratio=1 → 6.0
+    let targetSpeed = 0.5 + 5.5 * sqrt(ratio)
+    
     // 限制速度范围
+    let safeMaxSpeed: Float = 6.0  // 硬性上限防止穿透
+    let adjustedMinSpeed = max(0.3, targetSpeed * 0.8)  // 允许很慢
+    let adjustedMaxSpeed = min(safeMaxSpeed, targetSpeed * 1.2)
+    
     let speed = simd_length(ball.velocity)
-    if speed < minSpeed {
-      ball.velocity = simd_normalize(ball.velocity) * minSpeed
-    } else if speed > maxSpeed {
-      ball.velocity = simd_normalize(ball.velocity) * maxSpeed
+    if speed < adjustedMinSpeed {
+      ball.velocity = simd_normalize(ball.velocity) * adjustedMinSpeed
+    } else if speed > adjustedMaxSpeed {
+      ball.velocity = simd_normalize(ball.velocity) * adjustedMaxSpeed
     }
     
     balls[index] = ball
@@ -589,11 +606,15 @@ private extension PongWarRenderer {
   }
 
   static func zoneIndex(x: Int, y: Int, z: Int, grid: Int) -> Int {
+    // 4 种颜色各8个象限中的2个
+    // x >= half (正方向): 按 y 分（上下） → 0(y<half), 1(y>=half)
+    // x < half (负方向): 按 z 分（前后） → 2(z<half), 3(z>=half)
     let half = grid / 2
-    let xBit = x >= half ? 1 : 0
-    let yBit = y >= half ? 1 : 0
-    let zBit = z >= half ? 1 : 0
-    return (xBit << 2) | (yBit << 1) | zBit
+    if x >= half {
+      return y >= half ? 1 : 0
+    } else {
+      return z >= half ? 3 : 2
+    }
   }
 
   static func colorFromHex(_ hex: String) -> SIMD3<Float> {
@@ -612,7 +633,7 @@ private extension PongWarRenderer {
     var indices: [UInt16] = []
     
     let halfLength: Float = 0.5  // 满尺寸，margin在shader中根据粗细应用
-    let edgeHalfThickness: Float = 0.06  // 棱的粗细
+    let edgeHalfThickness: Float = 0.03  // 棱的粗细（减半）
 
     // 每条棱属于两个面，用 faceMask 编码
     // bit0: -X, bit1: +X, bit2: -Y, bit3: +Y, bit4: -Z, bit5: +Z

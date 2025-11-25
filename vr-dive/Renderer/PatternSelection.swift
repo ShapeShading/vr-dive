@@ -34,6 +34,7 @@ final class PatternCoordinator {
   private var _current: VisualPatternKind = .pongWar
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
+  private var _speedMultiplier: Float = 1.0
 
   func currentPattern() -> VisualPatternKind {
     queue.sync { _current }
@@ -62,6 +63,14 @@ final class PatternCoordinator {
   func clearResetFlag() {
     queue.async(flags: .barrier) { self._shouldReset = false }
   }
+
+  func speedMultiplier() -> Float {
+    queue.sync { _speedMultiplier }
+  }
+
+  func setSpeedMultiplier(_ multiplier: Float) {
+    queue.async(flags: .barrier) { self._speedMultiplier = multiplier }
+  }
 }
 
 @MainActor
@@ -76,6 +85,12 @@ final class PatternMenuModel {
   var isPaused: Bool = false {
     didSet {
       coordinator.setPaused(isPaused)
+    }
+  }
+
+  var speedMultiplier: Float = 1.0 {
+    didSet {
+      coordinator.setSpeedMultiplier(speedMultiplier)
     }
   }
 
@@ -94,5 +109,9 @@ final class PatternMenuModel {
 
   func reset() {
     coordinator.triggerReset()
+  }
+
+  func toggleSpeed() {
+    speedMultiplier = speedMultiplier > 1.0 ? 1.0 : 4.0
   }
 }

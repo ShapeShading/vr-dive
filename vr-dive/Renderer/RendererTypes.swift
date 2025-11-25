@@ -24,6 +24,7 @@ struct ViewRenderingData {
 struct PatternSimulationContext {
   let commandQueue: MTLCommandQueue
   let time: Float
+  let speedMultiplier: Float
 }
 
 struct PatternRenderContext {

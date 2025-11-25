@@ -179,7 +179,8 @@ class Renderer {
         if let activePattern = pattern, !patternCoordinator.isPaused() {
           let simulationContext = PatternSimulationContext(
             commandQueue: commandQueue,
-            time: animationTime
+            time: animationTime,
+            speedMultiplier: patternCoordinator.speedMultiplier()
           )
           activePattern.updateSimulation(simulationContext)
         }

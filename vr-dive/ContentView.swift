@@ -63,6 +63,15 @@ struct ControlButtonsView: View {
           systemImage: model.isPaused ? "play.fill" : "pause.fill")
       }
       .buttonStyle(.bordered)
+
+      Button(action: {
+        model.toggleSpeed()
+      }) {
+        Label(
+          model.speedMultiplier > 1.0 ? "4x" : "1x",
+          systemImage: model.speedMultiplier > 1.0 ? "hare.fill" : "tortoise.fill")
+      }
+      .buttonStyle(.bordered)
     }
     .frame(maxWidth: .infinity, alignment: .center)
   }

@@ -12,9 +12,19 @@ struct VRConfiguration: CompositorLayerConfiguration {
     let supportsFoveation = capabilities.supportsFoveation
     configuration.isFoveationEnabled = supportsFoveation
 
-    _ = capabilities.supportedLayouts(
-      options: supportsFoveation ? [.foveationEnabled] : [])
-    configuration.layout = .layered
+    let layoutOptions: LayerRenderer.Capabilities.SupportedLayoutsOptions = supportsFoveation
+      ? [.foveationEnabled]
+      : []
+    let supportedLayouts = capabilities.supportedLayouts(options: layoutOptions)
+    if supportedLayouts.contains(.layered) {
+      configuration.layout = .layered
+    } else if let fallbackLayout = supportedLayouts.first {
+      configuration.layout = fallbackLayout
+      print("[VRConfiguration] Falling back to supported layout: \(fallbackLayout)")
+    } else {
+      configuration.layout = .layered
+      print("[VRConfiguration] No supported layouts reported; defaulting to layered")
+    }
 
     configuration.colorFormat = .rgba16Float
     configuration.depthFormat = .depth32Float

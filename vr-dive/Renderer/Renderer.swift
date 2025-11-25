@@ -12,7 +12,8 @@ struct VRConfiguration: CompositorLayerConfiguration {
     let supportsFoveation = capabilities.supportsFoveation
     configuration.isFoveationEnabled = supportsFoveation
 
-    let layoutOptions: LayerRenderer.Capabilities.SupportedLayoutsOptions = supportsFoveation
+    let layoutOptions: LayerRenderer.Capabilities.SupportedLayoutsOptions =
+      supportsFoveation
       ? [.foveationEnabled]
       : []
     let supportedLayouts = capabilities.supportedLayouts(options: layoutOptions)

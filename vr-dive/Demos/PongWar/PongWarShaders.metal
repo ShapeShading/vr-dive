@@ -147,21 +147,21 @@ fragment float4 pongWarFragmentShader(PongWarVertexOut in [[stage_in]],
   // 外边界棱用较暗的颜色，颜色边界棱用正常颜色
   float outerDim = in.interior > 0.3 ? 0.5 : 1.0; // 外边界棱变暗
   float3 baseColor = in.color * outerDim;
-  
+
   // 提高基础亮度，让颜色更鲜明
-  float ambient = 0.5;  // 提高环境光
-  float diffuse = ndotl * 0.5;  // 漫反射
+  float ambient = 0.5;         // 提高环境光
+  float diffuse = ndotl * 0.5; // 漫反射
   float3 lit = baseColor * (ambient + diffuse);
-  
+
   // 高光和菲涅尔效果
   float3 specColor = float3(0.4) * spec;
   float3 fresnelColor = baseColor * fresnel * 0.2;
-  
+
   float3 color = lit + specColor + fresnelColor;
-  
+
   // 对于小球，增加自发光效果
   if (in.type > 0.5) {
-    color = baseColor * 0.8 + color * 0.4;  // 小球更亮
+    color = baseColor * 0.8 + color * 0.4; // 小球更亮
   }
 
   return float4(color, 1.0);

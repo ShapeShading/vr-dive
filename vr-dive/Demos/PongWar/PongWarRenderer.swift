@@ -43,8 +43,8 @@ final class PongWarRenderer: VisualPatternController {
 
   private var lastSimulationTimestamp: Float = 0
 
-  private let gridDimension = 16  // 16x16x16 = 4096个格子，性能可接受
-  private let worldCubeSize: Float = 4.0  // 恢复到4
+  private let gridDimension = 20  // 20x20x20 = 8000个格子
+  private let worldCubeSize: Float = 5.0  // 边长5，格子尺寸0.25
   private let minSpeed: Float = 2.5
   private let maxSpeed: Float = 5.0
   private let velocityNoise: Float = 0.2
@@ -88,7 +88,8 @@ final class PongWarRenderer: VisualPatternController {
     cubeIndexBuffer = edgeGeometry.indexBuffer
     cubeIndexCount = edgeGeometry.indexCount
 
-    let sphereGeometry = PongWarRenderer.makeSphereGeometry(device: device, segments: 24, stacks: 16)
+    let sphereGeometry = PongWarRenderer.makeSphereGeometry(
+      device: device, segments: 24, stacks: 16)
     sphereVertexBuffer = sphereGeometry.vertexBuffer
     sphereIndexBuffer = sphereGeometry.indexBuffer
     sphereIndexCount = sphereGeometry.indexCount
@@ -149,10 +150,10 @@ final class PongWarRenderer: VisualPatternController {
       )
       cubeStateDirty = false
     }
-    
+
     // 每帧更新外边界显示状态（基于小球位置）
     updateOuterBoundaryVisibility()
-    
+
     cubeStates.withUnsafeBytes { buffer in
       guard let base = buffer.baseAddress else { return }
       memcpy(cubeInstanceBuffer.contents(), base, buffer.count)
@@ -165,31 +166,31 @@ final class PongWarRenderer: VisualPatternController {
 
     lastSimulationTimestamp = context.time
   }
-  
+
   /// 更新外边界棱的可见性以及小球接近度
   func updateOuterBoundaryVisibility() {
-    let outerThreshold = cellSize * 1.0   // 外边界显示阈值
-    let nearThreshold = cellSize * 0.8    // 小球接近阈值（粗棱变粗）
-    
+    let outerThreshold = cellSize * 1.0  // 外边界显示阈值
+    let nearThreshold = cellSize * 0.8  // 小球接近阈值（粗棱变粗）
+
     // 对每个立方体，检查是否有小球足够近
     for idx in 0..<cubeStates.count {
       let (x, y, z) = PongWarRenderer.indices(for: idx, grid: gridDimension)
-      
+
       // 获取该立方体的中心位置
       let ps = cubeStates[idx].positionAndScale
       let cubePos = SIMD3<Float>(ps.x, ps.y, ps.z)
-      
+
       // 计算最近小球的距离
       var minDist: Float = Float.greatestFiniteMagnitude
       for ball in balls {
         let dist = simd_distance(ball.position, cubePos)
         minDist = min(minDist, dist)
       }
-      
+
       // edgeData.x: 小球接近度 (0 = 远, 1 = 近)
       let nearness: Float = minDist < nearThreshold ? 1.0 : 0.0
       cubeStates[idx].edgeData.x = nearness
-      
+
       // 计算该立方体的外边界掩码（哪些面在大立方体边界上）
       var outerMask: UInt8 = 0
       if x == 0 { outerMask |= 1 << 0 }
@@ -198,7 +199,7 @@ final class PongWarRenderer: VisualPatternController {
       if y == gridDimension - 1 { outerMask |= 1 << 3 }
       if z == 0 { outerMask |= 1 << 4 }
       if z == gridDimension - 1 { outerMask |= 1 << 5 }
-      
+
       // 外边界棱只在小球足够近时显示
       if outerMask != 0 && minDist < outerThreshold {
         cubeStates[idx].edgeData.z = Float(outerMask)
@@ -273,8 +274,8 @@ final class PongWarRenderer: VisualPatternController {
   }
 }
 
-private extension PongWarRenderer {
-  static func makePipelineState(
+extension PongWarRenderer {
+  fileprivate static func makePipelineState(
     device: MTLDevice,
     library: MTLLibrary,
     maxViewCount: Int
@@ -310,14 +311,14 @@ private extension PongWarRenderer {
     return try device.makeRenderPipelineState(descriptor: descriptor)
   }
 
-  static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
+  fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
     descriptor.depthCompareFunction = .greater
     descriptor.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: descriptor)!
   }
 
-  static func makeInitialZones(gridDimension: Int) -> [UInt8] {
+  fileprivate static func makeInitialZones(gridDimension: Int) -> [UInt8] {
     let total = gridDimension * gridDimension * gridDimension
     return (0..<total).map { index in
       let (x, y, z) = PongWarRenderer.indices(for: index, grid: gridDimension)
@@ -326,7 +327,7 @@ private extension PongWarRenderer {
     }
   }
 
-  static func makeInitialBalls(
+  fileprivate static func makeInitialBalls(
     gridDimension: Int,
     center: SIMD3<Float>,
     halfWorld: Float,
@@ -340,21 +341,22 @@ private extension PongWarRenderer {
     // 0: x>0, y<0 (右下)  1: x>0, y>0 (右上)
     // 2: x<0, z<0 (左后)  3: x<0, z>0 (左前)
     let offsets: [SIMD3<Float>] = [
-      SIMD3( 0.5, -0.5,  0.0),  // 0: 右下
-      SIMD3( 0.5,  0.5,  0.0),  // 1: 右上
-      SIMD3(-0.5,  0.0, -0.5),  // 2: 左后
-      SIMD3(-0.5,  0.0,  0.5),  // 3: 左前
+      SIMD3(0.5, -0.5, 0.0),  // 0: 右下
+      SIMD3(0.5, 0.5, 0.0),  // 1: 右上
+      SIMD3(-0.5, 0.0, -0.5),  // 2: 左后
+      SIMD3(-0.5, 0.0, 0.5),  // 3: 左前
     ]
 
     for (index, offset) in offsets.enumerated() {
       // 小球在各自象限的中心位置
       let position = center + offset * (halfWorld * 0.5)
       // 随机方向，速度一致
-      let randomDir = simd_normalize(SIMD3<Float>(
-        Float.random(in: -1...1),
-        Float.random(in: -1...1),
-        Float.random(in: -1...1)
-      ))
+      let randomDir = simd_normalize(
+        SIMD3<Float>(
+          Float.random(in: -1...1),
+          Float.random(in: -1...1),
+          Float.random(in: -1...1)
+        ))
       let speed: Float = 3.0
       let velocity = randomDir * speed
       balls.append(
@@ -370,17 +372,27 @@ private extension PongWarRenderer {
     return balls
   }
 
-  func integrateBalls(deltaTime: Float) {
+  fileprivate func integrateBalls(deltaTime: Float) {
     // 计算每个区域占有的立方体数量
     let zoneCounts = countCubesPerZone()
-    
+
+    // 使用子步（substep）来细化碰撞检测，防止高速穿透
+    // 每个子步的最大时间间隔确保小球移动不超过半个格子
+    let maxStepDistance = cellSize * 0.4  // 每步最大移动距离
+    let maxSpeed: Float = 24.0  // 最大速度
+    let minSubstepTime = maxStepDistance / maxSpeed
+    let substeps = max(1, Int(ceil(deltaTime / minSubstepTime)))
+    let substepDelta = deltaTime / Float(substeps)
+
     for idx in balls.indices {
-      updateBall(at: idx, deltaTime: deltaTime, zoneCounts: zoneCounts)
+      for _ in 0..<substeps {
+        updateBall(at: idx, deltaTime: substepDelta, zoneCounts: zoneCounts)
+      }
     }
   }
-  
+
   /// 统计每个区域占有的立方体数量
-  func countCubesPerZone() -> [Int] {
+  fileprivate func countCubesPerZone() -> [Int] {
     var counts = [Int](repeating: 0, count: 4)
     for zone in cubeZones {
       let idx = Int(zone)
@@ -391,14 +403,14 @@ private extension PongWarRenderer {
     return counts
   }
 
-  func updateBall(at index: Int, deltaTime: Float, zoneCounts: [Int]) {
+  fileprivate func updateBall(at index: Int, deltaTime: Float, zoneCounts: [Int]) {
     var ball = balls[index]
     let ballZone = UInt8(ball.zoneIndex)
-    
+
     // 预测下一步位置
     var nextPos = ball.position + ball.velocity * deltaTime
     var velocity = ball.velocity
-    
+
     // 1. 检查外边界碰撞
     let bounds = halfWorldSize - ballRadius
     if nextPos.x > bounds {
@@ -422,20 +434,29 @@ private extension PongWarRenderer {
       nextPos.z = -bounds
       velocity.z = -velocity.z
     }
-    
+
     // 2. 检查是否进入不同颜色区域
     if let (cx, cy, cz, linear) = cellIndex(for: nextPos) {
       let targetZone = cubeZones[linear]
       if targetZone != ballZone {
-        // 碰到不同颜色的立方体，变色并反弹
-        cubeZones[linear] = ballZone
-        cubeStateDirty = true
-        
+        // 防穿透规则：如果目标立方体周边同色立方体 < 1/4，则不变色
+        // 这是为了防止小球高速穿透敌方区域时在内部留下孤立的变色点
+        // 26个邻居中至少 6 个同色才能变色（约 1/4）
+        let neighborSameColorCount = countNeighborsSameColor(x: cx, y: cy, z: cz, zone: ballZone)
+        let canConvert = neighborSameColorCount >= 6
+
+        if canConvert {
+          // 碰到不同颜色的立方体，变色并反弹
+          cubeZones[linear] = ballZone
+          cubeStateDirty = true
+        }
+
+        // 无论是否变色都要反弹
         // 根据进入方向反弹
         let cellCenter = worldPosition(x: cx, y: cy, z: cz)
         let fromCenter = ball.position - cellCenter
         let absFrom = simd_abs(fromCenter)
-        
+
         if absFrom.x >= absFrom.y && absFrom.x >= absFrom.z {
           velocity.x = -velocity.x
           nextPos.x = ball.position.x  // 不进入该格子
@@ -448,43 +469,51 @@ private extension PongWarRenderer {
         }
       }
     }
-    
+
     // 更新位置和速度
     ball.position = nextPos
     ball.velocity = velocity
-    
+
     // 添加随机扰动
-    ball.velocity += SIMD3<Float>(
-      Float.random(in: -velocityNoise...velocityNoise),
-      Float.random(in: -velocityNoise...velocityNoise),
-      Float.random(in: -velocityNoise...velocityNoise)
-    ) * deltaTime
-    
+    ball.velocity +=
+      SIMD3<Float>(
+        Float.random(in: -velocityNoise...velocityNoise),
+        Float.random(in: -velocityNoise...velocityNoise),
+        Float.random(in: -velocityNoise...velocityNoise)
+      ) * deltaTime
+
     // 根据占有立方体数量调整目标速度
-    // 使用平方根关系，让少格子时速度很慢，多格子时速度适中
-    // 总共 4096 格子，初始每个区域 512 格
+    // 总共 8000 格子（20^3），初始每个区域 2000 格
     let cubeCount = zoneCounts[ball.zoneIndex]
-    let ratio = Float(cubeCount) / 4096.0  // 0 ~ 1
-    // 速度 = 0.5 + 5.5 * sqrt(ratio)
-    // ratio=0 → 0.5, ratio=0.125(512格) → 2.44, ratio=1 → 6.0
-    let targetSpeed = 0.5 + 5.5 * sqrt(ratio)
-    
+    let totalCubes: Float = 8000.0  // 20x20x20
+    let ratio = Float(cubeCount) / totalCubes  // 0 ~ 1
+    // S形曲线（sigmoid），在 0.382 占比处变化最剧烈
+    // 使用 sigmoid: 1 / (1 + e^(-k*(x-center)))
+    // center = 0.382（黄金分割率），k 控制陡峭程度
+    let center: Float = 0.382
+    let steepness: Float = 12.0  // 控制S曲线陡峭程度
+    let sigmoid = 1.0 / (1.0 + exp(-steepness * (ratio - center)))
+    // 速度范围: 0.6 ~ 24.0（再提升一倍，子步计算保证不穿透）
+    let minSpeed: Float = 0.6
+    let maxSpeedTarget: Float = 24.0
+    let targetSpeed = minSpeed + (maxSpeedTarget - minSpeed) * sigmoid
+
     // 限制速度范围
-    let safeMaxSpeed: Float = 6.0  // 硬性上限防止穿透
-    let adjustedMinSpeed = max(0.3, targetSpeed * 0.8)  // 允许很慢
-    let adjustedMaxSpeed = min(safeMaxSpeed, targetSpeed * 1.2)
-    
+    let safeMaxSpeed: Float = 24.0  // 硬性上限（子步计算保证不穿透）
+    let adjustedMinSpeed = max(0.4, targetSpeed * 0.9)
+    let adjustedMaxSpeed = min(safeMaxSpeed, targetSpeed * 1.1)
+
     let speed = simd_length(ball.velocity)
     if speed < adjustedMinSpeed {
       ball.velocity = simd_normalize(ball.velocity) * adjustedMinSpeed
     } else if speed > adjustedMaxSpeed {
       ball.velocity = simd_normalize(ball.velocity) * adjustedMaxSpeed
     }
-    
+
     balls[index] = ball
   }
 
-  func updateSphereInstances() {
+  fileprivate func updateSphereInstances() {
     sphereStates = balls.map { ball in
       PongWarInstanceState(
         positionAndScale: SIMD4<Float>(ball.position, ballRadius),
@@ -494,7 +523,7 @@ private extension PongWarRenderer {
     }
   }
 
-  func cellIndex(for position: SIMD3<Float>) -> (Int, Int, Int, Int)? {
+  fileprivate func cellIndex(for position: SIMD3<Float>) -> (Int, Int, Int, Int)? {
     let local = position + SIMD3<Float>(repeating: halfWorldSize)
     guard local.x >= 0, local.y >= 0, local.z >= 0,
       local.x <= worldCubeSize, local.y <= worldCubeSize, local.z <= worldCubeSize
@@ -511,7 +540,7 @@ private extension PongWarRenderer {
     return (ix, iy, iz, linear)
   }
 
-  func worldPosition(x: Int, y: Int, z: Int) -> SIMD3<Float> {
+  fileprivate func worldPosition(x: Int, y: Int, z: Int) -> SIMD3<Float> {
     let start = -halfWorldSize + cellSize * 0.5
     return SIMD3<Float>(
       start + Float(x) * cellSize,
@@ -520,7 +549,32 @@ private extension PongWarRenderer {
     )
   }
 
-  static func makeCubeStates(
+  /// 统计指定立方体周边 3x3x3 范围内同色立方体的数量
+  /// 用于防穿透规则：周边同色数量不足时不允许变色
+  fileprivate func countNeighborsSameColor(x: Int, y: Int, z: Int, zone: UInt8) -> Int {
+    var count = 0
+    for dz in -1...1 {
+      for dy in -1...1 {
+        for dx in -1...1 {
+          let nx = x + dx
+          let ny = y + dy
+          let nz = z + dz
+          // 边界检查
+          guard nx >= 0, nx < gridDimension,
+            ny >= 0, ny < gridDimension,
+            nz >= 0, nz < gridDimension
+          else { continue }
+          let linear = PongWarRenderer.linearIndex(x: nx, y: ny, z: nz, grid: gridDimension)
+          if cubeZones[linear] == zone {
+            count += 1
+          }
+        }
+      }
+    }
+    return count
+  }
+
+  fileprivate static func makeCubeStates(
     gridDimension: Int,
     center: SIMD3<Float>,
     cellSize: Float,
@@ -548,9 +602,9 @@ private extension PongWarRenderer {
       for (nx, ny, nz, bit) in neighbors {
         // 超出边界的邻居不计入（外边界由动态更新处理）
         guard nx >= 0, ny >= 0, nz >= 0,
-              nx < gridDimension, ny < gridDimension, nz < gridDimension
+          nx < gridDimension, ny < gridDimension, nz < gridDimension
         else { continue }
-        
+
         let idx = PongWarRenderer.linearIndex(x: nx, y: ny, z: nz, grid: gridDimension)
         if zones[idx] != zone {
           mask |= bit
@@ -561,11 +615,12 @@ private extension PongWarRenderer {
 
     for index in 0..<zones.count {
       let (x, y, z) = PongWarRenderer.indices(for: index, grid: gridDimension)
-      let position = SIMD3<Float>(
-        -halfWorld + cellSize * (Float(x) + 0.5),
-        -halfWorld + cellSize * (Float(y) + 0.5),
-        -halfWorld + cellSize * (Float(z) + 0.5)
-      ) + center
+      let position =
+        SIMD3<Float>(
+          -halfWorld + cellSize * (Float(x) + 0.5),
+          -halfWorld + cellSize * (Float(y) + 0.5),
+          -halfWorld + cellSize * (Float(z) + 0.5)
+        ) + center
 
       let zone = zones[index]
       let color = zoneColors[Int(zone)]
@@ -584,7 +639,9 @@ private extension PongWarRenderer {
     return states
   }
 
-  static func makeSphereInstances(from balls: [PongWarBall], radius: Float) -> [PongWarInstanceState] {
+  fileprivate static func makeSphereInstances(from balls: [PongWarBall], radius: Float)
+    -> [PongWarInstanceState]
+  {
     balls.map { ball in
       PongWarInstanceState(
         positionAndScale: SIMD4<Float>(ball.position, radius),
@@ -594,18 +651,18 @@ private extension PongWarRenderer {
     }
   }
 
-  static func linearIndex(x: Int, y: Int, z: Int, grid: Int) -> Int {
+  fileprivate static func linearIndex(x: Int, y: Int, z: Int, grid: Int) -> Int {
     return (z * grid * grid) + (y * grid) + x
   }
 
-  static func indices(for index: Int, grid: Int) -> (Int, Int, Int) {
+  fileprivate static func indices(for index: Int, grid: Int) -> (Int, Int, Int) {
     let x = index % grid
     let y = (index / grid) % grid
     let z = index / (grid * grid)
     return (x, y, z)
   }
 
-  static func zoneIndex(x: Int, y: Int, z: Int, grid: Int) -> Int {
+  fileprivate static func zoneIndex(x: Int, y: Int, z: Int, grid: Int) -> Int {
     // 4 种颜色各8个象限中的2个
     // x >= half (正方向): 按 y 分（上下） → 0(y<half), 1(y>=half)
     // x < half (负方向): 按 z 分（前后） → 2(z<half), 3(z>=half)
@@ -617,7 +674,7 @@ private extension PongWarRenderer {
     }
   }
 
-  static func colorFromHex(_ hex: String) -> SIMD3<Float> {
+  fileprivate static func colorFromHex(_ hex: String) -> SIMD3<Float> {
     var value: UInt64 = 0
     Scanner(string: hex.replacingOccurrences(of: "#", with: "")).scanHexInt64(&value)
     let r = Float((value >> 16) & 0xFF) / 255
@@ -627,17 +684,19 @@ private extension PongWarRenderer {
   }
 }
 
-private extension PongWarRenderer {
-  static func makeEdgeGeometry(device: MTLDevice) -> MeshBuffers {
+extension PongWarRenderer {
+  fileprivate static func makeEdgeGeometry(device: MTLDevice) -> MeshBuffers {
     var vertices: [EdgeVertex] = []
     var indices: [UInt16] = []
-    
+
     let halfLength: Float = 0.5  // 满尺寸，margin在shader中根据粗细应用
     let edgeHalfThickness: Float = 0.03  // 棱的粗细（减半）
 
     // 每条棱属于两个面，用 faceMask 编码
     // bit0: -X, bit1: +X, bit2: -Y, bit3: +Y, bit4: -Z, bit5: +Z
-    func appendBox(center: SIMD3<Float>, halfSize: SIMD3<Float>, axisMask: SIMD3<Float>, faceMask: SIMD3<Float>) {
+    func appendBox(
+      center: SIMD3<Float>, halfSize: SIMD3<Float>, axisMask: SIMD3<Float>, faceMask: SIMD3<Float>
+    ) {
       let corners: [SIMD3<Float>] = [
         SIMD3(-halfSize.x, -halfSize.y, halfSize.z),
         SIMD3(halfSize.x, -halfSize.y, halfSize.z),
@@ -677,69 +736,81 @@ private extension PongWarRenderer {
     // 12条棱，每条棱属于两个面
     // X轴方向的4条棱（位于 Y-Z 平面的四角）
     // 棱在 y=-0.5, z=-0.5: 属于 -Y(bit2) 和 -Z(bit4) 面 -> faceMask = 4+16=20
-    appendBox(center: SIMD3(0, -halfLength, -halfLength), 
-              halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness), 
-              axisMask: SIMD3(1, 0, 0), 
-              faceMask: SIMD3(20, 0, 0))  // -Y, -Z
+    appendBox(
+      center: SIMD3(0, -halfLength, -halfLength),
+      halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness),
+      axisMask: SIMD3(1, 0, 0),
+      faceMask: SIMD3(20, 0, 0))  // -Y, -Z
     // 棱在 y=+0.5, z=-0.5: 属于 +Y(bit3) 和 -Z(bit4) 面 -> faceMask = 8+16=24
-    appendBox(center: SIMD3(0, halfLength, -halfLength), 
-              halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness), 
-              axisMask: SIMD3(1, 0, 0), 
-              faceMask: SIMD3(24, 0, 0))  // +Y, -Z
+    appendBox(
+      center: SIMD3(0, halfLength, -halfLength),
+      halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness),
+      axisMask: SIMD3(1, 0, 0),
+      faceMask: SIMD3(24, 0, 0))  // +Y, -Z
     // 棱在 y=-0.5, z=+0.5: 属于 -Y(bit2) 和 +Z(bit5) 面 -> faceMask = 4+32=36
-    appendBox(center: SIMD3(0, -halfLength, halfLength), 
-              halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness), 
-              axisMask: SIMD3(1, 0, 0), 
-              faceMask: SIMD3(36, 0, 0))  // -Y, +Z
+    appendBox(
+      center: SIMD3(0, -halfLength, halfLength),
+      halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness),
+      axisMask: SIMD3(1, 0, 0),
+      faceMask: SIMD3(36, 0, 0))  // -Y, +Z
     // 棱在 y=+0.5, z=+0.5: 属于 +Y(bit3) 和 +Z(bit5) 面 -> faceMask = 8+32=40
-    appendBox(center: SIMD3(0, halfLength, halfLength), 
-              halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness), 
-              axisMask: SIMD3(1, 0, 0), 
-              faceMask: SIMD3(40, 0, 0))  // +Y, +Z
+    appendBox(
+      center: SIMD3(0, halfLength, halfLength),
+      halfSize: SIMD3(halfLength, edgeHalfThickness, edgeHalfThickness),
+      axisMask: SIMD3(1, 0, 0),
+      faceMask: SIMD3(40, 0, 0))  // +Y, +Z
 
     // Y轴方向的4条棱（位于 X-Z 平面的四角）
     // 棱在 x=-0.5, z=-0.5: 属于 -X(bit0) 和 -Z(bit4) 面 -> faceMask = 1+16=17
-    appendBox(center: SIMD3(-halfLength, 0, -halfLength), 
-              halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness), 
-              axisMask: SIMD3(0, 1, 0), 
-              faceMask: SIMD3(17, 0, 0))  // -X, -Z
+    appendBox(
+      center: SIMD3(-halfLength, 0, -halfLength),
+      halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness),
+      axisMask: SIMD3(0, 1, 0),
+      faceMask: SIMD3(17, 0, 0))  // -X, -Z
     // 棱在 x=+0.5, z=-0.5: 属于 +X(bit1) 和 -Z(bit4) 面 -> faceMask = 2+16=18
-    appendBox(center: SIMD3(halfLength, 0, -halfLength), 
-              halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness), 
-              axisMask: SIMD3(0, 1, 0), 
-              faceMask: SIMD3(18, 0, 0))  // +X, -Z
+    appendBox(
+      center: SIMD3(halfLength, 0, -halfLength),
+      halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness),
+      axisMask: SIMD3(0, 1, 0),
+      faceMask: SIMD3(18, 0, 0))  // +X, -Z
     // 棱在 x=-0.5, z=+0.5: 属于 -X(bit0) 和 +Z(bit5) 面 -> faceMask = 1+32=33
-    appendBox(center: SIMD3(-halfLength, 0, halfLength), 
-              halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness), 
-              axisMask: SIMD3(0, 1, 0), 
-              faceMask: SIMD3(33, 0, 0))  // -X, +Z
+    appendBox(
+      center: SIMD3(-halfLength, 0, halfLength),
+      halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness),
+      axisMask: SIMD3(0, 1, 0),
+      faceMask: SIMD3(33, 0, 0))  // -X, +Z
     // 棱在 x=+0.5, z=+0.5: 属于 +X(bit1) 和 +Z(bit5) 面 -> faceMask = 2+32=34
-    appendBox(center: SIMD3(halfLength, 0, halfLength), 
-              halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness), 
-              axisMask: SIMD3(0, 1, 0), 
-              faceMask: SIMD3(34, 0, 0))  // +X, +Z
+    appendBox(
+      center: SIMD3(halfLength, 0, halfLength),
+      halfSize: SIMD3(edgeHalfThickness, halfLength, edgeHalfThickness),
+      axisMask: SIMD3(0, 1, 0),
+      faceMask: SIMD3(34, 0, 0))  // +X, +Z
 
     // Z轴方向的4条棱（位于 X-Y 平面的四角）
     // 棱在 x=-0.5, y=-0.5: 属于 -X(bit0) 和 -Y(bit2) 面 -> faceMask = 1+4=5
-    appendBox(center: SIMD3(-halfLength, -halfLength, 0), 
-              halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength), 
-              axisMask: SIMD3(0, 0, 1), 
-              faceMask: SIMD3(5, 0, 0))  // -X, -Y
+    appendBox(
+      center: SIMD3(-halfLength, -halfLength, 0),
+      halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength),
+      axisMask: SIMD3(0, 0, 1),
+      faceMask: SIMD3(5, 0, 0))  // -X, -Y
     // 棱在 x=+0.5, y=-0.5: 属于 +X(bit1) 和 -Y(bit2) 面 -> faceMask = 2+4=6
-    appendBox(center: SIMD3(halfLength, -halfLength, 0), 
-              halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength), 
-              axisMask: SIMD3(0, 0, 1), 
-              faceMask: SIMD3(6, 0, 0))  // +X, -Y
+    appendBox(
+      center: SIMD3(halfLength, -halfLength, 0),
+      halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength),
+      axisMask: SIMD3(0, 0, 1),
+      faceMask: SIMD3(6, 0, 0))  // +X, -Y
     // 棱在 x=-0.5, y=+0.5: 属于 -X(bit0) 和 +Y(bit3) 面 -> faceMask = 1+8=9
-    appendBox(center: SIMD3(-halfLength, halfLength, 0), 
-              halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength), 
-              axisMask: SIMD3(0, 0, 1), 
-              faceMask: SIMD3(9, 0, 0))  // -X, +Y
+    appendBox(
+      center: SIMD3(-halfLength, halfLength, 0),
+      halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength),
+      axisMask: SIMD3(0, 0, 1),
+      faceMask: SIMD3(9, 0, 0))  // -X, +Y
     // 棱在 x=+0.5, y=+0.5: 属于 +X(bit1) 和 +Y(bit3) 面 -> faceMask = 2+8=10
-    appendBox(center: SIMD3(halfLength, halfLength, 0), 
-              halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength), 
-              axisMask: SIMD3(0, 0, 1), 
-              faceMask: SIMD3(10, 0, 0))  // +X, +Y
+    appendBox(
+      center: SIMD3(halfLength, halfLength, 0),
+      halfSize: SIMD3(edgeHalfThickness, edgeHalfThickness, halfLength),
+      axisMask: SIMD3(0, 0, 1),
+      faceMask: SIMD3(10, 0, 0))  // +X, +Y
 
     let vertexBuffer = device.makeBuffer(
       bytes: vertices,
@@ -755,7 +826,9 @@ private extension PongWarRenderer {
     return (vertexBuffer, indexBuffer, indices.count)
   }
 
-  static func makeSphereGeometry(device: MTLDevice, segments: Int, stacks: Int) -> MeshBuffers {
+  fileprivate static func makeSphereGeometry(device: MTLDevice, segments: Int, stacks: Int)
+    -> MeshBuffers
+  {
     var vertices: [EdgeVertex] = []
     var indices: [UInt16] = []
 

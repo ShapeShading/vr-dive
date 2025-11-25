@@ -112,6 +112,6 @@ final class PatternMenuModel {
   }
 
   func toggleSpeed() {
-    speedMultiplier = speedMultiplier > 1.0 ? 1.0 : 4.0
+    speedMultiplier = speedMultiplier > 1.0 ? 1.0 : 8.0
   }
 }

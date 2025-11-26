@@ -7,6 +7,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case lorenzAttractor
   case fourWingAttractor
   case aizawaAttractor
+  case julia3D
   case pagoda
 
   var id: String { rawValue }
@@ -23,6 +24,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Four-Wing Attractor"
     case .aizawaAttractor:
       return "Aizawa 吸引子"
+    case .julia3D:
+      return "Julia 3D"
     case .pagoda:
       return "大雁塔"
     }

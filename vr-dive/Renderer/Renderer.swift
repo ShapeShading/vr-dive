@@ -50,6 +50,7 @@ class Renderer {
   private static let lorenzParticleCount = 400000
   private static let fourWingParticleCount = 400000
   private static let aizawaParticleCount = 400000
+  private static let julia3DParticleCount = 400000
   private var didLogDrawableLayout = false
 
   var startTime: Date = Date()
@@ -70,6 +71,7 @@ class Renderer {
       lorenzCount: Renderer.lorenzParticleCount,
       fourWingCount: Renderer.fourWingParticleCount,
       aizawaCount: Renderer.aizawaParticleCount,
+      julia3DCount: Renderer.julia3DParticleCount,
       maxViewCount: maxViewCount
     )
     self.patternControllers = controllers
@@ -488,6 +490,7 @@ class Renderer {
     lorenzCount: Int,
     fourWingCount: Int,
     aizawaCount: Int,
+    julia3DCount: Int,
     maxViewCount: Int
   ) -> [VisualPatternKind: VisualPatternController] {
     var controllers: [VisualPatternKind: VisualPatternController] = [:]
@@ -549,6 +552,17 @@ class Renderer {
       controllers[.pagoda] = pagoda
     } else {
       print("[Renderer] Pagoda pattern unavailable.")
+    }
+
+    if let julia3D = try? Julia3DRenderer(
+      device: device,
+      library: library,
+      particleCount: julia3DCount,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.julia3D] = julia3D
+    } else {
+      print("[Renderer] Julia3D pattern unavailable.")
     }
 
     return controllers

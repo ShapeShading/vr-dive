@@ -24,7 +24,7 @@ struct PongWarUniforms {
   float edgeHighlight;
   float baseGlow;
   float ballGlow;
-  float padding;
+  float edgeHalfThickness;
 };
 
 struct PongWarVertexOut {
@@ -35,6 +35,7 @@ struct PongWarVertexOut {
   float type;
   float interior;
   float thickness;
+  float2 crossCoord;
 };
 
 vertex PongWarVertexOut pongWarVertexShader(
@@ -58,6 +59,7 @@ vertex PongWarVertexOut pongWarVertexShader(
   float3 scaledPos = meshPos;
   float3 scaledNormal = meshNormal;
   float thickness = 0.0;
+  float2 crossCoord = float2(0.0);
 
   if (isSphere < 0.5) {
     // 立方体：根据边界掩码判断这条棱是否需要显示
@@ -82,6 +84,7 @@ vertex PongWarVertexOut pongWarVertexShader(
       out.type = 0;
       out.interior = 1;
       out.thickness = 0;
+      out.crossCoord = float2(0);
       return out;
     }
 
@@ -103,6 +106,19 @@ vertex PongWarVertexOut pongWarVertexShader(
     scaledPos = meshPos * axisScale;
     scaledNormal = normalize(meshNormal / fmax(axisScale, float3(0.0001)));
     scaledPos *= state.positionAndScale.w;
+
+    // 计算截面坐标用于抗锯齿 - 用原始 meshPos，不是缩放后的
+    float halfThickness = uniforms.edgeHalfThickness;
+    if (axisMask.x > 0.5) {
+      // X轴方向的棱，截面在 YZ 平面
+      crossCoord = abs(float2(meshPos.y, meshPos.z)) / halfThickness;
+    } else if (axisMask.y > 0.5) {
+      // Y轴方向的棱，截面在 XZ 平面
+      crossCoord = abs(float2(meshPos.x, meshPos.z)) / halfThickness;
+    } else {
+      // Z轴方向的棱，截面在 XY 平面
+      crossCoord = abs(float2(meshPos.x, meshPos.y)) / halfThickness;
+    }
   } else {
     // 球体
     float wobble = sin(time * 1.2 + state.edgeData.x * 0.37);
@@ -127,6 +143,7 @@ vertex PongWarVertexOut pongWarVertexShader(
   // interior: 0 = 颜色边界棱, 0.5 = 外边界棱
   out.interior = isSphere < 0.5 ? (thickness < 0.4 ? 0.5 : 0.0) : 0.0;
   out.thickness = thickness;
+  out.crossCoord = crossCoord;
   return out;
 }
 

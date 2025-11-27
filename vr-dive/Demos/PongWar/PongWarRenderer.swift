@@ -21,6 +21,8 @@ final class PongWarRenderer: VisualPatternController {
   let identifier: VisualPatternKind = .pongWar
   let preferredClearColor = MTLClearColor(red: 0.01, green: 0.01, blue: 0.02, alpha: 1)
 
+  private static let edgeHalfThickness: Float = 0.03  // 恢复原始粗细
+
   private let pipelineState: MTLRenderPipelineState
   private let depthStencilState: MTLDepthStencilState
   private let cubeVertexBuffer: MTLBuffer
@@ -62,7 +64,8 @@ final class PongWarRenderer: VisualPatternController {
   private lazy var effectUniforms = PongWarUniforms(
     edgeHighlight: 0.45,
     baseGlow: 0.25,
-    ballGlow: 0.55
+    ballGlow: 0.55,
+    edgeHalfThickness: PongWarRenderer.edgeHalfThickness
   )
 
   private let cellSize: Float
@@ -690,7 +693,7 @@ extension PongWarRenderer {
     var indices: [UInt16] = []
 
     let halfLength: Float = 0.5  // 满尺寸，margin在shader中根据粗细应用
-    let edgeHalfThickness: Float = 0.03  // 棱的粗细（减半）
+    let edgeHalfThickness = PongWarRenderer.edgeHalfThickness  // 棱的粗细（减半）
 
     // 每条棱属于两个面，用 faceMask 编码
     // bit0: -X, bit1: +X, bit2: -Y, bit3: +Y, bit4: -Z, bit5: +Z

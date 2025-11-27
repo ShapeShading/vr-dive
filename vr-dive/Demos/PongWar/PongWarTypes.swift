@@ -10,5 +10,5 @@ struct PongWarUniforms {
   var edgeHighlight: Float
   var baseGlow: Float
   var ballGlow: Float
-  var padding: Float = 0
+  var edgeHalfThickness: Float
 }

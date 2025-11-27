@@ -176,6 +176,13 @@ fragment float4 pongWarFragmentShader(PongWarVertexOut in [[stage_in]],
 
   float3 color = lit + specColor + fresnelColor;
 
+  // 边缘增亮抗锯齿：在边缘处略微增亮，减少视觉上的锯齿感
+  if (in.type < 0.5) {
+    float edgeFactor = 1.0 - abs(dot(normal, viewDir));
+    float boost = edgeFactor * edgeFactor * 0.15; // 边缘轻微增亮
+    color = color * (1.0 + boost);
+  }
+
   // 对于小球，增加自发光效果
   if (in.type > 0.5) {
     color = baseColor * 0.8 + color * 0.4; // 小球更亮

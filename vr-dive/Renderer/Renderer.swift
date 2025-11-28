@@ -209,10 +209,12 @@ class Renderer {
 
         frame.startSubmission()
 
-        for (drawable, commandBuffer) in pendingCommands {
-          drawable.deviceAnchor = anchorToUse
-          drawable.encodePresent(commandBuffer: commandBuffer)
-          commandBuffer.commit()
+        if let validAnchor = anchorToUse {
+          for (drawable, commandBuffer) in pendingCommands {
+            drawable.deviceAnchor = validAnchor
+            drawable.encodePresent(commandBuffer: commandBuffer)
+            commandBuffer.commit()
+          }
         }
 
         frame.endSubmission()
@@ -261,6 +263,8 @@ class Renderer {
     deviceAnchor: ARKit.DeviceAnchor?,
     time: Float
   ) -> MTLCommandBuffer? {
+    let anchorToUse = deviceAnchor ?? lastKnownDeviceAnchor
+    guard anchorToUse != nil else { return nil }
     let viewCount = resolvedViewCount(for: drawable)
     guard viewCount > 0 else { return nil }
     guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
@@ -301,7 +305,7 @@ class Renderer {
       let sceneEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
     else { return nil }
 
-    if let activePattern = pattern, let anchor = deviceAnchor ?? lastKnownDeviceAnchor {
+    if let activePattern = pattern, let anchor = anchorToUse {
       let viewData = makeViewRenderingData(
         drawable: drawable,
         deviceAnchor: anchor,
@@ -544,7 +548,7 @@ class Renderer {
       print("[Renderer] Aizawa attractor pattern unavailable.")
     }
 
-    if let pagoda = try? PagodaRenderer(
+    if let pagoda = try? PagodaSolidRenderer(
       device: device,
       library: library,
       maxViewCount: maxViewCount

@@ -4,3 +4,4 @@ ignore/
 .trae/
 
 Packages/RealityKitContent/.build/
+.build/

@@ -9,6 +9,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case aizawaAttractor
   case julia3D
   case pagoda
+  case tetris3D
 
   var id: String { rawValue }
 
@@ -28,13 +29,15 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Julia 3D"
     case .pagoda:
       return "大雁塔"
+    case .tetris3D:
+      return "3D 俄罗斯方块"
     }
   }
 }
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .pongWar
+  private var _current: VisualPatternKind = .tetris3D
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

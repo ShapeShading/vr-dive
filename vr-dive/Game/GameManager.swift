@@ -9,7 +9,15 @@ class GameManager {
     var leftStick: SIMD2<Float> = .zero
     var rightStick: SIMD2<Float> = .zero
     var buttonA: Bool = false
+    var buttonB: Bool = false
+    var buttonX: Bool = false
+    var buttonY: Bool = false
     var boostActive: Bool = false
+    // D-pad for Tetris
+    var dpadUp: Bool = false
+    var dpadDown: Bool = false
+    var dpadLeft: Bool = false
+    var dpadRight: Bool = false
   }
 
   private let controllerQueue = DispatchQueue(label: "vr-dive.controller.state")
@@ -28,6 +36,38 @@ class GameManager {
 
   init() {
     setupControllerObserver()
+  }
+
+  // MARK: - Tetris Input (PS5 Controller)
+  // △ = buttonY = 向上移动
+  // × = buttonA = 快速下落
+  // □ = buttonX = 切换方块类型
+  // ○ = buttonB = 随机旋转朝向
+
+  struct TetrisInput {
+    var dpadUp: Bool
+    var dpadDown: Bool
+    var dpadLeft: Bool
+    var dpadRight: Bool
+    var buttonCross: Bool  // × = 快速下落
+    var buttonTriangle: Bool  // △ = 向上移动
+    var buttonSquare: Bool  // □ = 切换方块类型
+    var buttonCircle: Bool  // ○ = 随机旋转朝向
+  }
+
+  func getTetrisInput() -> TetrisInput {
+    controllerQueue.sync {
+      TetrisInput(
+        dpadUp: controllerState.dpadUp,
+        dpadDown: controllerState.dpadDown,
+        dpadLeft: controllerState.dpadLeft,
+        dpadRight: controllerState.dpadRight,
+        buttonCross: controllerState.buttonA,  // PS5 × maps to buttonA
+        buttonTriangle: controllerState.buttonY,  // PS5 △ maps to buttonY
+        buttonSquare: controllerState.buttonX,  // PS5 □ maps to buttonX
+        buttonCircle: controllerState.buttonB  // PS5 ○ maps to buttonB
+      )
+    }
   }
 
   func setupControllerObserver() {
@@ -71,13 +111,29 @@ class GameManager {
     let rightStick = SIMD2<Float>(
       gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value)
     let buttonA = gamepad.buttonA.isPressed
+    let buttonB = gamepad.buttonB.isPressed
+    let buttonX = gamepad.buttonX.isPressed
+    let buttonY = gamepad.buttonY.isPressed
     let boostActive = gamepad.leftShoulder.isPressed || gamepad.rightShoulder.isPressed
+
+    // D-pad
+    let dpadUp = gamepad.dpad.up.isPressed
+    let dpadDown = gamepad.dpad.down.isPressed
+    let dpadLeft = gamepad.dpad.left.isPressed
+    let dpadRight = gamepad.dpad.right.isPressed
 
     controllerQueue.sync {
       controllerState.leftStick = leftStick
       controllerState.rightStick = rightStick
       controllerState.buttonA = buttonA
+      controllerState.buttonB = buttonB
+      controllerState.buttonX = buttonX
+      controllerState.buttonY = buttonY
       controllerState.boostActive = boostActive
+      controllerState.dpadUp = dpadUp
+      controllerState.dpadDown = dpadDown
+      controllerState.dpadLeft = dpadLeft
+      controllerState.dpadRight = dpadRight
     }
 
     logInputEvent(

@@ -64,7 +64,7 @@ class Renderer {
     self.maxViewCount = max(1, layerRenderer.properties.viewCount)
 
     let library = device.makeDefaultLibrary()!
-    let controllers = Renderer.makePatternControllers(
+    var controllers = Renderer.makePatternControllers(
       device: device,
       library: library,
       cubeCount: Renderer.cubeObjectCount,
@@ -74,6 +74,20 @@ class Renderer {
       julia3DCount: Renderer.julia3DParticleCount,
       maxViewCount: maxViewCount
     )
+
+    self.arSession = ARKitSession()
+    self.worldTracking = WorldTrackingProvider()
+    self.gameManager = GameManager()
+
+    // Add Tetris3D after gameManager is initialized
+    Renderer.addTetris3D(
+      to: &controllers,
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount,
+      gameManager: self.gameManager
+    )
+
     self.patternControllers = controllers
     let requestedPattern = patternCoordinator.currentPattern()
     if controllers[requestedPattern] != nil {
@@ -84,10 +98,6 @@ class Renderer {
     } else {
       fatalError("No render patterns available")
     }
-
-    self.arSession = ARKitSession()
-    self.worldTracking = WorldTrackingProvider()
-    self.gameManager = GameManager()
   }
 
   func startRenderLoop() {
@@ -118,6 +128,12 @@ class Renderer {
         break
       }
 
+      // Also check for paused state during transition
+      if layerRenderer.state == .paused {
+        Thread.sleep(forTimeInterval: 0.05)
+        continue
+      }
+
       guard layerRenderer.state == .running else {
         if frameCount == 0 {
           print(
@@ -134,12 +150,38 @@ class Renderer {
         print("[Renderer] Frame \(frameCount) rendered")
       }
 
-      guard let frame = layerRenderer.queryNextFrame() else { continue }
+      guard let frame = layerRenderer.queryNextFrame() else {
+        // Check state again after failed query
+        if layerRenderer.state != .running {
+          continue
+        }
+        Thread.sleep(forTimeInterval: 0.001)
+        continue
+      }
+      
+      // Double-check state after getting frame but before processing
+      // This catches the transition that happens between queryNextFrame and startUpdate
+      guard layerRenderer.state == .running else {
+        continue
+      }
 
       var shouldSkipFrame = false
 
       autoreleasepool {
+        // Final state check before any frame operations
+        guard layerRenderer.state == .running else {
+          shouldSkipFrame = true
+          return
+        }
+
         frame.startUpdate()
+        
+        // Check state immediately after startUpdate - if transitioning, end gracefully
+        guard layerRenderer.state == .running else {
+          frame.endUpdate()
+          shouldSkipFrame = true
+          return
+        }
 
         let animationTime = Float(Date().timeIntervalSince(startTime))
         let predictedTiming = frame.predictTiming()
@@ -201,20 +243,31 @@ class Renderer {
         }
 
         frame.endUpdate()
-
-        guard !pendingCommands.isEmpty else {
+        
+        // Check state before submission - if not running, skip submission entirely
+        guard layerRenderer.state == .running else {
           shouldSkipFrame = true
           return
         }
 
         frame.startSubmission()
 
-        if let validAnchor = anchorToUse {
+        // If we have valid commands, submit them
+        if !pendingCommands.isEmpty, let validAnchor = anchorToUse {
           for (drawable, commandBuffer) in pendingCommands {
             drawable.deviceAnchor = validAnchor
             drawable.encodePresent(commandBuffer: commandBuffer)
             commandBuffer.commit()
           }
+        } else {
+          // No valid commands - create minimal submission for each drawable
+          for drawable in drawables {
+            if let commandBuffer = commandQueue.makeCommandBuffer() {
+              drawable.encodePresent(commandBuffer: commandBuffer)
+              commandBuffer.commit()
+            }
+          }
+          shouldSkipFrame = true
         }
 
         frame.endSubmission()
@@ -570,6 +623,23 @@ class Renderer {
     }
 
     return controllers
+  }
+
+  private static func addTetris3D(
+    to controllers: inout [VisualPatternKind: VisualPatternController],
+    device: MTLDevice,
+    library: MTLLibrary,
+    maxViewCount: Int,
+    gameManager: GameManager
+  ) {
+    let tetris = Tetris3DRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount,
+      gameManager: gameManager
+    )
+    controllers[.tetris3D] = tetris
+    print("[Renderer] Tetris3D pattern added.")
   }
 }
 

@@ -251,6 +251,13 @@ class Renderer {
         }
 
         frame.startSubmission()
+        
+        // Check state after startSubmission - if transitioning, end submission gracefully
+        guard layerRenderer.state == .running else {
+          frame.endSubmission()
+          shouldSkipFrame = true
+          return
+        }
 
         // If we have valid commands, submit them
         if !pendingCommands.isEmpty, let validAnchor = anchorToUse {

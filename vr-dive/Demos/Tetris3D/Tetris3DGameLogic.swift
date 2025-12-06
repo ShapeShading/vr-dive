@@ -10,6 +10,20 @@ class Tetris3DGameLogic {
 
   // Input state - pause dropping while controlling
   private var isInputActive: Bool = false
+  
+  // Fast drop animation
+  private var isDropAnimating: Bool = false
+  private var dropAnimationStartY: Float = 0
+  private var dropAnimationEndY: Float = 0
+  private var dropAnimationProgress: Float = 0
+  private let dropAnimationDuration: Float = 0.2  // 0.2 seconds
+  
+  // Blocks falling after line clear animation
+  private var isBlocksFallingAnimating: Bool = false
+  private var blocksFallProgress: Float = 0
+  private var blocksFallDistance: Int = 0  // How many lines were cleared
+  private var blocksFallMinY: Int = 0  // Lowest cleared line Y position
+  private let blocksFallDuration: Float = 0.2  // 0.2 seconds
 
   // Input handling
   private var lastMoveTime: TimeInterval = 0
@@ -25,13 +39,39 @@ class Tetris3DGameLogic {
   func update(currentTime: TimeInterval, deltaTime: Float) {
     guard !state.isGameOver else { return }
 
-    // Handle line clearing animation (slower for more visible effect)
+    // Handle line clearing animation
+    // Trigger falling animation at 50% of clear animation for smoother visual
     if !state.clearingLines.isEmpty {
-      state.clearAnimationProgress += deltaTime * 0.8  // Slower animation
-      if state.clearAnimationProgress >= 1.0 {
+      state.clearAnimationProgress += deltaTime * 1.2  // Animation speed
+      if state.clearAnimationProgress >= 0.5 {
+        startBlocksFallAnimation()
+      }
+      return
+    }
+    
+    // Handle blocks falling animation after clear
+    if isBlocksFallingAnimating {
+      blocksFallProgress += deltaTime / blocksFallDuration
+      if blocksFallProgress >= 1.0 {
+        blocksFallProgress = 1.0
+        isBlocksFallingAnimating = false
         completeClearLines()
       }
       return
+    }
+    
+    // Handle fast drop animation
+    if isDropAnimating {
+      dropAnimationProgress += deltaTime / dropAnimationDuration
+      if dropAnimationProgress >= 1.0 {
+        dropAnimationProgress = 1.0
+        isDropAnimating = false
+        // Now actually lock the piece
+        lockPiece()
+        checkForCompleteLines()
+        spawnNewPiece()
+      }
+      return  // Don't do anything else during drop animation
     }
 
     // Auto-drop piece (paused while controlling)
@@ -194,12 +234,29 @@ class Tetris3DGameLogic {
   }
 
   private func hardDrop() {
-    while movePiece(offset: SIMD3<Int>(0, -1, 0)) {
-      // Keep dropping
+    guard let piece = state.currentPiece else { return }
+    
+    // Find where piece would land
+    var targetY = state.currentPosition.y
+    while targetY > 0 {
+      let testPos = SIMD3<Int>(state.currentPosition.x, targetY - 1, state.currentPosition.z)
+      if !isValidPosition(position: testPos, piece: piece, rotation: state.currentRotation) {
+        break
+      }
+      targetY -= 1
     }
-    lockPiece()
-    checkForCompleteLines()
-    spawnNewPiece()
+    
+    // Start animation from current position to target
+    let blockSize = Self.blockSize
+    dropAnimationStartY = Float(state.currentPosition.y) * blockSize
+    dropAnimationEndY = Float(targetY) * blockSize
+    
+    // Update actual position to target (for collision purposes)
+    state.currentPosition.y = targetY
+    
+    // Start animation
+    isDropAnimating = true
+    dropAnimationProgress = 0
   }
 
   private func cyclePieceType() {
@@ -302,27 +359,52 @@ class Tetris3DGameLogic {
       print("[Tetris3D] Clearing \(completeLayers.count) lines: \(completeLayers)")
     }
   }
-
-  private func completeClearLines() {
+  
+  private func startBlocksFallAnimation() {
+    // Prepare for blocks falling animation
     let linesToClear = state.clearingLines.sorted()
-
-    for y in linesToClear {
-      // Clear the line
-      for x in 0..<state.gridWidth {
-        for z in 0..<state.gridDepth {
-          state.grid[x][y][z] = false
-          state.colorGrid[x][y][z] = SIMD4<Float>(0, 0, 0, 0)
-        }
-      }
-    }
-
-    // Drop blocks above cleared lines
-    for clearY in linesToClear.reversed() {
-      for y in (clearY + 1)..<state.gridHeight {
+    
+    if let minY = linesToClear.min() {
+      // Clear the lines from grid data
+      for y in linesToClear {
         for x in 0..<state.gridWidth {
           for z in 0..<state.gridDepth {
-            state.grid[x][y - 1][z] = state.grid[x][y][z]
-            state.colorGrid[x][y - 1][z] = state.colorGrid[x][y][z]
+            state.grid[x][y][z] = false
+            state.colorGrid[x][y][z] = SIMD4<Float>(0, 0, 0, 0)
+          }
+        }
+      }
+      
+      // Store info for fall animation
+      blocksFallMinY = minY
+      blocksFallDistance = linesToClear.count
+      blocksFallProgress = 0
+      
+      // Clear the clearingLines to exit clear animation phase
+      state.clearAnimationProgress = 0.0
+      state.clearingLines = []
+      
+      isBlocksFallingAnimating = true
+    } else {
+      // No lines to clear, just reset
+      state.clearingLines = []
+      state.clearAnimationProgress = 0.0
+    }
+  }
+
+  private func completeClearLines() {
+    let linesToClear = blocksFallDistance  // Use stored value
+    
+    // Drop blocks above cleared lines - the actual grid update
+    // Since we already cleared the lines in startBlocksFallAnimation,
+    // now we just need to drop blocks down
+    for _ in 0..<linesToClear {
+      // Move each row down by one, starting from blocksFallMinY
+      for y in blocksFallMinY..<(state.gridHeight - 1) {
+        for x in 0..<state.gridWidth {
+          for z in 0..<state.gridDepth {
+            state.grid[x][y][z] = state.grid[x][y + 1][z]
+            state.colorGrid[x][y][z] = state.colorGrid[x][y + 1][z]
           }
         }
       }
@@ -336,16 +418,16 @@ class Tetris3DGameLogic {
     }
 
     // Update score
-    let cleared = linesToClear.count
-    state.linesCleared += cleared
-    state.score += cleared * 100 * state.level
+    state.linesCleared += linesToClear
+    state.score += linesToClear * 100 * state.level
 
     // Level up every 10 lines
     state.level = state.linesCleared / 10 + 1
     dropInterval = max(0.1, 1.0 - Double(state.level - 1) * 0.1)
-
-    state.clearingLines = []
-    state.clearAnimationProgress = 0.0
+    
+    // Reset animation state
+    blocksFallMinY = 0
+    blocksFallDistance = 0
   }
 
   // MARK: - Reset
@@ -421,7 +503,7 @@ class Tetris3DGameLogic {
             var yOffset: Float = 0.0
             var zOffset: Float = 0.0
 
-            // Apply clear animation - blocks scatter outward and fade
+            // Apply clear animation - blocks scatter outward and fade with gravity
             if state.clearingLines.contains(y) {
               let t = state.clearAnimationProgress
               // Fade out with easing
@@ -437,8 +519,22 @@ class Tetris3DGameLogic {
               let scatterAmount = t * t * blockSize * 0.8
               xOffset = dirX * scatterAmount
               zOffset = dirZ * scatterAmount
-              // Also drop down slightly
-              yOffset = -t * t * blockSize * 0.3
+              // Drop down with accelerating speed (gravity effect)
+              // v = v0 + a*t, position = v0*t + 0.5*a*t^2
+              let initialDownSpeed: Float = 0.1
+              let gravity: Float = 2.0
+              yOffset = -(initialDownSpeed * t + 0.5 * gravity * t * t) * blockSize
+            }
+            
+            // Apply falling animation for blocks above cleared lines
+            // During fall animation, blocks need to visually drop before grid updates
+            if isBlocksFallingAnimating && y >= blocksFallMinY {
+              // Ease-out animation for falling
+              let t = blocksFallProgress
+              let easedT = t * (2.0 - t)  // ease-out quad
+              let fallDistance = Float(blocksFallDistance) * blockSize
+              // Start from 0 offset, animate to -fallDistance
+              yOffset = -fallDistance * easedT
             }
 
             // Determine type from color
@@ -468,9 +564,23 @@ class Tetris3DGameLogic {
           && gridPos.y >= 0 && gridPos.y < state.gridHeight
           && gridPos.z >= 0 && gridPos.z < state.gridDepth
         {
+          // Calculate Y position - use interpolation during hard drop animation
+          var renderY: Float
+          if isDropAnimating {
+            // Smooth easing: ease-out quad
+            let t = dropAnimationProgress
+            let easedT = t * (2.0 - t)  // ease-out quad
+            // Convert back from world units to grid units
+            let startGridY = dropAnimationStartY / Self.blockSize
+            let endGridY = dropAnimationEndY / Self.blockSize
+            renderY = startGridY + (endGridY - startGridY) * easedT + Float(block.y)
+          } else {
+            renderY = Float(gridPos.y)
+          }
+          
           let worldPos = SIMD3<Float>(
             gridOffsetX + Float(gridPos.x) * blockSize + blockSize * 0.5,
-            gridOffsetY + Float(gridPos.y) * blockSize + blockSize * 0.5,
+            gridOffsetY + renderY * blockSize + blockSize * 0.5,
             gridOffsetZ + Float(gridPos.z) * blockSize + blockSize * 0.5
           )
 

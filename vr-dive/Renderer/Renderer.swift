@@ -12,9 +12,20 @@ struct VRConfiguration: CompositorLayerConfiguration {
     let supportsFoveation = capabilities.supportsFoveation
     configuration.isFoveationEnabled = supportsFoveation
 
-    _ = capabilities.supportedLayouts(
-      options: supportsFoveation ? [.foveationEnabled] : [])
-    configuration.layout = .layered
+    let layoutOptions: LayerRenderer.Capabilities.SupportedLayoutsOptions =
+      supportsFoveation
+      ? [.foveationEnabled]
+      : []
+    let supportedLayouts = capabilities.supportedLayouts(options: layoutOptions)
+    if supportedLayouts.contains(.layered) {
+      configuration.layout = .layered
+    } else if let fallbackLayout = supportedLayouts.first {
+      configuration.layout = fallbackLayout
+      print("[VRConfiguration] Falling back to supported layout: \(fallbackLayout)")
+    } else {
+      configuration.layout = .layered
+      print("[VRConfiguration] No supported layouts reported; defaulting to layered")
+    }
 
     configuration.colorFormat = .rgba16Float
     configuration.depthFormat = .depth32Float
@@ -39,6 +50,7 @@ class Renderer {
   private static let lorenzParticleCount = 400000
   private static let fourWingParticleCount = 400000
   private static let aizawaParticleCount = 400000
+  private static let julia3DParticleCount = 400000
   private var didLogDrawableLayout = false
 
   var startTime: Date = Date()
@@ -52,15 +64,30 @@ class Renderer {
     self.maxViewCount = max(1, layerRenderer.properties.viewCount)
 
     let library = device.makeDefaultLibrary()!
-    let controllers = Renderer.makePatternControllers(
+    var controllers = Renderer.makePatternControllers(
       device: device,
       library: library,
       cubeCount: Renderer.cubeObjectCount,
       lorenzCount: Renderer.lorenzParticleCount,
       fourWingCount: Renderer.fourWingParticleCount,
       aizawaCount: Renderer.aizawaParticleCount,
+      julia3DCount: Renderer.julia3DParticleCount,
       maxViewCount: maxViewCount
     )
+
+    self.arSession = ARKitSession()
+    self.worldTracking = WorldTrackingProvider()
+    self.gameManager = GameManager()
+
+    // Add Tetris3D after gameManager is initialized
+    Renderer.addTetris3D(
+      to: &controllers,
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount,
+      gameManager: self.gameManager
+    )
+
     self.patternControllers = controllers
     let requestedPattern = patternCoordinator.currentPattern()
     if controllers[requestedPattern] != nil {
@@ -71,10 +98,6 @@ class Renderer {
     } else {
       fatalError("No render patterns available")
     }
-
-    self.arSession = ARKitSession()
-    self.worldTracking = WorldTrackingProvider()
-    self.gameManager = GameManager()
   }
 
   func startRenderLoop() {
@@ -105,6 +128,12 @@ class Renderer {
         break
       }
 
+      // Also check for paused state during transition
+      if layerRenderer.state == .paused {
+        Thread.sleep(forTimeInterval: 0.05)
+        continue
+      }
+
       guard layerRenderer.state == .running else {
         if frameCount == 0 {
           print(
@@ -121,12 +150,38 @@ class Renderer {
         print("[Renderer] Frame \(frameCount) rendered")
       }
 
-      guard let frame = layerRenderer.queryNextFrame() else { continue }
+      guard let frame = layerRenderer.queryNextFrame() else {
+        // Check state again after failed query
+        if layerRenderer.state != .running {
+          continue
+        }
+        Thread.sleep(forTimeInterval: 0.001)
+        continue
+      }
+      
+      // Double-check state after getting frame but before processing
+      // This catches the transition that happens between queryNextFrame and startUpdate
+      guard layerRenderer.state == .running else {
+        continue
+      }
 
       var shouldSkipFrame = false
 
       autoreleasepool {
+        // Final state check before any frame operations
+        guard layerRenderer.state == .running else {
+          shouldSkipFrame = true
+          return
+        }
+
         frame.startUpdate()
+        
+        // Check state immediately after startUpdate - if transitioning, end gracefully
+        guard layerRenderer.state == .running else {
+          frame.endUpdate()
+          shouldSkipFrame = true
+          return
+        }
 
         let animationTime = Float(Date().timeIntervalSince(startTime))
         let predictedTiming = frame.predictTiming()
@@ -169,7 +224,8 @@ class Renderer {
         if let activePattern = pattern, !patternCoordinator.isPaused() {
           let simulationContext = PatternSimulationContext(
             commandQueue: commandQueue,
-            time: animationTime
+            time: animationTime,
+            speedMultiplier: patternCoordinator.speedMultiplier()
           )
           activePattern.updateSimulation(simulationContext)
         }
@@ -187,18 +243,38 @@ class Renderer {
         }
 
         frame.endUpdate()
-
-        guard !pendingCommands.isEmpty else {
+        
+        // Check state before submission - if not running, skip submission entirely
+        guard layerRenderer.state == .running else {
           shouldSkipFrame = true
           return
         }
 
         frame.startSubmission()
+        
+        // Check state after startSubmission - if transitioning, end submission gracefully
+        guard layerRenderer.state == .running else {
+          frame.endSubmission()
+          shouldSkipFrame = true
+          return
+        }
 
-        for (drawable, commandBuffer) in pendingCommands {
-          drawable.deviceAnchor = anchorToUse
-          drawable.encodePresent(commandBuffer: commandBuffer)
-          commandBuffer.commit()
+        // If we have valid commands, submit them
+        if !pendingCommands.isEmpty, let validAnchor = anchorToUse {
+          for (drawable, commandBuffer) in pendingCommands {
+            drawable.deviceAnchor = validAnchor
+            drawable.encodePresent(commandBuffer: commandBuffer)
+            commandBuffer.commit()
+          }
+        } else {
+          // No valid commands - create minimal submission for each drawable
+          for drawable in drawables {
+            if let commandBuffer = commandQueue.makeCommandBuffer() {
+              drawable.encodePresent(commandBuffer: commandBuffer)
+              commandBuffer.commit()
+            }
+          }
+          shouldSkipFrame = true
         }
 
         frame.endSubmission()
@@ -247,6 +323,8 @@ class Renderer {
     deviceAnchor: ARKit.DeviceAnchor?,
     time: Float
   ) -> MTLCommandBuffer? {
+    let anchorToUse = deviceAnchor ?? lastKnownDeviceAnchor
+    guard anchorToUse != nil else { return nil }
     let viewCount = resolvedViewCount(for: drawable)
     guard viewCount > 0 else { return nil }
     guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
@@ -287,7 +365,7 @@ class Renderer {
       let sceneEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
     else { return nil }
 
-    if let activePattern = pattern, let anchor = deviceAnchor ?? lastKnownDeviceAnchor {
+    if let activePattern = pattern, let anchor = anchorToUse {
       let viewData = makeViewRenderingData(
         drawable: drawable,
         deviceAnchor: anchor,
@@ -326,7 +404,7 @@ class Renderer {
     }
 
     descriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
-    
+
     // Always clear every slice in the drawable's texture, otherwise untouched
     // foveation tiles stay black.
     descriptor.renderTargetArrayLength = colorTexture.arrayLength
@@ -476,6 +554,7 @@ class Renderer {
     lorenzCount: Int,
     fourWingCount: Int,
     aizawaCount: Int,
+    julia3DCount: Int,
     maxViewCount: Int
   ) -> [VisualPatternKind: VisualPatternController] {
     var controllers: [VisualPatternKind: VisualPatternController] = [:]
@@ -484,6 +563,16 @@ class Renderer {
         device: device, library: library, objectCount: cubeCount, maxViewCount: maxViewCount)
     } catch {
       fatalError("Failed to build cube pattern: \(error)")
+    }
+
+    if let pongWar = try? PongWarRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.pongWar] = pongWar
+    } else {
+      print("[Renderer] PongWar pattern unavailable.")
     }
 
     if let lorenz = try? LorenzRenderer(
@@ -519,7 +608,45 @@ class Renderer {
       print("[Renderer] Aizawa attractor pattern unavailable.")
     }
 
+    if let pagoda = try? PagodaSolidRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.pagoda] = pagoda
+    } else {
+      print("[Renderer] Pagoda pattern unavailable.")
+    }
+
+    if let julia3D = try? Julia3DRenderer(
+      device: device,
+      library: library,
+      particleCount: julia3DCount,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.julia3D] = julia3D
+    } else {
+      print("[Renderer] Julia3D pattern unavailable.")
+    }
+
     return controllers
+  }
+
+  private static func addTetris3D(
+    to controllers: inout [VisualPatternKind: VisualPatternController],
+    device: MTLDevice,
+    library: MTLLibrary,
+    maxViewCount: Int,
+    gameManager: GameManager
+  ) {
+    let tetris = Tetris3DRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount,
+      gameManager: gameManager
+    )
+    controllers[.tetris3D] = tetris
+    print("[Renderer] Tetris3D pattern added.")
   }
 }
 

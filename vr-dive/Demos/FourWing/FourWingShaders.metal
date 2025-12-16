@@ -40,13 +40,12 @@ struct FourWingVertexOut {
   // uint layer [[render_target_array_index]]; // Removed
 };
 vertex FourWingVertexOut fourWingVertexShader(
-  ushort amplificationID [[amplification_id]],
-  const device MeshVertex *vertices [[buffer(0)]],
-  const device FourWingParticleState *states [[buffer(1)]],
-  constant SceneUniforms &uniforms [[buffer(2)]],
-  constant float4x4 *viewProjectionMatrices [[buffer(3)]],
-  uint vertexID [[vertex_id]],
-  uint instanceID [[instance_id]]) {
+    ushort amplificationID [[amplification_id]],
+    const device MeshVertex *vertices [[buffer(0)]],
+    const device FourWingParticleState *states [[buffer(1)]],
+    constant SceneUniforms &uniforms [[buffer(2)]],
+    constant float4x4 *viewProjectionMatrices [[buffer(3)]],
+    uint vertexID [[vertex_id]], uint instanceID [[instance_id]]) {
   FourWingVertexOut out;
   uint layers = max(uniforms.layerCount, 1u);
   uint viewIndex = min((uint)amplificationID, layers - 1);

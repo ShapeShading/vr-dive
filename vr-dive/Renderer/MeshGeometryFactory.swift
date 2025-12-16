@@ -8,9 +8,9 @@ struct MeshGeometryFactory {
   ) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
     let h = size
     let positions: [SIMD3<Float>] = [
-      SIMD3<Float>(0, h, 0),   // Top
-      SIMD3<Float>(h, 0, 0),   // Right
-      SIMD3<Float>(0, 0, h),   // Front
+      SIMD3<Float>(0, h, 0),  // Top
+      SIMD3<Float>(h, 0, 0),  // Right
+      SIMD3<Float>(0, 0, h),  // Front
       SIMD3<Float>(-h, 0, 0),  // Left
       SIMD3<Float>(0, 0, -h),  // Back
       SIMD3<Float>(0, -h, 0),  // Bottom

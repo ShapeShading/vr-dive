@@ -10,6 +10,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case julia3D
   case pagoda
   case tetris3D
+  case snake3D
 
   var id: String { rawValue }
 
@@ -31,6 +32,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "大雁塔"
     case .tetris3D:
       return "3D 俄罗斯方块"
+    case .snake3D:
+      return "3D 贪食蛇"
     }
   }
 }

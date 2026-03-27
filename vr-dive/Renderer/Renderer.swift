@@ -88,6 +88,15 @@ class Renderer {
       gameManager: self.gameManager
     )
 
+    // Add Snake3D
+    Renderer.addSnake3D(
+      to: &controllers,
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount,
+      gameManager: self.gameManager
+    )
+
     self.patternControllers = controllers
     let requestedPattern = patternCoordinator.currentPattern()
     if controllers[requestedPattern] != nil {
@@ -158,7 +167,7 @@ class Renderer {
         Thread.sleep(forTimeInterval: 0.001)
         continue
       }
-      
+
       // Double-check state after getting frame but before processing
       // This catches the transition that happens between queryNextFrame and startUpdate
       guard layerRenderer.state == .running else {
@@ -175,7 +184,7 @@ class Renderer {
         }
 
         frame.startUpdate()
-        
+
         // Check state immediately after startUpdate - if transitioning, end gracefully
         guard layerRenderer.state == .running else {
           frame.endUpdate()
@@ -243,7 +252,7 @@ class Renderer {
         }
 
         frame.endUpdate()
-        
+
         // Check state before submission - if not running, skip submission entirely
         guard layerRenderer.state == .running else {
           shouldSkipFrame = true
@@ -251,7 +260,7 @@ class Renderer {
         }
 
         frame.startSubmission()
-        
+
         // Check state after startSubmission - if transitioning, end submission gracefully
         guard layerRenderer.state == .running else {
           frame.endSubmission()
@@ -647,6 +656,23 @@ class Renderer {
     )
     controllers[.tetris3D] = tetris
     print("[Renderer] Tetris3D pattern added.")
+  }
+
+  private static func addSnake3D(
+    to controllers: inout [VisualPatternKind: VisualPatternController],
+    device: MTLDevice,
+    library: MTLLibrary,
+    maxViewCount: Int,
+    gameManager: GameManager
+  ) {
+    let snake = Snake3DRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount,
+      gameManager: gameManager
+    )
+    controllers[.snake3D] = snake
+    print("[Renderer] Snake3D pattern added.")
   }
 }
 

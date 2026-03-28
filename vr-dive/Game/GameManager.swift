@@ -26,7 +26,8 @@ class GameManager {
 
   private let movementSpeed: Float = 1.2
   private let yawSpeed: Float = .pi / 2.0
-  private let deadZone: Float = 0.12
+  private let deadZone: Float = 0.2
+  private let residualStickClamp: Float = 0.025
   private let boostMovementMultiplier: Float = 5.0
   private let boostYawMultiplier: Float = 2.0
 
@@ -217,7 +218,14 @@ class GameManager {
     let magnitude = simd_length(input)
     guard magnitude > deadZone else { return .zero }
     let scaled = (magnitude - deadZone) / (1 - deadZone)
-    return (input / max(magnitude, 0.0001)) * scaled
+    var filtered = (input / max(magnitude, 0.0001)) * scaled
+    if abs(filtered.x) < residualStickClamp {
+      filtered.x = 0
+    }
+    if abs(filtered.y) < residualStickClamp {
+      filtered.y = 0
+    }
+    return filtered
   }
 
   private func wrapAngle(_ angle: Float) -> Float {

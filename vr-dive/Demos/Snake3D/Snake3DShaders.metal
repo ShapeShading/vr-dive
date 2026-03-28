@@ -28,8 +28,10 @@ struct FoodInstance {
   float  phase;
 };
 
-struct SnakeBorderVertex {
+struct SnakeGuideInstance {
   float3 position;
+  float3 scale;
+  float4 color;
 };
 
 // MARK: - Snake Body Shader
@@ -147,7 +149,7 @@ vertex FoodVertexOut snake3DFoodVertexShader(
 
   // Pulsing scale
   float pulse = 1.0 + 0.12 * sin(uniforms.time * 3.0 + inst.phase);
-  float blockSize = 0.09;
+  float blockSize = 0.192;
   float3 worldPos = inst.position + vtx.position * (blockSize * pulse);
 
   float3 transformed = applyWorldTransform(worldPos,
@@ -191,30 +193,45 @@ fragment float4 snake3DFoodFragmentShader(FoodVertexOut in [[stage_in]],
 
 struct BorderVertexOut {
   float4 position [[position]];
+  float3 normal;
+  float4 color;
 };
 
 vertex BorderVertexOut snake3DBorderVertexShader(
     ushort amplificationID [[amplification_id]],
-    const device SnakeBorderVertex *vertices       [[buffer(0)]],
-    constant Snake3DSceneUniforms  &uniforms        [[buffer(1)]],
-    constant float4x4 *viewProjectionMatrices       [[buffer(2)]],
-    uint vertexID [[vertex_id]])
+    const device SnakeMeshVertex *vertices         [[buffer(0)]],
+    const device SnakeGuideInstance *instances     [[buffer(1)]],
+    constant Snake3DSceneUniforms  &uniforms       [[buffer(2)]],
+    constant float4x4 *viewProjectionMatrices      [[buffer(3)]],
+    uint vertexID [[vertex_id]],
+    uint instanceID [[instance_id]])
 {
   BorderVertexOut out;
   uint layers    = max(uniforms.layerCount, 1u);
   uint viewIndex = min((uint)amplificationID, layers - 1u);
 
-  float3 pos = vertices[vertexID].position;
-  float3 transformed = applyWorldTransform(pos,
+  SnakeMeshVertex vtx = vertices[vertexID];
+  SnakeGuideInstance inst = instances[instanceID];
+
+  float3 worldPos = inst.position + vtx.position * inst.scale;
+  float3 transformed = applyWorldTransform(worldPos,
                                            uniforms.worldRotation,
                                            uniforms.anchorTranslation);
 
   float4x4 vp = viewProjectionMatrices[viewIndex];
   out.position = vp * float4(transformed, 1.0);
+  out.normal = (uniforms.worldRotation * float4(vtx.normal, 0.0)).xyz;
+  out.color = inst.color;
   return out;
 }
 
-fragment float4 snake3DBorderFragmentShader(BorderVertexOut in [[stage_in]])
+fragment float4 snake3DBorderFragmentShader(BorderVertexOut in [[stage_in]],
+                                            bool isFrontFacing [[front_facing]])
 {
-  return float4(1.0, 1.0, 1.0, 0.12);
+  float3 normal = normalize(in.normal);
+  normal = isFrontFacing ? normal : -normal;
+  float3 lightDir = normalize(float3(0.25, 1.0, -0.4));
+  float ndotl = max(dot(normal, lightDir), 0.0);
+  float3 color = in.color.rgb * (0.55 + ndotl * 0.45);
+  return float4(color, 1.0);
 }

@@ -19,6 +19,7 @@ final class Snake3DRenderer: VisualPatternController {
   private let foodPipelineState: MTLRenderPipelineState
   private let borderPipelineState: MTLRenderPipelineState
   private let depthStencilState: MTLDepthStencilState
+  private let transparentDepthStencilState: MTLDepthStencilState
 
   // Shared cube geometry
   private let cubeMesh: MeshBuffers
@@ -26,12 +27,15 @@ final class Snake3DRenderer: VisualPatternController {
   // Instance buffers
   private var bodyBuffer: MTLBuffer
   private var foodBuffer: MTLBuffer
+  private var guideBuffer: MTLBuffer
   private let maxSegments = 512
   private let maxFoods = 8
+  private let maxGuideInstances = Snake3DState.gridSize * 3
 
   // Border line buffer (static)
   private var borderBuffer: MTLBuffer!
-  private var borderVertexCount: Int = 0
+  private var borderInstanceCount: Int = 0
+  private var guideInstanceCount: Int = 0
 
   // MARK: Game
   private let gameLogic: Snake3DGameLogic
@@ -46,7 +50,7 @@ final class Snake3DRenderer: VisualPatternController {
   private var rotationStartQuat: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
   private var targetWorldQuat: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
   private var rotationProgress: Float = 1.0  // 1.0 = done
-  private let rotationDuration: Float = 0.3
+  private let rotationDuration: Float = 3.0
 
   // MARK: Input debounce
   private var lastDpadTime: TimeInterval = 0
@@ -83,6 +87,10 @@ final class Snake3DRenderer: VisualPatternController {
       length: MemoryLayout<FoodInstance>.stride * 8,
       options: .storageModeShared)!
 
+    guideBuffer = device.makeBuffer(
+      length: MemoryLayout<SnakeGuideInstance>.stride * maxGuideInstances,
+      options: .storageModeShared)!
+
     bodyPipelineState = try! Snake3DRenderer.makeBodyPipeline(
       device: device, library: library, maxViewCount: max(1, maxViewCount))
     foodPipelineState = try! Snake3DRenderer.makeFoodPipeline(
@@ -90,8 +98,10 @@ final class Snake3DRenderer: VisualPatternController {
     borderPipelineState = try! Snake3DRenderer.makeBorderPipeline(
       device: device, library: library, maxViewCount: max(1, maxViewCount))
     depthStencilState = Snake3DRenderer.makeDepthStencilState(device: device)
+    transparentDepthStencilState = Snake3DRenderer.makeTransparentDepthStencilState(device: device)
 
     buildBorderGeometry()
+    updateGuideGeometry()
   }
 
   // MARK: - VisualPatternController Protocol
@@ -104,7 +114,8 @@ final class Snake3DRenderer: VisualPatternController {
     // Advance rotation interpolation
     if rotationProgress < 1.0 {
       rotationProgress = min(rotationProgress + deltaTime / rotationDuration, 1.0)
-      currentWorldQuat = simd_slerp(rotationStartQuat, targetWorldQuat, rotationProgress)
+      let easedProgress = smoothRotationProgress(rotationProgress)
+      currentWorldQuat = simd_slerp(rotationStartQuat, targetWorldQuat, easedProgress)
     }
 
     // Handle input
@@ -116,6 +127,7 @@ final class Snake3DRenderer: VisualPatternController {
     // Upload instance data
     uploadBodyInstances()
     uploadFoodInstances()
+    updateGuideGeometry()
   }
 
   func resetToInitialState() {
@@ -140,8 +152,9 @@ final class Snake3DRenderer: VisualPatternController {
     var viewMatrices = context.viewData.viewProjectionMatrices
     if viewMatrices.isEmpty { viewMatrices = [matrix_identity_float4x4] }
 
-    // Draw border
+    // Draw opaque helper geometry first so the snake remains the primary visual.
     drawBorder(encoder: encoder, uniforms: &uniforms, viewMatrices: viewMatrices)
+    drawGuides(encoder: encoder, uniforms: &uniforms, viewMatrices: viewMatrices)
 
     // Draw snake body
     let segCount = gameLogic.state.segments.count
@@ -196,10 +209,6 @@ final class Snake3DRenderer: VisualPatternController {
     guard let manager = gameManager else { return }
     let input = manager.getTetrisInput()
 
-    if rotationProgress < 0.98 {
-      return
-    }
-
     // Options button = reset
     if input.buttonTriangle && currentTime - lastOptionsTime > optionsDelay {
       lastOptionsTime = currentTime
@@ -216,10 +225,10 @@ final class Snake3DRenderer: VisualPatternController {
         applyDisplayRotation(axis: displayRight, angle: .pi / 2, updatesDirection: true)
         turned = true
       } else if input.dpadLeft {
-        applyDisplayRotation(axis: displayUp, angle: .pi / 2, updatesDirection: true)
+        applyDisplayRotation(axis: displayUp, angle: -.pi / 2, updatesDirection: true)
         turned = true
       } else if input.dpadRight {
-        applyDisplayRotation(axis: displayUp, angle: -.pi / 2, updatesDirection: true)
+        applyDisplayRotation(axis: displayUp, angle: .pi / 2, updatesDirection: true)
         turned = true
       }
       if turned { lastDpadTime = currentTime }
@@ -248,6 +257,11 @@ final class Snake3DRenderer: VisualPatternController {
   }
 
   // MARK: - Rotation Logic
+
+  private func smoothRotationProgress(_ t: Float) -> Float {
+    let clamped = max(0, min(1, t))
+    return clamped * clamped * (3 - 2 * clamped)
+  }
 
   private func applyDisplayRotation(axis: SIMD3<Float>, angle: Float, updatesDirection: Bool) {
     let displayRotation = simd_quatf(angle: angle, axis: simd_normalize(axis))
@@ -283,7 +297,7 @@ final class Snake3DRenderer: VisualPatternController {
 
     // The anchor translation moves all geometry so the snake head ends at headAnchor.
     // headWorldPos = gridToWorld(head grid pos)
-    let headGrid = gameLogic.state.segments.first ?? SIMD3<Int>(10, 10, 10)
+    let headGrid = gameLogic.getInterpolatedHeadPosition(currentTime: TimeInterval(time))
     let headWorld = gridToWorld(headGrid)
     // After rotation: rotated head = rotMat * headWorld
     // We want rotated head + anchorTranslation = headAnchor
@@ -301,27 +315,28 @@ final class Snake3DRenderer: VisualPatternController {
   // MARK: - Grid to World Conversion
 
   private func gridToWorld(_ grid: SIMD3<Int>) -> SIMD3<Float> {
+    return gridToWorld(SIMD3<Float>(Float(grid.x), Float(grid.y), Float(grid.z)))
+  }
+
+  private func gridToWorld(_ grid: SIMD3<Float>) -> SIMD3<Float> {
     let cell = Snake3DState.cellSize
     let g = Float(Snake3DState.gridSize)
-    // Centre the grid at origin
     return SIMD3<Float>(
-      (Float(grid.x) - g * 0.5 + 0.5) * cell,
-      (Float(grid.y) - g * 0.5 + 0.5) * cell,
-      (Float(grid.z) - g * 0.5 + 0.5) * cell
+      (grid.x - g * 0.5 + 0.5) * cell,
+      (grid.y - g * 0.5 + 0.5) * cell,
+      (grid.z - g * 0.5 + 0.5) * cell
     )
   }
 
   // MARK: - Instance Data Upload
 
   private func uploadBodyInstances() {
-    let segs = gameLogic.getSegmentPositions()
+    let segs = gameLogic.getInterpolatedSegmentPositions(currentTime: lastUpdateTime)
     let ptr = bodyBuffer.contents().assumingMemoryBound(to: SnakeSegmentInstance.self)
-    // Head color = bright green, tail dims
     let headColor = SIMD3<Float>(0.1, 1.0, 0.2)
     for (i, seg) in segs.prefix(maxSegments).enumerated() {
       let worldPos = gridToWorld(seg.gridPos)
-      let t = seg.normalizedIndex  // 0=head, 1=tail
-      // Interpolate from bright green → dark green
+      let t = seg.normalizedIndex
       let color = mix(headColor, headColor * 0.2, t)
       ptr[i] = SnakeSegmentInstance(
         position: worldPos,
@@ -364,17 +379,109 @@ final class Snake3DRenderer: VisualPatternController {
       (0, 4), (1, 5), (2, 6), (3, 7),  // connecting edges
     ]
 
-    var verts: [SnakeBorderVertex] = []
-    for (a, b) in edges {
-      verts.append(SnakeBorderVertex(position: corners[a]))
-      verts.append(SnakeBorderVertex(position: corners[b]))
+    var instances: [SnakeGuideInstance] = []
+    let borderColor = SIMD4<Float>(0.28, 0.32, 0.38, 1.0)
+    let borderThickness: Float = 0.01
+
+    func addSegment(_ a: SIMD3<Float>, _ b: SIMD3<Float>, color: SIMD4<Float>, thickness: Float) {
+      let center = (a + b) * 0.5
+      let delta = b - a
+      let scale = SIMD3<Float>(
+        max(abs(delta.x), thickness),
+        max(abs(delta.y), thickness),
+        max(abs(delta.z), thickness)
+      )
+      instances.append(SnakeGuideInstance(position: center, scale: scale, color: color))
     }
 
-    borderVertexCount = verts.count
+    for (a, b) in edges {
+      addSegment(corners[a], corners[b], color: borderColor, thickness: borderThickness)
+    }
+
+    borderInstanceCount = instances.count
     borderBuffer = device.makeBuffer(
-      bytes: verts,
-      length: MemoryLayout<SnakeBorderVertex>.stride * verts.count,
+      bytes: instances,
+      length: MemoryLayout<SnakeGuideInstance>.stride * instances.count,
       options: .storageModeShared)!
+  }
+
+  private func updateGuideGeometry() {
+    let g = Float(Snake3DState.gridSize)
+    let inactiveColor = SIMD4<Float>(0.14, 0.17, 0.21, 1.0)
+    let activeColor = SIMD4<Float>(0.74, 0.85, 1.0, 1.0)
+    let dashLength = Snake3DState.cellSize * 0.55
+    let dashThickness = Snake3DState.blockSize * 0.12
+    let head =
+      gameLogic.state.segments.first
+      ?? SIMD3<Int>(Snake3DState.gridSize / 2, Snake3DState.gridSize / 2, Snake3DState.gridSize / 2)
+    let direction = gameLogic.state.pendingDirection ?? gameLogic.state.direction
+    let ptr = guideBuffer.contents().assumingMemoryBound(to: SnakeGuideInstance.self)
+    var instanceIndex = 0
+
+    func addDash(_ cell: SIMD3<Int>, scale: SIMD3<Float>, color: SIMD4<Float>) {
+      let position = SIMD3<Float>(
+        (Float(cell.x) - g * 0.5 + 0.5) * Snake3DState.cellSize,
+        (Float(cell.y) - g * 0.5 + 0.5) * Snake3DState.cellSize,
+        (Float(cell.z) - g * 0.5 + 0.5) * Snake3DState.cellSize
+      )
+      ptr[instanceIndex] = SnakeGuideInstance(position: position, scale: scale, color: color)
+      instanceIndex += 1
+    }
+
+    let xColor = (direction == .posX || direction == .negX) ? activeColor : inactiveColor
+    let yColor = (direction == .posY || direction == .negY) ? activeColor : inactiveColor
+    let zColor = (direction == .posZ || direction == .negZ) ? activeColor : inactiveColor
+    let xScale = SIMD3<Float>(dashLength, dashThickness, dashThickness)
+    let yScale = SIMD3<Float>(dashThickness, dashLength, dashThickness)
+    let zScale = SIMD3<Float>(dashThickness, dashThickness, dashLength)
+
+    func forwardAlignedIndices(for axis: SnakeDirection) -> [Int] {
+      switch axis {
+      case .posX:
+        return Array(stride(from: head.x, to: Snake3DState.gridSize, by: 2))
+      case .negX:
+        return Array(stride(from: head.x, through: 0, by: -2))
+      case .posY:
+        return Array(stride(from: head.y, to: Snake3DState.gridSize, by: 2))
+      case .negY:
+        return Array(stride(from: head.y, through: 0, by: -2))
+      case .posZ:
+        return Array(stride(from: head.z, to: Snake3DState.gridSize, by: 2))
+      case .negZ:
+        return Array(stride(from: head.z, through: 0, by: -2))
+      }
+    }
+
+    let xIndices: [Int]
+    let yIndices: [Int]
+    let zIndices: [Int]
+
+    switch direction {
+    case .posX, .negX:
+      xIndices = forwardAlignedIndices(for: direction)
+      yIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
+      zIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
+    case .posY, .negY:
+      xIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
+      yIndices = forwardAlignedIndices(for: direction)
+      zIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
+    case .posZ, .negZ:
+      xIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
+      yIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
+      zIndices = forwardAlignedIndices(for: direction)
+    }
+
+    for x in xIndices {
+      addDash(SIMD3<Int>(x, head.y, head.z), scale: xScale, color: xColor)
+    }
+    for y in yIndices {
+      addDash(SIMD3<Int>(head.x, y, head.z), scale: yScale, color: yColor)
+    }
+    for z in zIndices {
+      addDash(SIMD3<Int>(head.x, head.y, z), scale: zScale, color: zColor)
+    }
+
+    guideInstanceCount = instanceIndex
   }
 
   private func drawBorder(
@@ -382,17 +489,49 @@ final class Snake3DRenderer: VisualPatternController {
     uniforms: inout Snake3DSceneUniforms,
     viewMatrices: [simd_float4x4]
   ) {
-    guard borderVertexCount > 0 else { return }
+    guard borderInstanceCount > 0 else { return }
     encoder.setRenderPipelineState(borderPipelineState)
     encoder.setDepthStencilState(depthStencilState)
-    encoder.setVertexBuffer(borderBuffer, offset: 0, index: 0)
-    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Snake3DSceneUniforms>.stride, index: 1)
+    encoder.setVertexBuffer(cubeMesh.vertexBuffer, offset: 0, index: 0)
+    encoder.setVertexBuffer(borderBuffer, offset: 0, index: 1)
+    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Snake3DSceneUniforms>.stride, index: 2)
     viewMatrices.withUnsafeBytes { raw in
       if let base = raw.baseAddress, raw.count > 0 {
-        encoder.setVertexBytes(base, length: raw.count, index: 2)
+        encoder.setVertexBytes(base, length: raw.count, index: 3)
       }
     }
-    encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: borderVertexCount)
+    encoder.drawIndexedPrimitives(
+      type: .triangle,
+      indexCount: cubeMesh.indexCount,
+      indexType: .uint16,
+      indexBuffer: cubeMesh.indexBuffer,
+      indexBufferOffset: 0,
+      instanceCount: borderInstanceCount)
+  }
+
+  private func drawGuides(
+    encoder: MTLRenderCommandEncoder,
+    uniforms: inout Snake3DSceneUniforms,
+    viewMatrices: [simd_float4x4]
+  ) {
+    guard guideInstanceCount > 0 else { return }
+    encoder.setRenderPipelineState(borderPipelineState)
+    encoder.setDepthStencilState(depthStencilState)
+    encoder.setVertexBuffer(cubeMesh.vertexBuffer, offset: 0, index: 0)
+    encoder.setVertexBuffer(guideBuffer, offset: 0, index: 1)
+    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Snake3DSceneUniforms>.stride, index: 2)
+    viewMatrices.withUnsafeBytes { raw in
+      if let base = raw.baseAddress, raw.count > 0 {
+        encoder.setVertexBytes(base, length: raw.count, index: 3)
+      }
+    }
+    encoder.drawIndexedPrimitives(
+      type: .triangle,
+      indexCount: cubeMesh.indexCount,
+      indexType: .uint16,
+      indexBuffer: cubeMesh.indexBuffer,
+      indexBufferOffset: 0,
+      instanceCount: guideInstanceCount)
   }
 }
 
@@ -465,14 +604,21 @@ extension Snake3DRenderer {
     desc.vertexFunction = library.makeFunction(name: "snake3DBorderVertexShader")
     desc.fragmentFunction = library.makeFunction(name: "snake3DBorderFragmentShader")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
-    desc.colorAttachments[0].isBlendingEnabled = true
-    desc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-    desc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-    desc.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
-    desc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+    desc.colorAttachments[0].isBlendingEnabled = false
     desc.depthAttachmentPixelFormat = .depth32Float
-    desc.inputPrimitiveTopology = .line
+    desc.inputPrimitiveTopology = .triangle
     desc.maxVertexAmplificationCount = max(maxViewCount, 1)
+
+    let vd = MTLVertexDescriptor()
+    vd.attributes[0].format = .float3
+    vd.attributes[0].offset = 0
+    vd.attributes[0].bufferIndex = 0
+    vd.attributes[1].format = .float3
+    vd.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
+    vd.attributes[1].bufferIndex = 0
+    vd.layouts[0].stride = MemoryLayout<SnakeMeshVertex>.stride
+    desc.vertexDescriptor = vd
+
     return try device.makeRenderPipelineState(descriptor: desc)
   }
 
@@ -480,6 +626,15 @@ extension Snake3DRenderer {
     let desc = MTLDepthStencilDescriptor()
     desc.depthCompareFunction = .greater
     desc.isDepthWriteEnabled = true
+    return device.makeDepthStencilState(descriptor: desc)!
+  }
+
+  fileprivate static func makeTransparentDepthStencilState(device: MTLDevice)
+    -> MTLDepthStencilState
+  {
+    let desc = MTLDepthStencilDescriptor()
+    desc.depthCompareFunction = .greater
+    desc.isDepthWriteEnabled = false
     return device.makeDepthStencilState(descriptor: desc)!
   }
 

@@ -177,6 +177,9 @@ class Renderer {
       var shouldSkipFrame = false
 
       autoreleasepool {
+        var shouldEndUpdate = false
+        var didStartSubmission = false
+
         // Final state check before any frame operations
         guard layerRenderer.state == .running else {
           shouldSkipFrame = true
@@ -184,21 +187,31 @@ class Renderer {
         }
 
         frame.startUpdate()
+        shouldEndUpdate = true
 
         // Check state immediately after startUpdate - if transitioning, end gracefully
         guard layerRenderer.state == .running else {
-          frame.endUpdate()
+          if shouldEndUpdate {
+            frame.endUpdate()
+          }
           shouldSkipFrame = true
           return
         }
 
         let animationTime = Float(Date().timeIntervalSince(startTime))
         let predictedTiming = frame.predictTiming()
+        guard predictedTiming != nil else {
+          // Frame is no longer valid; do not call endUpdate on an invalid frame.
+          shouldEndUpdate = false
+          shouldSkipFrame = true
+          return
+        }
         let presentationTimestamp = presentationTimeInterval(from: predictedTiming)
         let drawables = frame.queryDrawables()
 
         guard !drawables.isEmpty else {
-          frame.endUpdate()
+          // queryDrawables can invalidate the frame during immersive dismissal.
+          shouldEndUpdate = false
           shouldSkipFrame = true
           return
         }
@@ -251,7 +264,10 @@ class Renderer {
           }
         }
 
-        frame.endUpdate()
+        if shouldEndUpdate {
+          frame.endUpdate()
+          shouldEndUpdate = false
+        }
 
         // Check state before submission - if not running, skip submission entirely
         guard layerRenderer.state == .running else {
@@ -260,10 +276,13 @@ class Renderer {
         }
 
         frame.startSubmission()
+        didStartSubmission = true
 
         // Check state after startSubmission - if transitioning, end submission gracefully
         guard layerRenderer.state == .running else {
-          frame.endSubmission()
+          if didStartSubmission {
+            frame.endSubmission()
+          }
           shouldSkipFrame = true
           return
         }
@@ -286,7 +305,9 @@ class Renderer {
           shouldSkipFrame = true
         }
 
-        frame.endSubmission()
+        if didStartSubmission {
+          frame.endSubmission()
+        }
       }
 
       if shouldSkipFrame {

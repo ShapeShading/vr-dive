@@ -36,9 +36,9 @@ enum SnakeDirection: Int, CaseIterable {
 // MARK: - Game State
 
 struct Snake3DState {
-  static let gridSize: Int = 20
-  static let cellSize: Float = 0.1  // 10cm per cell
-  static let blockSize: Float = 0.09  // 9cm block (1cm gap per side)
+  static let gridSize: Int = 40
+  static let cellSize: Float = 0.2  // enlarged grid spacing for a larger play volume
+  static let blockSize: Float = 0.192  // keep guide cells and snake blocks visually consistent
 
   var segments: [SIMD3<Int>]  // index 0 = head
   var direction: SnakeDirection
@@ -104,6 +104,8 @@ struct Snake3DSceneUniforms {
 }
 
 /// Border line vertex
-struct SnakeBorderVertex {
+struct SnakeGuideInstance {
   var position: SIMD3<Float>
+  var scale: SIMD3<Float>
+  var color: SIMD4<Float>
 }

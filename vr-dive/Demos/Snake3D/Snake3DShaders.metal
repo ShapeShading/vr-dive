@@ -26,6 +26,8 @@ struct SnakeSegmentInstance {
 struct FoodInstance {
   float3 position;
   float  phase;
+  float  hit;
+  float3 padding;
 };
 
 struct SnakeGuideInstance {
@@ -129,6 +131,7 @@ struct FoodVertexOut {
   float3 localPos;
   float  time;
   float  phase;
+  float  hit;
 };
 
 vertex FoodVertexOut snake3DFoodVertexShader(
@@ -163,6 +166,7 @@ vertex FoodVertexOut snake3DFoodVertexShader(
   out.localPos = vtx.position;
   out.time     = uniforms.time;
   out.phase    = inst.phase;
+  out.hit      = inst.hit;
   return out;
 }
 
@@ -176,9 +180,11 @@ fragment float4 snake3DFoodFragmentShader(FoodVertexOut in [[stage_in]],
   float3 lightDir = normalize(float3(0.3, 1.0, -0.5));
   float  ndotl    = max(dot(normal, lightDir), 0.0);
 
-  // Red food with glow
+  // Red by default, switches to bright cyan when touched by guide dashes.
   float  glow     = 0.7 + 0.3 * sin(in.time * 3.0 + in.phase);
-  float3 baseColor = float3(1.0, 0.15, 0.1) * glow;
+  float3 normalColor = float3(1.0, 0.15, 0.1) * glow;
+  float3 hitColor = float3(0.15, 0.95, 1.0) * (0.85 + 0.15 * glow);
+  float3 baseColor = mix(normalColor, hitColor, saturate(in.hit));
 
   float3 absLocal   = abs(in.localPos);
   float  edgeDist   = max(max(absLocal.x, absLocal.y), absLocal.z);

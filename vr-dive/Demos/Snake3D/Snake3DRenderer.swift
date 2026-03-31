@@ -29,7 +29,7 @@ final class Snake3DRenderer: VisualPatternController {
   private var foodBuffer: MTLBuffer
   private var guideBuffer: MTLBuffer
   private let maxSegments = 512
-  private let maxFoods = 8
+  private let maxFoods = 256
   private let maxGuideInstances = Snake3DState.gridSize * 3
 
   // Border line buffer (static)
@@ -50,7 +50,7 @@ final class Snake3DRenderer: VisualPatternController {
   private var rotationStartQuat: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
   private var targetWorldQuat: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
   private var rotationProgress: Float = 1.0  // 1.0 = done
-  private let rotationDuration: Float = 3.0
+  private let rotationDuration: Float = 2.0
 
   // MARK: Input debounce
   private var lastDpadTime: TimeInterval = 0
@@ -84,7 +84,7 @@ final class Snake3DRenderer: VisualPatternController {
       options: .storageModeShared)!
 
     foodBuffer = device.makeBuffer(
-      length: MemoryLayout<FoodInstance>.stride * 8,
+      length: MemoryLayout<FoodInstance>.stride * maxFoods,
       options: .storageModeShared)!
 
     guideBuffer = device.makeBuffer(
@@ -238,10 +238,10 @@ final class Snake3DRenderer: VisualPatternController {
     let rollCanFire = currentTime - lastRollTime > rollDelay
     if rollCanFire, !gameLogic.state.isGameOver {
       if input.buttonSquare {
-        applyDisplayRotation(axis: displayForward, angle: -.pi / 2, updatesDirection: false)
+        applyDisplayRotation(axis: displayForward, angle: .pi / 2, updatesDirection: false)
         lastRollTime = currentTime
       } else if input.buttonCircle {
-        applyDisplayRotation(axis: displayForward, angle: .pi / 2, updatesDirection: false)
+        applyDisplayRotation(axis: displayForward, angle: -.pi / 2, updatesDirection: false)
         lastRollTime = currentTime
       }
     }
@@ -331,7 +331,7 @@ final class Snake3DRenderer: VisualPatternController {
   // MARK: - Instance Data Upload
 
   private func uploadBodyInstances() {
-    let segs = gameLogic.getInterpolatedSegmentPositions(currentTime: lastUpdateTime)
+    let segs = gameLogic.getSegmentPositions()
     let ptr = bodyBuffer.contents().assumingMemoryBound(to: SnakeSegmentInstance.self)
     let headColor = SIMD3<Float>(0.1, 1.0, 0.2)
     for (i, seg) in segs.prefix(maxSegments).enumerated() {
@@ -348,12 +348,54 @@ final class Snake3DRenderer: VisualPatternController {
 
   private func uploadFoodInstances() {
     let foods = gameLogic.getFoodPositions()
+    let head =
+      gameLogic.state.segments.first
+      ?? SIMD3<Int>(Snake3DState.gridSize / 2, Snake3DState.gridSize / 2, Snake3DState.gridSize / 2)
+    let direction = gameLogic.state.pendingDirection ?? gameLogic.state.direction
     let ptr = foodBuffer.contents().assumingMemoryBound(to: FoodInstance.self)
     for (i, grid) in foods.prefix(maxFoods).enumerated() {
+      let isHit = isGuideDashHit(cell: grid, head: head, direction: direction)
       ptr[i] = FoodInstance(
         position: gridToWorld(grid),
-        phase: Float(i) * 1.3)
+        phase: Float(i) * 1.3,
+        hit: isHit ? 1.0 : 0.0)
     }
+  }
+
+  private func isGuideDashHit(cell: SIMD3<Int>, head: SIMD3<Int>, direction: SnakeDirection) -> Bool
+  {
+    func isForwardAligned(_ value: Int, headValue: Int, axisDirection: SnakeDirection) -> Bool {
+      switch axisDirection {
+      case .posX, .posY, .posZ:
+        return value >= headValue && (value - headValue) % 2 == 0
+      case .negX, .negY, .negZ:
+        return value <= headValue && (headValue - value) % 2 == 0
+      }
+    }
+
+    let xOnDash: Bool
+    let yOnDash: Bool
+    let zOnDash: Bool
+
+    switch direction {
+    case .posX, .negX:
+      xOnDash = isForwardAligned(cell.x, headValue: head.x, axisDirection: direction)
+      yOnDash = cell.y % 2 == 0
+      zOnDash = cell.z % 2 == 0
+    case .posY, .negY:
+      xOnDash = cell.x % 2 == 0
+      yOnDash = isForwardAligned(cell.y, headValue: head.y, axisDirection: direction)
+      zOnDash = cell.z % 2 == 0
+    case .posZ, .negZ:
+      xOnDash = cell.x % 2 == 0
+      yOnDash = cell.y % 2 == 0
+      zOnDash = isForwardAligned(cell.z, headValue: head.z, axisDirection: direction)
+    }
+
+    let onXLine = cell.y == head.y && cell.z == head.z && xOnDash
+    let onYLine = cell.x == head.x && cell.z == head.z && yOnDash
+    let onZLine = cell.x == head.x && cell.y == head.y && zOnDash
+    return onXLine || onYLine || onZLine
   }
 
   // MARK: - Border Geometry
@@ -407,8 +449,9 @@ final class Snake3DRenderer: VisualPatternController {
 
   private func updateGuideGeometry() {
     let g = Float(Snake3DState.gridSize)
-    let inactiveColor = SIMD4<Float>(0.14, 0.17, 0.21, 1.0)
-    let activeColor = SIMD4<Float>(0.74, 0.85, 1.0, 1.0)
+    let xHintColor = SIMD4<Float>(0.46, 0.34, 0.18, 1.0)  // darker hint axis (X control cue)
+    let yHintColor = SIMD4<Float>(0.72, 0.96, 0.78, 1.0)  // brighter hint axis (Y control cue)
+    let neutralColor = SIMD4<Float>(0.30, 0.36, 0.44, 1.0)
     let dashLength = Snake3DState.cellSize * 0.55
     let dashThickness = Snake3DState.blockSize * 0.12
     let head =
@@ -428,9 +471,32 @@ final class Snake3DRenderer: VisualPatternController {
       instanceIndex += 1
     }
 
-    let xColor = (direction == .posX || direction == .negX) ? activeColor : inactiveColor
-    let yColor = (direction == .posY || direction == .negY) ? activeColor : inactiveColor
-    let zColor = (direction == .posZ || direction == .negZ) ? activeColor : inactiveColor
+    func axisFamily(_ dir: SnakeDirection) -> Int {
+      switch dir {
+      case .posX, .negX: return 0
+      case .posY, .negY: return 1
+      case .posZ, .negZ: return 2
+      }
+    }
+
+    let displayRightInGrid = simd_inverse(currentWorldQuat).act(displayRight)
+    let displayUpInGrid = simd_inverse(currentWorldQuat).act(displayUp)
+    let rightFamily = axisFamily(nearestDirection(for: displayRightInGrid))
+    let upFamily = axisFamily(nearestDirection(for: displayUpInGrid))
+
+    func colorForWorldAxisFamily(_ family: Int) -> SIMD4<Float> {
+      if family == upFamily {
+        return yHintColor
+      }
+      if family == rightFamily {
+        return xHintColor
+      }
+      return neutralColor
+    }
+
+    let xColor = colorForWorldAxisFamily(0)
+    let yColor = colorForWorldAxisFamily(1)
+    let zColor = colorForWorldAxisFamily(2)
     let xScale = SIMD3<Float>(dashLength, dashThickness, dashThickness)
     let yScale = SIMD3<Float>(dashThickness, dashLength, dashThickness)
     let zScale = SIMD3<Float>(dashThickness, dashThickness, dashLength)

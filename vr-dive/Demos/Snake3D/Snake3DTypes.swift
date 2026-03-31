@@ -36,7 +36,7 @@ enum SnakeDirection: Int, CaseIterable {
 // MARK: - Game State
 
 struct Snake3DState {
-  static let gridSize: Int = 40
+  static let gridSize: Int = 80
   static let cellSize: Float = 0.2  // enlarged grid spacing for a larger play volume
   static let blockSize: Float = 0.192  // keep guide cells and snake blocks visually consistent
 
@@ -86,6 +86,8 @@ struct SnakeSegmentInstance {
 struct FoodInstance {
   var position: SIMD3<Float>
   var phase: Float  // animation phase offset
+  var hit: Float
+  var padding: SIMD3<Float> = .zero
 }
 
 /// Mesh vertex shared by all snake geometry

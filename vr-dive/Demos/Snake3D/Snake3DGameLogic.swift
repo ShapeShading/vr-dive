@@ -7,7 +7,7 @@ final class Snake3DGameLogic {
   private(set) var state: Snake3DState
 
   // MARK: - Constants
-  static let maxFoodCount = 16
+  static let maxFoodCount = 256
   static let initialMoveInterval: TimeInterval = 0.4
   static let minMoveInterval: TimeInterval = 0.15
   static let speedUpPerScore = 5  // every N score points, speed up

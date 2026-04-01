@@ -18,6 +18,7 @@ class GameManager {
     var dpadDown: Bool = false
     var dpadLeft: Bool = false
     var dpadRight: Bool = false
+    var rightShoulder: Bool = false
   }
 
   private let controllerQueue = DispatchQueue(label: "vr-dive.controller.state")
@@ -54,6 +55,7 @@ class GameManager {
     var buttonTriangle: Bool  // △ = 向上移动
     var buttonSquare: Bool  // □ = 切换方块类型
     var buttonCircle: Bool  // ○ = 随机旋转朝向
+    var buttonR1: Bool      // R1 = 加速前进
   }
 
   func getTetrisInput() -> TetrisInput {
@@ -66,7 +68,8 @@ class GameManager {
         buttonCross: controllerState.buttonA,  // PS5 × maps to buttonA
         buttonTriangle: controllerState.buttonY,  // PS5 △ maps to buttonY
         buttonSquare: controllerState.buttonX,  // PS5 □ maps to buttonX
-        buttonCircle: controllerState.buttonB  // PS5 ○ maps to buttonB
+        buttonCircle: controllerState.buttonB,  // PS5 ○ maps to buttonB
+        buttonR1: controllerState.rightShoulder
       )
     }
   }
@@ -116,6 +119,7 @@ class GameManager {
     let buttonX = gamepad.buttonX.isPressed
     let buttonY = gamepad.buttonY.isPressed
     let boostActive = gamepad.leftShoulder.isPressed || gamepad.rightShoulder.isPressed
+    let rightShoulder = gamepad.rightShoulder.isPressed
 
     // D-pad
     let dpadUp = gamepad.dpad.up.isPressed
@@ -135,6 +139,7 @@ class GameManager {
       controllerState.dpadDown = dpadDown
       controllerState.dpadLeft = dpadLeft
       controllerState.dpadRight = dpadRight
+      controllerState.rightShoulder = rightShoulder
     }
 
     logInputEvent(

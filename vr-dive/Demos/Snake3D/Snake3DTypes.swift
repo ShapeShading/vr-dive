@@ -87,7 +87,8 @@ struct FoodInstance {
   var position: SIMD3<Float>
   var phase: Float  // animation phase offset
   var hit: Float
-  var padding: SIMD3<Float> = .zero
+  var colorIndex: Float  // 0–3 food color palette index
+  var padding: SIMD2<Float> = .zero
 }
 
 /// Mesh vertex shared by all snake geometry

@@ -27,7 +27,8 @@ struct FoodInstance {
   float3 position;
   float  phase;
   float  hit;
-  float3 padding;
+  float  colorIndex;
+  float2 padding;
 };
 
 struct SnakeGuideInstance {
@@ -118,7 +119,7 @@ fragment float4 snake3DBodyFragmentShader(SnakeBodyVertexOut in [[stage_in]],
   float3 edgeColor = baseColor * 0.25;
   baseColor = mix(baseColor, edgeColor, edgeFactor);
 
-  float3 color = baseColor * (0.3 + ndotl * 0.7) + spec;
+  float3 color = baseColor * (0.5 + ndotl * 0.6) + spec;
   return float4(color, 1.0);
 }
 
@@ -132,6 +133,7 @@ struct FoodVertexOut {
   float  time;
   float  phase;
   float  hit;
+  float  colorIndex;
 };
 
 vertex FoodVertexOut snake3DFoodVertexShader(
@@ -150,10 +152,8 @@ vertex FoodVertexOut snake3DFoodVertexShader(
   SnakeMeshVertex vtx  = vertices[vertexID];
   FoodInstance    inst = instances[instanceID];
 
-  // Pulsing scale
-  float pulse = 1.0 + 0.12 * sin(uniforms.time * 3.0 + inst.phase);
   float blockSize = 0.192;
-  float3 worldPos = inst.position + vtx.position * (blockSize * pulse);
+  float3 worldPos = inst.position + vtx.position * blockSize;
 
   float3 transformed = applyWorldTransform(worldPos,
                                            uniforms.worldRotation,
@@ -167,6 +167,7 @@ vertex FoodVertexOut snake3DFoodVertexShader(
   out.time     = uniforms.time;
   out.phase    = inst.phase;
   out.hit      = inst.hit;
+  out.colorIndex = inst.colorIndex;
   return out;
 }
 
@@ -180,10 +181,15 @@ fragment float4 snake3DFoodFragmentShader(FoodVertexOut in [[stage_in]],
   float3 lightDir = normalize(float3(0.3, 1.0, -0.5));
   float  ndotl    = max(dot(normal, lightDir), 0.0);
 
-  // Red by default, switches to bright cyan when touched by guide dashes.
-  float  glow     = 0.7 + 0.3 * sin(in.time * 3.0 + in.phase);
-  float3 normalColor = float3(1.0, 0.15, 0.1) * glow;
-  float3 hitColor = float3(0.15, 0.95, 1.0) * (0.85 + 0.15 * glow);
+  // Per-food base color from palette (orange / blue / purple / hot-pink)
+  float3 paletteColor;
+  int ci = clamp(int(in.colorIndex), 0, 3);
+  if      (ci == 0) paletteColor = float3(1.00, 0.55, 0.05);  // orange
+  else if (ci == 1) paletteColor = float3(0.20, 0.50, 1.00);  // blue
+  else if (ci == 2) paletteColor = float3(0.75, 0.15, 1.00);  // purple
+  else              paletteColor = float3(1.00, 0.20, 0.55);  // hot pink
+  float3 normalColor = paletteColor;
+  float3 hitColor = float3(0.15, 0.95, 1.0);
   float3 baseColor = mix(normalColor, hitColor, saturate(in.hit));
 
   float3 absLocal   = abs(in.localPos);
@@ -191,7 +197,7 @@ fragment float4 snake3DFoodFragmentShader(FoodVertexOut in [[stage_in]],
   float  edgeFactor = smoothstep(0.35, 0.48, edgeDist);
   baseColor = mix(baseColor, baseColor * 0.3, edgeFactor);
 
-  float3 color = baseColor * (0.35 + ndotl * 0.65);
+  float3 color = baseColor * (0.55 + ndotl * 0.55);
   return float4(color, 1.0);
 }
 
@@ -238,6 +244,6 @@ fragment float4 snake3DBorderFragmentShader(BorderVertexOut in [[stage_in]],
   normal = isFrontFacing ? normal : -normal;
   float3 lightDir = normalize(float3(0.25, 1.0, -0.4));
   float ndotl = max(dot(normal, lightDir), 0.0);
-  float3 color = in.color.rgb * (0.55 + ndotl * 0.45);
+  float3 color = in.color.rgb * (0.65 + ndotl * 0.45);
   return float4(color, 1.0);
 }

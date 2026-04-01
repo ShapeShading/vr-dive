@@ -29,8 +29,8 @@ final class Snake3DRenderer: VisualPatternController {
   private var foodBuffer: MTLBuffer
   private var guideBuffer: MTLBuffer
   private let maxSegments = 512
-  private let maxFoods = 256
-  private let maxGuideInstances = Snake3DState.gridSize * 3
+  private let maxFoods = 1024
+  private let maxGuideInstances = Snake3DState.gridSize * 8
 
   // Border line buffer (static)
   private var borderBuffer: MTLBuffer!
@@ -50,7 +50,7 @@ final class Snake3DRenderer: VisualPatternController {
   private var rotationStartQuat: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
   private var targetWorldQuat: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
   private var rotationProgress: Float = 1.0  // 1.0 = done
-  private let rotationDuration: Float = 2.0
+  private let rotationDuration: Float = 1.2
 
   // MARK: Input debounce
   private var lastDpadTime: TimeInterval = 0
@@ -247,13 +247,16 @@ final class Snake3DRenderer: VisualPatternController {
     }
 
     // Reset
-    let optionsPressed = input.buttonCross  // □ for now; Options not exposed in TetrisInput
+    let optionsPressed = input.buttonCross
     // We reuse buttonCross (×) as game-over restart trigger since Options isn't in current input struct
     if gameLogic.state.isGameOver && optionsPressed && currentTime - lastOptionsTime > optionsDelay
     {
       resetToInitialState()
       lastOptionsTime = currentTime
     }
+
+    // R1 = boost forward speed
+    gameLogic.isBoosting = input.buttonR1
   }
 
   // MARK: - Rotation Logic
@@ -358,39 +361,45 @@ final class Snake3DRenderer: VisualPatternController {
       ptr[i] = FoodInstance(
         position: gridToWorld(grid),
         phase: Float(i) * 1.3,
-        hit: isHit ? 1.0 : 0.0)
+        hit: isHit ? 1.0 : 0.0,
+        colorIndex: Float(i % 4))
     }
   }
 
   private func isGuideDashHit(cell: SIMD3<Int>, head: SIMD3<Int>, direction: SnakeDirection) -> Bool
   {
-    func isForwardAligned(_ value: Int, headValue: Int, axisDirection: SnakeDirection) -> Bool {
-      switch axisDirection {
-      case .posX, .posY, .posZ:
-        return value >= headValue && (value - headValue) % 2 == 0
-      case .negX, .negY, .negZ:
-        return value <= headValue && (headValue - value) % 2 == 0
+    let period = 4
+    // A cell is "on a dash" if any of the 4 spiral rails covers it.
+    // Rail i covers positions with (pos - headVal) ≡ i*2 (mod period) in forward direction,
+    // or (pos % period) == i*2 for perpendicular axes.
+    func anyRailHits(value: Int, headValue: Int, isForward: Bool, negDir: Bool) -> Bool {
+      for railIdx in 0..<4 {
+        let offset = railIdx * 2
+        if isForward {
+          if negDir {
+            let diff = headValue - value
+            if diff >= 0 && diff % period == offset { return true }
+          } else {
+            let diff = value - headValue
+            if diff >= 0 && diff % period == offset { return true }
+          }
+        } else {
+          if value % period == offset { return true }
+        }
       }
+      return false
     }
 
-    let xOnDash: Bool
-    let yOnDash: Bool
-    let zOnDash: Bool
+    let xForward = direction == .posX || direction == .negX
+    let yForward = direction == .posY || direction == .negY
+    let zForward = direction == .posZ || direction == .negZ
 
-    switch direction {
-    case .posX, .negX:
-      xOnDash = isForwardAligned(cell.x, headValue: head.x, axisDirection: direction)
-      yOnDash = cell.y % 2 == 0
-      zOnDash = cell.z % 2 == 0
-    case .posY, .negY:
-      xOnDash = cell.x % 2 == 0
-      yOnDash = isForwardAligned(cell.y, headValue: head.y, axisDirection: direction)
-      zOnDash = cell.z % 2 == 0
-    case .posZ, .negZ:
-      xOnDash = cell.x % 2 == 0
-      yOnDash = cell.y % 2 == 0
-      zOnDash = isForwardAligned(cell.z, headValue: head.z, axisDirection: direction)
-    }
+    let xOnDash = anyRailHits(
+      value: cell.x, headValue: head.x, isForward: xForward, negDir: direction == .negX)
+    let yOnDash = anyRailHits(
+      value: cell.y, headValue: head.y, isForward: yForward, negDir: direction == .negY)
+    let zOnDash = anyRailHits(
+      value: cell.z, headValue: head.z, isForward: zForward, negDir: direction == .negZ)
 
     let onXLine = cell.y == head.y && cell.z == head.z && xOnDash
     let onYLine = cell.x == head.x && cell.z == head.z && yOnDash
@@ -453,7 +462,7 @@ final class Snake3DRenderer: VisualPatternController {
     let yHintColor = SIMD4<Float>(0.72, 0.96, 0.78, 1.0)  // brighter hint axis (Y control cue)
     let neutralColor = SIMD4<Float>(0.30, 0.36, 0.44, 1.0)
     let dashLength = Snake3DState.cellSize * 0.55
-    let dashThickness = Snake3DState.blockSize * 0.12
+    let dashThickness = Snake3DState.blockSize * 0.08
     let head =
       gameLogic.state.segments.first
       ?? SIMD3<Int>(Snake3DState.gridSize / 2, Snake3DState.gridSize / 2, Snake3DState.gridSize / 2)
@@ -501,50 +510,71 @@ final class Snake3DRenderer: VisualPatternController {
     let yScale = SIMD3<Float>(dashThickness, dashLength, dashThickness)
     let zScale = SIMD3<Float>(dashThickness, dashThickness, dashLength)
 
-    func forwardAlignedIndices(for axis: SnakeDirection) -> [Int] {
-      switch axis {
-      case .posX:
-        return Array(stride(from: head.x, to: Snake3DState.gridSize, by: 2))
-      case .negX:
-        return Array(stride(from: head.x, through: 0, by: -2))
-      case .posY:
-        return Array(stride(from: head.y, to: Snake3DState.gridSize, by: 2))
-      case .negY:
-        return Array(stride(from: head.y, through: 0, by: -2))
-      case .posZ:
-        return Array(stride(from: head.z, to: Snake3DState.gridSize, by: 2))
-      case .negZ:
-        return Array(stride(from: head.z, through: 0, by: -2))
+    let cell = Snake3DState.cellSize
+    let hx = Float(head.x)
+    let hy = Float(head.y)
+    let hz = Float(head.z)
+    let size = Snake3DState.gridSize
+
+    func gridWorldF(_ x: Float, _ y: Float, _ z: Float) -> SIMD3<Float> {
+      SIMD3<Float>(
+        (x - g * 0.5 + 0.5) * cell,
+        (y - g * 0.5 + 0.5) * cell,
+        (z - g * 0.5 + 0.5) * cell
+      )
+    }
+
+    // Spiral rails: 4 corners arranged in rotational order around each axis.
+    // Each rail i has dash phase offset i*2, period 8 → collectively same coverage
+    // as stride-2 but each rail is 4× less dense, creating a helix appearance.
+    let spiralCorners: [(Float, Float)] = [(0.5, 0.5), (0.5, -0.5), (-0.5, -0.5), (-0.5, 0.5)]
+    let period = 4
+
+    // Dash positions for one rail along an axis.
+    // fullGrid=true → cover whole axis with phase offset; false → forward from head.
+    func dashIndices(headVal: Int, railIdx: Int, fullGrid: Bool, negDir: Bool) -> [Int] {
+      let offset = railIdx * 2
+      if fullGrid {
+        return Array(stride(from: offset, to: size, by: period))
+      } else if negDir {
+        let start = headVal - offset
+        guard start >= 0 else { return [] }
+        return Array(stride(from: start, through: 0, by: -period))
+      } else {
+        let start = headVal + offset
+        guard start < size else { return [] }
+        return Array(stride(from: start, to: size, by: period))
       }
     }
 
-    let xIndices: [Int]
-    let yIndices: [Int]
-    let zIndices: [Int]
+    let xForward = direction == .posX || direction == .negX
+    let yForward = direction == .posY || direction == .negY
+    let zForward = direction == .posZ || direction == .negZ
+    let xNeg = direction == .negX
+    let yNeg = direction == .negY
+    let zNeg = direction == .negZ
 
-    switch direction {
-    case .posX, .negX:
-      xIndices = forwardAlignedIndices(for: direction)
-      yIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
-      zIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
-    case .posY, .negY:
-      xIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
-      yIndices = forwardAlignedIndices(for: direction)
-      zIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
-    case .posZ, .negZ:
-      xIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
-      yIndices = Array(stride(from: 0, to: Snake3DState.gridSize, by: 2))
-      zIndices = forwardAlignedIndices(for: direction)
-    }
+    for railIdx in 0..<4 {
+      let (pA, pB) = spiralCorners[railIdx]
 
-    for x in xIndices {
-      addDash(SIMD3<Int>(x, head.y, head.z), scale: xScale, color: xColor)
-    }
-    for y in yIndices {
-      addDash(SIMD3<Int>(head.x, y, head.z), scale: yScale, color: yColor)
-    }
-    for z in zIndices {
-      addDash(SIMD3<Int>(head.x, head.y, z), scale: zScale, color: zColor)
+      // X-axis rail (corners in YZ plane)
+      for x in dashIndices(headVal: head.x, railIdx: railIdx, fullGrid: !xForward, negDir: xNeg) {
+        let pos = gridWorldF(Float(x), hy + pA, hz + pB)
+        ptr[instanceIndex] = SnakeGuideInstance(position: pos, scale: xScale, color: xColor)
+        instanceIndex += 1
+      }
+      // Y-axis rail (corners in XZ plane)
+      for y in dashIndices(headVal: head.y, railIdx: railIdx, fullGrid: !yForward, negDir: yNeg) {
+        let pos = gridWorldF(hx + pA, Float(y), hz + pB)
+        ptr[instanceIndex] = SnakeGuideInstance(position: pos, scale: yScale, color: yColor)
+        instanceIndex += 1
+      }
+      // Z-axis rail (corners in XY plane)
+      for z in dashIndices(headVal: head.z, railIdx: railIdx, fullGrid: !zForward, negDir: zNeg) {
+        let pos = gridWorldF(hx + pA, hy + pB, Float(z))
+        ptr[instanceIndex] = SnakeGuideInstance(position: pos, scale: zScale, color: zColor)
+        instanceIndex += 1
+      }
     }
 
     guideInstanceCount = instanceIndex

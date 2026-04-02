@@ -55,7 +55,7 @@ class GameManager {
     var buttonTriangle: Bool  // △ = 向上移动
     var buttonSquare: Bool  // □ = 切换方块类型
     var buttonCircle: Bool  // ○ = 随机旋转朝向
-    var buttonR1: Bool      // R1 = 加速前进
+    var buttonR1: Bool  // R1 = 加速前进
   }
 
   func getTetrisInput() -> TetrisInput {

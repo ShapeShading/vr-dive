@@ -116,6 +116,11 @@ fragment float4 snake3DBodyFragmentShader(SnakeBodyVertexOut in [[stage_in]],
   float  t = in.color.a;   // 0=head, 1=tail
   baseColor = mix(baseColor, baseColor * 0.25, t * 0.7);
 
+  // Diagonal gradient to break up visual merging between adjacent segments.
+  float3 bodyGradDir = normalize(float3(0.6, 0.8, 0.4));
+  float  bodyGradT   = saturate(dot(in.localPos, bodyGradDir) * 2.0 + 0.5);
+  baseColor = mix(baseColor * 0.88, baseColor * 1.12, bodyGradT);
+
   float3 edgeColor = baseColor * 0.25;
   baseColor = mix(baseColor, edgeColor, edgeFactor);
 
@@ -152,7 +157,16 @@ vertex FoodVertexOut snake3DFoodVertexShader(
   SnakeMeshVertex vtx  = vertices[vertexID];
   FoodInstance    inst = instances[instanceID];
 
-  float blockSize = 0.192;
+  // Shrink block only when very close to camera to avoid obstructing view.
+  // Block center distance determines scale; normal size beyond ~0.6 m.
+  float3 centerTransformed = applyWorldTransform(inst.position,
+                                                  uniforms.worldRotation,
+                                                  uniforms.anchorTranslation);
+  float  camDist    = length(centerTransformed);
+  float  proximity  = saturate(1.0 - camDist / 0.6);  // 1=touching cam, 0=>=0.6m
+  float  normalSize = 0.192;
+  float  minSize    = 0.04;
+  float  blockSize  = mix(normalSize, minSize, proximity * proximity);
   float3 worldPos = inst.position + vtx.position * blockSize;
 
   float3 transformed = applyWorldTransform(worldPos,
@@ -188,7 +202,15 @@ fragment float4 snake3DFoodFragmentShader(FoodVertexOut in [[stage_in]],
   else if (ci == 1) paletteColor = float3(0.20, 0.50, 1.00);  // blue
   else if (ci == 2) paletteColor = float3(0.75, 0.15, 1.00);  // purple
   else              paletteColor = float3(1.00, 0.20, 0.55);  // hot pink
-  float3 normalColor = paletteColor;
+
+  // Fixed-direction diagonal gradient so adjacent same-color blocks stay distinguishable.
+  // Project local position onto a fixed diagonal; this produces a unique shade per face corner.
+  float3 gradDir = normalize(float3(0.6, 0.8, 0.4));
+  float  gradT   = dot(in.localPos, gradDir) * 2.0 + 0.5; // roughly [-0.5, 1.5]
+  gradT = saturate(gradT);
+  float3 gradColor = mix(paletteColor * 0.82, paletteColor * 1.18, gradT);
+
+  float3 normalColor = gradColor;
   float3 hitColor = float3(0.15, 0.95, 1.0);
   float3 baseColor = mix(normalColor, hitColor, saturate(in.hit));
 
@@ -197,7 +219,12 @@ fragment float4 snake3DFoodFragmentShader(FoodVertexOut in [[stage_in]],
   float  edgeFactor = smoothstep(0.35, 0.48, edgeDist);
   baseColor = mix(baseColor, baseColor * 0.3, edgeFactor);
 
-  float3 color = baseColor * (0.55 + ndotl * 0.55);
+  // Distance-based brightness: closer = brighter, farther = darker.
+  float dist = length(in.worldPos);
+  float distFade = saturate(1.0 - dist * 0.13);  // full at ~0m, half at ~5m
+  float distScale = mix(0.55, 1.25, distFade);
+
+  float3 color = baseColor * (0.55 + ndotl * 0.55) * distScale;
   return float4(color, 1.0);
 }
 

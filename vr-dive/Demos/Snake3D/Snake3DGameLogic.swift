@@ -7,7 +7,7 @@ final class Snake3DGameLogic {
   private(set) var state: Snake3DState
 
   // MARK: - Constants
-  static let maxFoodCount = 1024
+  static let maxFoodCount = 4096
   static let initialMoveInterval: TimeInterval = 0.32
   static let minMoveInterval: TimeInterval = 0.15
   static let speedUpPerScore = 5  // every N score points, speed up
@@ -37,7 +37,7 @@ final class Snake3DGameLogic {
     }
 
     while currentTime - lastMoveTime >= moveInterval * (isBoosting ? 0.5 : 1.0) {
-    lastMoveTime += moveInterval * (isBoosting ? 0.5 : 1.0)
+      lastMoveTime += moveInterval * (isBoosting ? 0.5 : 1.0)
       step()
       if state.isGameOver {
         break

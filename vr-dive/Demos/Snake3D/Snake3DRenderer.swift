@@ -29,7 +29,7 @@ final class Snake3DRenderer: VisualPatternController {
   private var foodBuffer: MTLBuffer
   private var guideBuffer: MTLBuffer
   private let maxSegments = 512
-  private let maxFoods = 1024
+  private let maxFoods = 4096
   private let maxGuideInstances = Snake3DState.gridSize * 8
 
   // Border line buffer (static)
@@ -68,6 +68,8 @@ final class Snake3DRenderer: VisualPatternController {
 
   // MARK: Last update time
   private var lastUpdateTime: TimeInterval = 0
+  // Game-local time: advances only when updateSimulation runs (pauses when paused)
+  private var gameTime: TimeInterval = 0
 
   // MARK: - Init
 
@@ -110,6 +112,7 @@ final class Snake3DRenderer: VisualPatternController {
     let currentTime = TimeInterval(context.time)
     let deltaTime = Float(max(0, currentTime - lastUpdateTime))
     lastUpdateTime = currentTime
+    gameTime += TimeInterval(deltaTime)
 
     // Advance rotation interpolation
     if rotationProgress < 1.0 {
@@ -122,7 +125,7 @@ final class Snake3DRenderer: VisualPatternController {
     processInput(currentTime: currentTime)
 
     // Update game tick
-    gameLogic.update(currentTime: currentTime)
+    gameLogic.update(currentTime: gameTime)
 
     // Upload instance data
     uploadBodyInstances()
@@ -132,6 +135,7 @@ final class Snake3DRenderer: VisualPatternController {
 
   func resetToInitialState() {
     gameLogic.reset()
+    gameTime = 0
     currentWorldQuat = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
     rotationStartQuat = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
     targetWorldQuat = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)

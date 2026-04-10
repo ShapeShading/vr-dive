@@ -26,6 +26,7 @@ final class StereographicRenderer: VisualPatternController {
     let radialSegments: Int
     let sphereLatitudeSegments: Int
     let sphereLongitudeSegments: Int
+    let meshUpdateInterval: Float
     let worldScale: Float
     let worldOffset: SIMD3<Float>
     let baseRadius: Float
@@ -73,6 +74,7 @@ final class StereographicRenderer: VisualPatternController {
   private let meshLayout: MeshLayout
   private var animationTime: Float = 0
   private var lastSimulationTimestamp: Float?
+  private var meshUpdateAccumulator: Float = 0
 
   init(
     device: MTLDevice,
@@ -132,6 +134,13 @@ final class StereographicRenderer: VisualPatternController {
     lastSimulationTimestamp = context.time
     animationTime += deltaTime * max(0, context.speedMultiplier)
 
+    let updateInterval = max(0, style.meshUpdateInterval)
+    if updateInterval > 0 {
+      meshUpdateAccumulator += deltaTime
+      guard meshUpdateAccumulator >= updateInterval else { return }
+      meshUpdateAccumulator.formTruncatingRemainder(dividingBy: updateInterval)
+    }
+
     let vertices = Self.generateMeshVertices(
       definition: definition,
       style: style,
@@ -179,6 +188,7 @@ final class StereographicRenderer: VisualPatternController {
   func resetToInitialState() {
     animationTime = 0
     lastSimulationTimestamp = nil
+    meshUpdateAccumulator = 0
     let vertices = Self.generateMeshVertices(
       definition: definition,
       style: style,
@@ -359,6 +369,7 @@ final class StereographicRenderer: VisualPatternController {
         radialSegments: 12,
         sphereLatitudeSegments: 6,
         sphereLongitudeSegments: 10,
+        meshUpdateInterval: 0,
         worldScale: 0.26,
         worldOffset: SIMD3<Float>(0, 0, -1.2),
         baseRadius: 0.018,
@@ -369,13 +380,14 @@ final class StereographicRenderer: VisualPatternController {
       )
     case .twentyFourCell:
       return PolychoronStyle(
-        edgeSegments: 20,
-        radialSegments: 10,
-        sphereLatitudeSegments: 5,
-        sphereLongitudeSegments: 8,
+        edgeSegments: 32,
+        radialSegments: 12,
+        sphereLatitudeSegments: 6,
+        sphereLongitudeSegments: 10,
+        meshUpdateInterval: 0,
         worldScale: 0.24,
         worldOffset: SIMD3<Float>(0, 0, -1.2),
-        baseRadius: 0.013,
+        baseRadius: 0.012,
         minimumRadius: 0.0022,
         maximumRadius: 0.016,
         junctionRadiusScale: 1.12,
@@ -383,30 +395,32 @@ final class StereographicRenderer: VisualPatternController {
       )
     case .oneHundredTwentyCell:
       return PolychoronStyle(
-        edgeSegments: 10,
-        radialSegments: 5,
-        sphereLatitudeSegments: 3,
-        sphereLongitudeSegments: 5,
+        edgeSegments: 7,
+        radialSegments: 4,
+        sphereLatitudeSegments: 2,
+        sphereLongitudeSegments: 3,
+        meshUpdateInterval: 1.0 / 20.0,
         worldScale: 0.15,
         worldOffset: SIMD3<Float>(0, 0, -1.25),
-        baseRadius: 0.007,
-        minimumRadius: 0.0012,
-        maximumRadius: 0.007,
-        junctionRadiusScale: 1.05,
+        baseRadius: 0.0048,
+        minimumRadius: 0.00075,
+        maximumRadius: 0.0048,
+        junctionRadiusScale: 0.9,
         junctionColor: junctionHighlight
       )
     case .sixHundredCell:
       return PolychoronStyle(
-        edgeSegments: 10,
-        radialSegments: 6,
-        sphereLatitudeSegments: 4,
-        sphereLongitudeSegments: 6,
+        edgeSegments: 6,
+        radialSegments: 4,
+        sphereLatitudeSegments: 2,
+        sphereLongitudeSegments: 3,
+        meshUpdateInterval: 1.0 / 15.0,
         worldScale: 0.18,
         worldOffset: SIMD3<Float>(0, 0, -1.25),
-        baseRadius: 0.008,
-        minimumRadius: 0.0015,
-        maximumRadius: 0.010,
-        junctionRadiusScale: 1.08,
+        baseRadius: 0.0042,
+        minimumRadius: 0.0007,
+        maximumRadius: 0.0055,
+        junctionRadiusScale: 0.88,
         junctionColor: junctionHighlight
       )
     }

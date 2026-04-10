@@ -605,6 +605,16 @@ class Renderer {
       print("[Renderer] PongWar pattern unavailable.")
     }
 
+    if let stereographic = try? StereographicRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.stereographicProjection] = stereographic
+    } else {
+      print("[Renderer] Stereographic projection pattern unavailable.")
+    }
+
     if let lorenz = try? LorenzRenderer(
       device: device,
       library: library,

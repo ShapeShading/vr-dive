@@ -32,6 +32,7 @@ struct PatternMenuView: View {
     VStack(alignment: .leading, spacing: 8) {
       Text("图案切换")
         .font(.headline)
+
       Picker("当前图案", selection: $model.selectedPattern) {
         ForEach(VisualPatternKind.allCases) { pattern in
           Text(pattern.displayName).tag(pattern)

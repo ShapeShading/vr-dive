@@ -4,6 +4,7 @@ import Observation
 enum VisualPatternKind: String, CaseIterable, Identifiable {
   case pongWar
   case cubeField
+  case stereographicProjection
   case lorenzAttractor
   case fourWingAttractor
   case aizawaAttractor
@@ -20,6 +21,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "PongWar"
     case .cubeField:
       return "立方体"
+    case .stereographicProjection:
+      return "4D 立体投影"
     case .lorenzAttractor:
       return "Lorenz 吸引子"
     case .fourWingAttractor:

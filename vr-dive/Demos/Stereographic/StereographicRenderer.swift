@@ -4,12 +4,34 @@ import Metal
 import simd
 
 final class StereographicRenderer: VisualPatternController {
+  private struct EdgeSpec {
+    let axisA: Int
+    let signA: Float
+    let axisB: Int
+    let signB: Float
+    let color: SIMD4<Float>
+  }
+
   let identifier: VisualPatternKind = .stereographicProjection
   let preferredClearColor = MTLClearColor(red: 0.01, green: 0.01, blue: 0.015, alpha: 1)
 
-  private static let ringSegments = 360
-  private static let radialSegments = 14
+  private static let edgeSegments = 56
+  private static let radialSegments = 12
+  private static let sphereLatitudeSegments = 8
+  private static let sphereLongitudeSegments = 12
   private static let maxDeltaTime: Float = 1.0 / 45.0
+  private static let primaryRotationSpeed: Float = 0.22
+  private static let secondaryRotationSpeed: Float = 0.11
+  private static let worldScale: Float = 0.24
+  private static let baseRadius: Float = 0.015
+  private static let minimumRadius: Float = 0.0025
+  private static let maximumRadius: Float = 0.024
+  private static let junctionRadiusScale: Float = 1.22
+  private static let junctionColor = SIMD4<Float>(0.93, 0.94, 0.97, 1.0)
+  private static let e1 = SIMD4<Float>(1.0 / sqrt(2.0), -1.0 / sqrt(2.0), 0.0, 0.0)
+  private static let e2 = SIMD4<Float>(0.5, 0.5, -0.5, -0.5)
+  private static let e3 = SIMD4<Float>(0.0, 0.0, 1.0 / sqrt(2.0), -1.0 / sqrt(2.0))
+  private static let nPole = SIMD4<Float>(repeating: 0.5)
   private static let circlePairs: [(Int, Int)] = [
     (0, 1),
     (0, 2),
@@ -47,14 +69,14 @@ final class StereographicRenderer: VisualPatternController {
     depthDescriptor.isDepthWriteEnabled = true
     depthStencilState = device.makeDepthStencilState(descriptor: depthDescriptor)!
 
-    let initialVertices = Self.generateTubeVertices(animationTime: 0)
+    let initialVertices = Self.generateSkeletonVertices(animationTime: 0)
     vertexBuffer = device.makeBuffer(
       bytes: initialVertices,
       length: MemoryLayout<StereographicVertex>.stride * initialVertices.count,
       options: [.storageModeShared]
     )!
 
-    let indices = Self.generateTubeIndices()
+    let indices = Self.generateSkeletonIndices()
     indexCount = indices.count
     indexBuffer = device.makeBuffer(
       bytes: indices,
@@ -73,7 +95,7 @@ final class StereographicRenderer: VisualPatternController {
     self.lastSimulationTimestamp = context.time
     animationTime += deltaTime * 0.5 * max(0.01, context.speedMultiplier)
 
-    let vertices = Self.generateTubeVertices(animationTime: animationTime)
+    let vertices = Self.generateSkeletonVertices(animationTime: animationTime)
     vertices.withUnsafeBytes { ptr in
       guard let base = ptr.baseAddress, ptr.count > 0 else { return }
       memcpy(vertexBuffer.contents(), base, ptr.count)
@@ -115,7 +137,7 @@ final class StereographicRenderer: VisualPatternController {
   func resetToInitialState() {
     animationTime = 0
     lastSimulationTimestamp = nil
-    let vertices = Self.generateTubeVertices(animationTime: 0)
+    let vertices = Self.generateSkeletonVertices(animationTime: 0)
     vertices.withUnsafeBytes { ptr in
       guard let base = ptr.baseAddress, ptr.count > 0 else { return }
       memcpy(vertexBuffer.contents(), base, ptr.count)
@@ -151,47 +173,34 @@ final class StereographicRenderer: VisualPatternController {
     return try device.makeRenderPipelineState(descriptor: descriptor)
   }
 
-  private static func generateTubeVertices(animationTime: Float) -> [StereographicVertex] {
-    let e1 = SIMD4<Float>(1.0 / sqrt(2.0), -1.0 / sqrt(2.0), 0.0, 0.0)
-    let e2 = SIMD4<Float>(0.5, 0.5, -0.5, -0.5)
-    let e3 = SIMD4<Float>(0.0, 0.0, 1.0 / sqrt(2.0), -1.0 / sqrt(2.0))
-    let nPole = SIMD4<Float>(repeating: 0.5)
-
-    let worldScale: Float = 0.24
-    let baseRadius: Float = 0.0175
+  private static func generateSkeletonVertices(animationTime: Float) -> [StereographicVertex] {
+    let edges = edgeSpecifications()
+    let vertexPoints = vertexPoints4D()
+    let edgeVertexCount = edges.count * (edgeSegments + 1) * radialSegments
+    let sphereVertexCount = vertexPoints.count * (sphereLatitudeSegments + 1) * (sphereLongitudeSegments + 1)
     var vertices: [StereographicVertex] = []
-    vertices.reserveCapacity(circlePairs.count * ringSegments * radialSegments)
+    vertices.reserveCapacity(edgeVertexCount + sphereVertexCount)
 
-    for (pairIndex, pair) in circlePairs.enumerated() {
-      let color = colors[pairIndex]
+    for edge in edges {
+      var centers = Array(repeating: SIMD3<Float>(repeating: 0), count: edgeSegments + 1)
+      var tangents = Array(repeating: SIMD3<Float>(repeating: 0), count: edgeSegments + 1)
+      var radii = Array(repeating: Float(0), count: edgeSegments + 1)
 
-      var centers = Array(repeating: SIMD3<Float>(repeating: 0), count: ringSegments)
-      var tangents = Array(repeating: SIMD3<Float>(repeating: 0), count: ringSegments)
-      var radii = Array(repeating: Float(0), count: ringSegments)
-
-      for i in 0..<ringSegments {
-        let t = (Float(i) / Float(ringSegments)) * (2.0 * .pi)
+      for i in 0...edgeSegments {
+        let t = (Float(i) / Float(edgeSegments)) * (.pi * 0.5)
         var p4 = SIMD4<Float>(repeating: 0)
-        p4[pair.0] = cos(t)
-        p4[pair.1] = sin(t)
+        p4[edge.axisA] = edge.signA * cos(t)
+        p4[edge.axisB] = edge.signB * sin(t)
 
         let rotated = rotate4D(point: p4, time: animationTime)
-        let dotNPole = simd_dot(rotated, nPole)
-        let denom = max(1e-4, 1.0 - dotNPole)
-        let projection = (rotated - dotNPole * nPole) / denom
-
-        let u = simd_dot(projection, e1)
-        let v = simd_dot(projection, e2)
-        let w = simd_dot(projection, e3)
-        centers[i] = SIMD3<Float>(u, v, w) * worldScale
-
-        let perspectiveRadius = baseRadius * (1.0 / denom) * worldScale
-        radii[i] = min(max(perspectiveRadius, 0.003), 0.03)
+        let projected = projectedPoint(for: rotated)
+        centers[i] = projected.position
+        radii[i] = projected.radius
       }
 
-      for i in 0..<ringSegments {
-        let prev = centers[(i - 1 + ringSegments) % ringSegments]
-        let next = centers[(i + 1) % ringSegments]
+      for i in 0...edgeSegments {
+        let prev = centers[max(0, i - 1)]
+        let next = centers[min(edgeSegments, i + 1)]
         let delta = next - prev
         tangents[i] =
           simd_length_squared(delta) > 1e-8 ? simd_normalize(delta) : SIMD3<Float>(1, 0, 0)
@@ -199,7 +208,7 @@ final class StereographicRenderer: VisualPatternController {
 
       let frames = makeTransportFrames(centers: centers, tangents: tangents)
 
-      for i in 0..<ringSegments {
+      for i in 0...edgeSegments {
         let frame = frames[i]
         let normal = frame.normal
         let binormal = frame.binormal
@@ -208,7 +217,33 @@ final class StereographicRenderer: VisualPatternController {
           let angle = (Float(j) / Float(radialSegments)) * (2.0 * .pi)
           let ringDir = normal * cos(angle) + binormal * sin(angle)
           let position = centers[i] + ringDir * radii[i]
-          vertices.append(StereographicVertex(position: position, normal: ringDir, color: color))
+          vertices.append(StereographicVertex(position: position, normal: ringDir, color: edge.color))
+        }
+      }
+    }
+
+    for point4D in vertexPoints {
+      let rotated = rotate4D(point: point4D, time: animationTime)
+      let projected = projectedPoint(for: rotated)
+      let radius = min(projected.radius * junctionRadiusScale, maximumRadius * 1.3)
+
+      for latitude in 0...sphereLatitudeSegments {
+        let v = Float(latitude) / Float(sphereLatitudeSegments)
+        let phi = v * .pi
+        let sinPhi = sin(phi)
+        let cosPhi = cos(phi)
+
+        for longitude in 0...sphereLongitudeSegments {
+          let u = Float(longitude) / Float(sphereLongitudeSegments)
+          let theta = u * (2.0 * .pi)
+          let sinTheta = sin(theta)
+          let cosTheta = cos(theta)
+
+          let normal = SIMD3<Float>(sinPhi * cosTheta, cosPhi, sinPhi * sinTheta)
+          let position = projected.position + normal * radius
+          vertices.append(
+            StereographicVertex(position: position, normal: normal, color: junctionColor)
+          )
         }
       }
     }
@@ -216,21 +251,43 @@ final class StereographicRenderer: VisualPatternController {
     return vertices
   }
 
-  private static func generateTubeIndices() -> [UInt16] {
-    var indices: [UInt16] = []
-    indices.reserveCapacity(circlePairs.count * ringSegments * radialSegments * 6)
+  private static func generateSkeletonIndices() -> [UInt16] {
+    let edgeCount = edgeSpecifications().count
+    let vertexCount = vertexPoints4D().count
+    let edgeStride = (edgeSegments + 1) * radialSegments
+    let sphereStride = (sphereLatitudeSegments + 1) * (sphereLongitudeSegments + 1)
 
-    for c in 0..<circlePairs.count {
-      let base = c * ringSegments * radialSegments
-      for i in 0..<ringSegments {
-        let ni = (i + 1) % ringSegments
+    var indices: [UInt16] = []
+    let edgeIndexCount = edgeCount * edgeSegments * radialSegments * 6
+    let sphereIndexCount = vertexCount * sphereLatitudeSegments * sphereLongitudeSegments * 6
+    indices.reserveCapacity(edgeIndexCount + sphereIndexCount)
+
+    for edgeIndex in 0..<edgeCount {
+      let base = edgeIndex * edgeStride
+      for i in 0..<edgeSegments {
         for j in 0..<radialSegments {
           let nj = (j + 1) % radialSegments
 
           let a = UInt16(base + i * radialSegments + j)
-          let b = UInt16(base + ni * radialSegments + j)
-          let c1 = UInt16(base + ni * radialSegments + nj)
+          let b = UInt16(base + (i + 1) * radialSegments + j)
+          let c1 = UInt16(base + (i + 1) * radialSegments + nj)
           let d = UInt16(base + i * radialSegments + nj)
+
+          indices.append(contentsOf: [a, b, c1, a, c1, d])
+        }
+      }
+    }
+
+    let sphereBase = edgeCount * edgeStride
+    for sphereIndex in 0..<vertexCount {
+      let base = sphereBase + sphereIndex * sphereStride
+      for latitude in 0..<sphereLatitudeSegments {
+        for longitude in 0..<sphereLongitudeSegments {
+          let rowStride = sphereLongitudeSegments + 1
+          let a = UInt16(base + latitude * rowStride + longitude)
+          let b = UInt16(base + (latitude + 1) * rowStride + longitude)
+          let c1 = UInt16(base + (latitude + 1) * rowStride + longitude + 1)
+          let d = UInt16(base + latitude * rowStride + longitude + 1)
 
           indices.append(contentsOf: [a, b, c1, a, c1, d])
         }
@@ -242,12 +299,9 @@ final class StereographicRenderer: VisualPatternController {
 
   private static func rotate4D(point: SIMD4<Float>, time: Float) -> SIMD4<Float> {
     var p = point
-    p = rotateInPlane(point: p, i: 0, j: 1, angle: time * 0.27)
-    p = rotateInPlane(point: p, i: 0, j: 2, angle: time * 0.19)
-    p = rotateInPlane(point: p, i: 0, j: 3, angle: time * 0.23)
-    p = rotateInPlane(point: p, i: 1, j: 2, angle: time * 0.31)
-    p = rotateInPlane(point: p, i: 1, j: 3, angle: time * 0.17)
-    p = rotateInPlane(point: p, i: 2, j: 3, angle: time * 0.29)
+    // Standard double rotation in two completely orthogonal invariant planes.
+    p = rotateInPlane(point: p, i: 0, j: 1, angle: time * primaryRotationSpeed)
+    p = rotateInPlane(point: p, i: 2, j: 3, angle: time * secondaryRotationSpeed)
     return p
   }
 
@@ -305,6 +359,10 @@ final class StereographicRenderer: VisualPatternController {
       frames[index] = (orthogonalNormal, binormal)
     }
 
+    if centers.count <= 2 {
+      return frames
+    }
+
     let startNormal = frames[0].normal
     let endNormal = frames[centers.count - 1].normal
     let endTangent = tangents[0]
@@ -321,6 +379,61 @@ final class StereographicRenderer: VisualPatternController {
     }
 
     return frames
+  }
+
+  private static func projectedPoint(for point: SIMD4<Float>) -> (position: SIMD3<Float>, radius: Float) {
+    let dotNPole = simd_dot(point, nPole)
+    let denom = max(1e-4, 1.0 - dotNPole)
+    let projection = (point - dotNPole * nPole) / denom
+
+    let u = simd_dot(projection, e1)
+    let v = simd_dot(projection, e2)
+    let w = simd_dot(projection, e3)
+    let position = SIMD3<Float>(u, v, w) * worldScale
+
+    let perspectiveRadius = baseRadius * worldScale / denom
+    let radius = min(max(perspectiveRadius, minimumRadius), maximumRadius)
+    return (position, radius)
+  }
+
+  private static func edgeSpecifications() -> [EdgeSpec] {
+    var edges: [EdgeSpec] = []
+    edges.reserveCapacity(circlePairs.count * 4)
+
+    let signs: [Float] = [-1.0, 1.0]
+    for (pairIndex, pair) in circlePairs.enumerated() {
+      let color = colors[pairIndex]
+      for signA in signs {
+        for signB in signs {
+          edges.append(
+            EdgeSpec(
+              axisA: pair.0,
+              signA: signA,
+              axisB: pair.1,
+              signB: signB,
+              color: color
+            )
+          )
+        }
+      }
+    }
+
+    return edges
+  }
+
+  private static func vertexPoints4D() -> [SIMD4<Float>] {
+    var points: [SIMD4<Float>] = []
+    points.reserveCapacity(8)
+
+    for axis in 0..<4 {
+      for sign: Float in [-1.0, 1.0] {
+        var point = SIMD4<Float>(repeating: 0)
+        point[axis] = sign
+        points.append(point)
+      }
+    }
+
+    return points
   }
 
   private static func rotate(vector: SIMD3<Float>, around axis: SIMD3<Float>, angle: Float)

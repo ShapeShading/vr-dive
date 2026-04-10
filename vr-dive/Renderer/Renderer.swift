@@ -605,14 +605,25 @@ class Renderer {
       print("[Renderer] PongWar pattern unavailable.")
     }
 
-    if let stereographic = try? StereographicRenderer(
-      device: device,
-      library: library,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.stereographicProjection] = stereographic
-    } else {
-      print("[Renderer] Stereographic projection pattern unavailable.")
+    let polychoronConfigs: [(VisualPatternKind, RegularPolychoronKind, String)] = [
+      (.sixteenCellProjection, .sixteenCell, "16-cell"),
+      (.twentyFourCellProjection, .twentyFourCell, "24-cell"),
+      (.oneHundredTwentyCellProjection, .oneHundredTwentyCell, "120-cell"),
+      (.sixHundredCellProjection, .sixHundredCell, "600-cell"),
+    ]
+
+    for (patternKind, polychoronKind, label) in polychoronConfigs {
+      if let renderer = try? StereographicRenderer(
+        device: device,
+        library: library,
+        patternKind: patternKind,
+        polychoronKind: polychoronKind,
+        maxViewCount: maxViewCount
+      ) {
+        controllers[patternKind] = renderer
+      } else {
+        print("[Renderer] \(label) projection pattern unavailable.")
+      }
     }
 
     if let lorenz = try? LorenzRenderer(

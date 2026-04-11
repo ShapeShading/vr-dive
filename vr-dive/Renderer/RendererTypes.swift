@@ -25,6 +25,8 @@ struct PatternSimulationContext {
   let commandQueue: MTLCommandQueue
   let time: Float
   let speedMultiplier: Float
+  let isPaused: Bool
+  let originCellInspectionEnabled: Bool
 }
 
 struct PatternRenderContext {
@@ -54,7 +56,12 @@ protocol VisualPatternController: AnyObject {
   var identifier: VisualPatternKind { get }
   var preferredClearColor: MTLClearColor { get }
 
+  func synchronizeState(_ context: PatternSimulationContext)
   func updateSimulation(_ context: PatternSimulationContext)
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext)
   func resetToInitialState()
+}
+
+extension VisualPatternController {
+  func synchronizeState(_ context: PatternSimulationContext) {}
 }

@@ -56,9 +56,10 @@ struct ToggleImmersiveSpaceButton: View {
       Text(appModel.immersiveSpaceState == .open ? "退出沉浸模式" : "进入沉浸模式")
     }
     .disabled(appModel.immersiveSpaceState == .inTransition)
+    .buttonStyle(.bordered)
     .animation(.none, value: 0)
-    .font(.title2)
+    .font(.headline)
     .fontWeight(.semibold)
-    .padding()
+    .padding(.vertical, 4)
   }
 }

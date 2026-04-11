@@ -4,6 +4,8 @@ import Observation
 enum VisualPatternKind: String, CaseIterable, Identifiable {
   case pongWar
   case cubeField
+  case fiveCellProjection
+  case eightCellProjection
   case sixteenCellProjection
   case twentyFourCellProjection
   case oneHundredTwentyCellProjection
@@ -18,12 +20,26 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
 
   var id: String { rawValue }
 
+  var supportsOriginCellInspection: Bool {
+    switch self {
+    case .fiveCellProjection, .eightCellProjection, .sixteenCellProjection, .twentyFourCellProjection,
+      .oneHundredTwentyCellProjection, .sixHundredCellProjection:
+      return true
+    default:
+      return false
+    }
+  }
+
   var displayName: String {
     switch self {
     case .pongWar:
       return "PongWar"
     case .cubeField:
-      return "立方体"
+      return "杂物空间"
+    case .fiveCellProjection:
+      return "正五胞体投影"
+    case .eightCellProjection:
+      return "正八胞体投影"
     case .sixteenCellProjection:
       return "正十六胞体投影"
     case .twentyFourCellProjection:
@@ -56,6 +72,7 @@ final class PatternCoordinator {
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0
+  private var _originCellInspectionEnabled: Bool = false
 
   func currentPattern() -> VisualPatternKind {
     queue.sync { _current }
@@ -92,6 +109,14 @@ final class PatternCoordinator {
   func setSpeedMultiplier(_ multiplier: Float) {
     queue.async(flags: .barrier) { self._speedMultiplier = multiplier }
   }
+
+  func originCellInspectionEnabled() -> Bool {
+    queue.sync { _originCellInspectionEnabled }
+  }
+
+  func setOriginCellInspectionEnabled(_ enabled: Bool) {
+    queue.async(flags: .barrier) { self._originCellInspectionEnabled = enabled }
+  }
 }
 
 @MainActor
@@ -99,6 +124,9 @@ final class PatternCoordinator {
 final class PatternMenuModel {
   var selectedPattern: VisualPatternKind {
     didSet {
+      if !selectedPattern.supportsOriginCellInspection && originCellInspectionEnabled {
+        originCellInspectionEnabled = false
+      }
       coordinator.setPattern(selectedPattern)
     }
   }
@@ -115,17 +143,28 @@ final class PatternMenuModel {
     }
   }
 
+  var originCellInspectionEnabled: Bool = false {
+    didSet {
+      coordinator.setOriginCellInspectionEnabled(originCellInspectionEnabled)
+      if originCellInspectionEnabled {
+        isPaused = true
+      }
+    }
+  }
+
   private let coordinator: PatternCoordinator
 
   init(coordinator: PatternCoordinator) {
     self.coordinator = coordinator
     self.selectedPattern = coordinator.currentPattern()
     self.isPaused = coordinator.isPaused()
+    self.originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
   }
 
   func refreshFromCoordinator() {
     selectedPattern = coordinator.currentPattern()
     isPaused = coordinator.isPaused()
+    originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
   }
 
   func reset() {

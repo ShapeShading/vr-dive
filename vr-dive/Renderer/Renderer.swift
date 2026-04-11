@@ -237,18 +237,22 @@ class Renderer {
         }
 
         let pattern = resolveActivePatternController()
+        let isPaused = patternCoordinator.isPaused()
+        let simulationContext = PatternSimulationContext(
+          commandQueue: commandQueue,
+          time: animationTime,
+          speedMultiplier: patternCoordinator.speedMultiplier(),
+          isPaused: isPaused,
+          originCellInspectionEnabled: patternCoordinator.originCellInspectionEnabled()
+        )
+        pattern?.synchronizeState(simulationContext)
 
         if patternCoordinator.shouldReset() {
           pattern?.resetToInitialState()
           patternCoordinator.clearResetFlag()
         }
 
-        if let activePattern = pattern, !patternCoordinator.isPaused() {
-          let simulationContext = PatternSimulationContext(
-            commandQueue: commandQueue,
-            time: animationTime,
-            speedMultiplier: patternCoordinator.speedMultiplier()
-          )
+        if let activePattern = pattern, !isPaused {
           activePattern.updateSimulation(simulationContext)
         }
 
@@ -606,6 +610,8 @@ class Renderer {
     }
 
     let polychoronConfigs: [(VisualPatternKind, RegularPolychoronKind, String)] = [
+      (.fiveCellProjection, .fiveCell, "5-cell"),
+      (.eightCellProjection, .eightCell, "8-cell"),
       (.sixteenCellProjection, .sixteenCell, "16-cell"),
       (.twentyFourCellProjection, .twentyFourCell, "24-cell"),
       (.oneHundredTwentyCellProjection, .oneHundredTwentyCell, "120-cell"),

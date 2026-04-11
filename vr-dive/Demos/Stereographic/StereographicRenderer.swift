@@ -2,6 +2,8 @@ import Metal
 import simd
 
 enum RegularPolychoronKind {
+  case fiveCell
+  case eightCell
   case sixteenCell
   case twentyFourCell
   case oneHundredTwentyCell
@@ -14,11 +16,28 @@ final class StereographicRenderer: VisualPatternController {
     let end: Int
   }
 
+  private struct PolychoronCell {
+    let vertices: [Int]
+    let edgeIndices: [Int]
+    let direction4D: SIMD4<Float>
+  }
+
+  private struct EdgeKey: Hashable {
+    let start: Int
+    let end: Int
+
+    init(_ first: Int, _ second: Int) {
+      self.start = min(first, second)
+      self.end = max(first, second)
+    }
+  }
+
   private struct PolychoronDefinition {
     let kind: RegularPolychoronKind
     let vertices4D: [SIMD4<Float>]
     let edges: [PolychoronEdge]
     let edgeColors: [SIMD4<Float>]
+    let cells: [PolychoronCell]
   }
 
   private struct PolychoronStyle {
@@ -54,6 +73,10 @@ final class StereographicRenderer: VisualPatternController {
   private static let e2 = SIMD4<Float>(0.5, 0.5, -0.5, -0.5)
   private static let e3 = SIMD4<Float>(0.0, 0.0, 1.0 / sqrt(2.0), -1.0 / sqrt(2.0))
   private static let nPole = SIMD4<Float>(repeating: 0.5)
+  private static let inspectionHighlightColor = SIMD4<Float>(1.0, 0.95, 0.48, 1.0)
+  private static let inspectionDimFactor: Float = 0.14
+  private static let inspectionEdgeRadiusMultiplier: Float = 1.9
+  private static let inspectionJunctionRadiusMultiplier: Float = 1.18
   private static let edgePalette: [SIMD4<Float>] = [
     SIMD4<Float>(0.90, 0.28, 0.34, 1.0),
     SIMD4<Float>(0.96, 0.66, 0.22, 1.0),
@@ -63,6 +86,7 @@ final class StereographicRenderer: VisualPatternController {
     SIMD4<Float>(0.72, 0.42, 0.96, 1.0),
   ]
   private static let definitionsByKind = buildPolychoronDefinitions()
+  private static let polychoronScaleMultiplier: Float = 2.0
 
   private let pipelineState: MTLRenderPipelineState
   private let depthStencilState: MTLDepthStencilState
@@ -75,6 +99,7 @@ final class StereographicRenderer: VisualPatternController {
   private var animationTime: Float = 0
   private var lastSimulationTimestamp: Float?
   private var meshUpdateAccumulator: Float = 0
+  private var originCellInspectionEnabled = false
 
   init(
     device: MTLDevice,
@@ -107,7 +132,8 @@ final class StereographicRenderer: VisualPatternController {
       definition: definition,
       style: style,
       meshLayout: meshLayout,
-      animationTime: 0
+      animationTime: 0,
+      originCellInspectionEnabled: false
     )
     vertexBuffer = device.makeBuffer(
       bytes: initialVertices,
@@ -115,13 +141,21 @@ final class StereographicRenderer: VisualPatternController {
       options: [.storageModeShared]
     )!
 
-    let indices = Self.generateMeshIndices(definition: definition, style: style, meshLayout: meshLayout)
+    let indices = Self.generateMeshIndices(
+      definition: definition, style: style, meshLayout: meshLayout)
     indexCount = indices.count
     indexBuffer = device.makeBuffer(
       bytes: indices,
       length: MemoryLayout<UInt32>.stride * indices.count,
       options: [.storageModeShared]
     )!
+  }
+
+  func synchronizeState(_ context: PatternSimulationContext) {
+    let inspectionEnabled = context.originCellInspectionEnabled && !definition.cells.isEmpty
+    guard originCellInspectionEnabled != inspectionEnabled else { return }
+    originCellInspectionEnabled = inspectionEnabled
+    rebuildMesh(animationTime: animationTime)
   }
 
   func updateSimulation(_ context: PatternSimulationContext) {
@@ -141,16 +175,7 @@ final class StereographicRenderer: VisualPatternController {
       meshUpdateAccumulator.formTruncatingRemainder(dividingBy: updateInterval)
     }
 
-    let vertices = Self.generateMeshVertices(
-      definition: definition,
-      style: style,
-      meshLayout: meshLayout,
-      animationTime: animationTime
-    )
-    vertices.withUnsafeBytes { ptr in
-      guard let base = ptr.baseAddress, ptr.count > 0 else { return }
-      memcpy(vertexBuffer.contents(), base, ptr.count)
-    }
+    rebuildMesh(animationTime: animationTime)
   }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
@@ -193,7 +218,22 @@ final class StereographicRenderer: VisualPatternController {
       definition: definition,
       style: style,
       meshLayout: meshLayout,
-      animationTime: 0
+      animationTime: 0,
+      originCellInspectionEnabled: originCellInspectionEnabled
+    )
+    vertices.withUnsafeBytes { ptr in
+      guard let base = ptr.baseAddress, ptr.count > 0 else { return }
+      memcpy(vertexBuffer.contents(), base, ptr.count)
+    }
+  }
+
+  private func rebuildMesh(animationTime: Float) {
+    let vertices = Self.generateMeshVertices(
+      definition: definition,
+      style: style,
+      meshLayout: meshLayout,
+      animationTime: animationTime,
+      originCellInspectionEnabled: originCellInspectionEnabled
     )
     vertices.withUnsafeBytes { ptr in
       guard let base = ptr.baseAddress, ptr.count > 0 else { return }
@@ -234,14 +274,25 @@ final class StereographicRenderer: VisualPatternController {
     definition: PolychoronDefinition,
     style: PolychoronStyle,
     meshLayout: MeshLayout,
-    animationTime: Float
+    animationTime: Float,
+    originCellInspectionEnabled: Bool
   ) -> [StereographicVertex] {
     var vertices: [StereographicVertex] = []
     vertices.reserveCapacity(meshLayout.totalVertexCount)
 
+    let highlightedCellIndex = highlightedCellIndex(
+      for: definition,
+      animationTime: animationTime,
+      inspectionEnabled: originCellInspectionEnabled
+    )
+    let highlightedEdges = highlightedCellIndex.map { Set(definition.cells[$0].edgeIndices) } ?? []
+    let highlightedVertices = highlightedCellIndex.map { Set(definition.cells[$0].vertices) } ?? []
+    let inspectionEnabled = highlightedCellIndex != nil
+
     for (edgeIndex, edge) in definition.edges.enumerated() {
       let start4D = rotate4D(point: definition.vertices4D[edge.start], time: animationTime)
       let end4D = rotate4D(point: definition.vertices4D[edge.end], time: animationTime)
+      let isHighlighted = highlightedEdges.contains(edgeIndex)
 
       var centers = Array(repeating: SIMD3<Float>(repeating: 0), count: style.edgeSegments + 1)
       var tangents = Array(repeating: SIMD3<Float>(repeating: 0), count: style.edgeSegments + 1)
@@ -252,7 +303,7 @@ final class StereographicRenderer: VisualPatternController {
         let point = sphericalInterpolate(from: start4D, to: end4D, t: interpolation)
         let projected = projectedPoint(for: point, style: style)
         centers[segmentIndex] = projected.position
-        radii[segmentIndex] = projected.radius
+        radii[segmentIndex] = projected.radius * (isHighlighted ? inspectionEdgeRadiusMultiplier : 1.0)
       }
 
       for segmentIndex in 0...style.edgeSegments {
@@ -264,7 +315,14 @@ final class StereographicRenderer: VisualPatternController {
       }
 
       let frames = makeTransportFrames(centers: centers, tangents: tangents)
-      let color = definition.edgeColors[edgeIndex]
+      let color: SIMD4<Float>
+      if inspectionEnabled {
+        color = isHighlighted
+          ? inspectionHighlightColor
+          : dimmedColor(definition.edgeColors[edgeIndex], factor: inspectionDimFactor)
+      } else {
+        color = definition.edgeColors[edgeIndex]
+      }
 
       for segmentIndex in 0...style.edgeSegments {
         let frame = frames[segmentIndex]
@@ -279,10 +337,23 @@ final class StereographicRenderer: VisualPatternController {
       }
     }
 
-    for point4D in definition.vertices4D {
+    for (vertexIndex, point4D) in definition.vertices4D.enumerated() {
       let rotated = rotate4D(point: point4D, time: animationTime)
       let projected = projectedPoint(for: rotated, style: style)
-      let radius = min(projected.radius * style.junctionRadiusScale, style.maximumRadius * 1.3)
+      let isHighlighted = highlightedVertices.contains(vertexIndex)
+      let radiusMultiplier = inspectionEnabled && isHighlighted ? inspectionJunctionRadiusMultiplier : 1.0
+      let radius = min(
+        projected.radius * style.junctionRadiusScale * radiusMultiplier,
+        style.maximumRadius * 1.3
+      )
+      let color: SIMD4<Float>
+      if inspectionEnabled {
+        color = isHighlighted
+          ? inspectionHighlightColor
+          : dimmedColor(style.junctionColor, factor: inspectionDimFactor)
+      } else {
+        color = style.junctionColor
+      }
 
       for latitude in 0...style.sphereLatitudeSegments {
         let v = Float(latitude) / Float(style.sphereLatitudeSegments)
@@ -299,7 +370,7 @@ final class StereographicRenderer: VisualPatternController {
           let normal = SIMD3<Float>(sinPhi * cosTheta, cosPhi, sinPhi * sinTheta)
           let position = projected.position + normal * radius
           vertices.append(
-            StereographicVertex(position: position, normal: normal, color: style.junctionColor)
+            StereographicVertex(position: position, normal: normal, color: color)
           )
         }
       }
@@ -354,15 +425,49 @@ final class StereographicRenderer: VisualPatternController {
     return indices
   }
 
-  private static func meshLayout(for definition: PolychoronDefinition, style: PolychoronStyle) -> MeshLayout {
+  private static func meshLayout(for definition: PolychoronDefinition, style: PolychoronStyle)
+    -> MeshLayout
+  {
     let edgeStride = (style.edgeSegments + 1) * style.radialSegments
     let sphereStride = (style.sphereLatitudeSegments + 1) * (style.sphereLongitudeSegments + 1)
-    let totalVertexCount = definition.edges.count * edgeStride + definition.vertices4D.count * sphereStride
-    return MeshLayout(edgeStride: edgeStride, sphereStride: sphereStride, totalVertexCount: totalVertexCount)
+    let totalVertexCount =
+      definition.edges.count * edgeStride + definition.vertices4D.count * sphereStride
+    return MeshLayout(
+      edgeStride: edgeStride, sphereStride: sphereStride, totalVertexCount: totalVertexCount)
   }
 
   private static func style(for kind: RegularPolychoronKind) -> PolychoronStyle {
     switch kind {
+    case .fiveCell:
+      return PolychoronStyle(
+        edgeSegments: 24,
+        radialSegments: 10,
+        sphereLatitudeSegments: 5,
+        sphereLongitudeSegments: 8,
+        meshUpdateInterval: 0,
+        worldScale: 0.29,
+        worldOffset: SIMD3<Float>(0, 0, -1.2),
+        baseRadius: 0.017,
+        minimumRadius: 0.0028,
+        maximumRadius: 0.022,
+        junctionRadiusScale: 1.12,
+        junctionColor: junctionHighlight
+      )
+    case .eightCell:
+      return PolychoronStyle(
+        edgeSegments: 18,
+        radialSegments: 10,
+        sphereLatitudeSegments: 5,
+        sphereLongitudeSegments: 8,
+        meshUpdateInterval: 0,
+        worldScale: 0.24,
+        worldOffset: SIMD3<Float>(0, 0, -1.2),
+        baseRadius: 0.013,
+        minimumRadius: 0.0022,
+        maximumRadius: 0.016,
+        junctionRadiusScale: 1.08,
+        junctionColor: junctionHighlight
+      )
     case .sixteenCell:
       return PolychoronStyle(
         edgeSegments: 36,
@@ -426,11 +531,27 @@ final class StereographicRenderer: VisualPatternController {
     }
   }
 
-  private static func buildPolychoronDefinitions() -> [RegularPolychoronKind: PolychoronDefinition] {
+  private static func buildPolychoronDefinitions() -> [RegularPolychoronKind: PolychoronDefinition]
+  {
+    let fiveCellVertices = buildFiveCellVertices()
+    let eightCellVertices = buildEightCellVertices()
     let sixteenCellVertices = buildSixteenCellVertices()
     let twentyFourCellVertices = buildTwentyFourCellVertices()
     let sixHundredCellVertices = buildSixHundredCellVertices()
+    let fiveCellCells = buildFiveCellCells(vertexCount: fiveCellVertices.count)
+    let eightCellCells = buildEightCellCells(vertices: eightCellVertices)
+    let sixteenCellCells = buildSixteenCellCells(vertices: sixteenCellVertices)
 
+    let fiveCellEdges = buildEdgePairs(
+      vertices: fiveCellVertices,
+      expectedValence: 4,
+      expectedEdgeCount: 10
+    )
+    let eightCellEdges = buildEdgePairs(
+      vertices: eightCellVertices,
+      expectedValence: 4,
+      expectedEdgeCount: 32
+    )
     let sixteenCellEdges = buildEdgePairs(
       vertices: sixteenCellVertices,
       expectedValence: 6,
@@ -440,6 +561,10 @@ final class StereographicRenderer: VisualPatternController {
       vertices: twentyFourCellVertices,
       expectedValence: 8,
       expectedEdgeCount: 96
+    )
+    let twentyFourCellCells = buildTwentyFourCellCells(
+      vertexCount: twentyFourCellVertices.count,
+      edges: twentyFourCellEdges
     )
     let sixHundredCellEdges = buildEdgePairs(
       vertices: sixHundredCellVertices,
@@ -462,27 +587,48 @@ final class StereographicRenderer: VisualPatternController {
       expectedValence: 4,
       expectedEdgeCount: 1200
     )
+    let oneHundredTwentyCellCells = buildOneHundredTwentyCellCells(
+      sourceVertexCount: sixHundredCellVertices.count,
+      sourceCells: sixHundredCellTetrahedra
+    )
 
     return [
+      .fiveCell: makeDefinition(
+        kind: .fiveCell,
+        vertices: fiveCellVertices,
+        edges: fiveCellEdges,
+        cellVertexSets: fiveCellCells
+      ),
+      .eightCell: makeDefinition(
+        kind: .eightCell,
+        vertices: eightCellVertices,
+        edges: eightCellEdges,
+        cellVertexSets: eightCellCells
+      ),
       .sixteenCell: makeDefinition(
         kind: .sixteenCell,
         vertices: sixteenCellVertices,
-        edges: sixteenCellEdges
+        edges: sixteenCellEdges,
+        cellVertexSets: sixteenCellCells
       ),
       .twentyFourCell: makeDefinition(
         kind: .twentyFourCell,
         vertices: twentyFourCellVertices,
-        edges: twentyFourCellEdges
+        edges: twentyFourCellEdges,
+        cellVertexSets: twentyFourCellCells
       ),
       .oneHundredTwentyCell: makeDefinition(
         kind: .oneHundredTwentyCell,
         vertices: oneHundredTwentyCellVertices,
-        edges: oneHundredTwentyCellEdges
+        edges: oneHundredTwentyCellEdges,
+        cellVertexSets: oneHundredTwentyCellCells,
+        cellDirections: sixHundredCellVertices.map(floatVector)
       ),
       .sixHundredCell: makeDefinition(
         kind: .sixHundredCell,
         vertices: sixHundredCellVertices,
-        edges: sixHundredCellEdges
+        edges: sixHundredCellEdges,
+        cellVertexSets: sixHundredCellTetrahedra
       ),
     ]
   }
@@ -490,16 +636,186 @@ final class StereographicRenderer: VisualPatternController {
   private static func makeDefinition(
     kind: RegularPolychoronKind,
     vertices: [SIMD4<Double>],
-    edges: [PolychoronEdge]
+    edges: [PolychoronEdge],
+    cellVertexSets: [[Int]] = [],
+    cellDirections: [SIMD4<Float>]? = nil
   ) -> PolychoronDefinition {
     let floatVertices = vertices.map(floatVector)
     let edgeColors = edges.enumerated().map { edgePalette[$0.offset % edgePalette.count] }
+    let cells = buildCells(
+      vertexSets: cellVertexSets,
+      vertices: floatVertices,
+      edges: edges,
+      directions: cellDirections
+    )
     return PolychoronDefinition(
       kind: kind,
       vertices4D: floatVertices,
       edges: edges,
-      edgeColors: edgeColors
+      edgeColors: edgeColors,
+      cells: cells
     )
+  }
+
+  private static func buildCells(
+    vertexSets: [[Int]],
+    vertices: [SIMD4<Float>],
+    edges: [PolychoronEdge],
+    directions: [SIMD4<Float>]?
+  ) -> [PolychoronCell] {
+    guard !vertexSets.isEmpty else { return [] }
+    if let directions {
+      precondition(directions.count == vertexSets.count, "Cell direction count mismatch")
+    }
+
+    var edgeIndicesByKey: [EdgeKey: Int] = [:]
+    for (edgeIndex, edge) in edges.enumerated() {
+      edgeIndicesByKey[EdgeKey(edge.start, edge.end)] = edgeIndex
+    }
+
+    return vertexSets.enumerated().map { cellIndex, vertexSet in
+      var edgeIndices: [Int] = []
+      for i in 0..<vertexSet.count {
+        for j in (i + 1)..<vertexSet.count {
+          if let edgeIndex = edgeIndicesByKey[EdgeKey(vertexSet[i], vertexSet[j])] {
+            edgeIndices.append(edgeIndex)
+          }
+        }
+      }
+
+      let direction: SIMD4<Float>
+      if let directions {
+        direction = simd_normalize(directions[cellIndex])
+      } else {
+        var accumulatedDirection = SIMD4<Float>(repeating: 0)
+        for vertexIndex in vertexSet {
+          accumulatedDirection += vertices[vertexIndex]
+        }
+        direction = simd_normalize(accumulatedDirection)
+      }
+
+      return PolychoronCell(
+        vertices: vertexSet,
+        edgeIndices: edgeIndices,
+        direction4D: direction
+      )
+    }
+  }
+
+  private static func buildOneHundredTwentyCellCells(
+    sourceVertexCount: Int,
+    sourceCells: [[Int]]
+  ) -> [[Int]] {
+    var cells = Array(repeating: [Int](), count: sourceVertexCount)
+    for (cellIndex, sourceCell) in sourceCells.enumerated() {
+      for sourceVertex in sourceCell {
+        cells[sourceVertex].append(cellIndex)
+      }
+    }
+
+    precondition(cells.count == 120, "Expected 120 dodecahedral cells for the 120-cell")
+    precondition(cells.allSatisfy { $0.count == 20 }, "Expected each 120-cell cell to have 20 vertices")
+    return cells
+  }
+
+  private static func buildFiveCellCells(vertexCount: Int) -> [[Int]] {
+    let cells = (0..<vertexCount).map { omittedVertex in
+      (0..<vertexCount).filter { $0 != omittedVertex }
+    }
+    precondition(cells.count == 5, "Expected 5 cells for the 5-cell")
+    return cells
+  }
+
+  private static func buildEightCellCells(vertices: [SIMD4<Double>]) -> [[Int]] {
+    let epsilon = 1e-10
+    var cells: [[Int]] = []
+    cells.reserveCapacity(8)
+
+    for axis in 0..<4 {
+      for fixedValue in [-0.5, 0.5] {
+        let cell = vertices.enumerated().compactMap { index, vertex in
+          abs(vertex[axis] - fixedValue) < epsilon ? index : nil
+        }
+        precondition(cell.count == 8, "Expected 8 vertices in each 8-cell cube")
+        cells.append(cell)
+      }
+    }
+
+    precondition(cells.count == 8, "Expected 8 cells for the 8-cell")
+    return cells
+  }
+
+  private static func buildSixteenCellCells(vertices: [SIMD4<Double>]) -> [[Int]] {
+    var indicesByAxisAndSign: [Int: Int] = [:]
+    for (index, vertex) in vertices.enumerated() {
+      guard let axis = (0..<4).first(where: { abs(vertex[$0]) > 0.5 }) else { continue }
+      let signBit = vertex[axis] > 0 ? 1 : 0
+      indicesByAxisAndSign[axis * 2 + signBit] = index
+    }
+
+    var cells: [[Int]] = []
+    cells.reserveCapacity(16)
+    for mask in 0..<(1 << 4) {
+      var cell: [Int] = []
+      for axis in 0..<4 {
+        let signBit = (mask >> axis) & 1
+        guard let vertexIndex = indicesByAxisAndSign[axis * 2 + signBit] else {
+          preconditionFailure("Missing 16-cell vertex for axis/sign combination")
+        }
+        cell.append(vertexIndex)
+      }
+      cells.append(cell)
+    }
+
+    precondition(cells.count == 16, "Expected 16 cells for the 16-cell")
+    return cells
+  }
+
+  private static func buildTwentyFourCellCells(
+    vertexCount: Int,
+    edges: [PolychoronEdge]
+  ) -> [[Int]] {
+    var adjacency = Array(repeating: Set<Int>(), count: vertexCount)
+    for edge in edges {
+      adjacency[edge.start].insert(edge.end)
+      adjacency[edge.end].insert(edge.start)
+    }
+
+    var cells: [[Int]] = []
+    cells.reserveCapacity(24)
+
+    for a in 0..<(vertexCount - 5) {
+      for b in (a + 1)..<(vertexCount - 4) {
+        for c in (b + 1)..<(vertexCount - 3) {
+          for d in (c + 1)..<(vertexCount - 2) {
+            for e in (d + 1)..<(vertexCount - 1) {
+              for f in (e + 1)..<vertexCount {
+                let candidate = [a, b, c, d, e, f]
+                var degrees = Array(repeating: 0, count: candidate.count)
+                var edgeCount = 0
+
+                for i in 0..<candidate.count {
+                  for j in (i + 1)..<candidate.count {
+                    if adjacency[candidate[i]].contains(candidate[j]) {
+                      degrees[i] += 1
+                      degrees[j] += 1
+                      edgeCount += 1
+                    }
+                  }
+                }
+
+                if edgeCount == 12 && degrees.allSatisfy({ $0 == 4 }) {
+                  cells.append(candidate)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    precondition(cells.count == 24, "Expected 24 octahedral cells for the 24-cell")
+    return cells
   }
 
   private static func buildSixteenCellVertices() -> [SIMD4<Double>] {
@@ -511,6 +827,34 @@ final class StereographicRenderer: VisualPatternController {
         var point = SIMD4<Double>(repeating: 0)
         point[axis] = sign
         vertices.append(point)
+      }
+    }
+
+    return vertices
+  }
+
+  private static func buildFiveCellVertices() -> [SIMD4<Double>] {
+    let rootFive = sqrt(5.0)
+    return [
+      SIMD4<Double>(rootFive / 4.0, rootFive / 4.0, rootFive / 4.0, -0.25),
+      SIMD4<Double>(rootFive / 4.0, -rootFive / 4.0, -rootFive / 4.0, -0.25),
+      SIMD4<Double>(-rootFive / 4.0, rootFive / 4.0, -rootFive / 4.0, -0.25),
+      SIMD4<Double>(-rootFive / 4.0, -rootFive / 4.0, rootFive / 4.0, -0.25),
+      SIMD4<Double>(0, 0, 0, 1),
+    ]
+  }
+
+  private static func buildEightCellVertices() -> [SIMD4<Double>] {
+    var vertices: [SIMD4<Double>] = []
+    vertices.reserveCapacity(16)
+
+    for signX in [-0.5, 0.5] {
+      for signY in [-0.5, 0.5] {
+        for signZ in [-0.5, 0.5] {
+          for signW in [-0.5, 0.5] {
+            vertices.append(SIMD4<Double>(signX, signY, signZ, signW))
+          }
+        }
       }
     }
 
@@ -602,7 +946,9 @@ final class StereographicRenderer: VisualPatternController {
       }
     }
 
-    precondition(edges.count == expectedEdgeCount, "Unexpected edge count for \(expectedEdgeCount)-edge polychoron")
+    precondition(
+      edges.count == expectedEdgeCount,
+      "Unexpected edge count for \(expectedEdgeCount)-edge polychoron")
     precondition(degrees.allSatisfy { $0 == expectedValence }, "Unexpected valence distribution")
     return edges
   }
@@ -658,7 +1004,8 @@ final class StereographicRenderer: VisualPatternController {
     return dualVertices
   }
 
-  private static func adjacencyThreshold(vertices: [SIMD4<Double>], expectedValence: Int) -> Double {
+  private static func adjacencyThreshold(vertices: [SIMD4<Double>], expectedValence: Int) -> Double
+  {
     var threshold = 0.0
 
     for index in vertices.indices {
@@ -684,7 +1031,41 @@ final class StereographicRenderer: VisualPatternController {
     return rotated
   }
 
-  private static func rotateInPlane(point: SIMD4<Float>, i: Int, j: Int, angle: Float) -> SIMD4<Float> {
+  private static func inverseRotate4D(point: SIMD4<Float>, time: Float) -> SIMD4<Float> {
+    var rotated = point
+    rotated = rotateInPlane(point: rotated, i: 2, j: 3, angle: -time * secondaryRotationSpeed)
+    rotated = rotateInPlane(point: rotated, i: 0, j: 1, angle: -time * primaryRotationSpeed)
+    rotated = rotateInPlane(point: rotated, i: 0, j: 1, angle: -baseOrientationAngles.z)
+    rotated = rotateInPlane(point: rotated, i: 1, j: 2, angle: -baseOrientationAngles.y)
+    rotated = rotateInPlane(point: rotated, i: 0, j: 3, angle: -baseOrientationAngles.x)
+    return rotated
+  }
+
+  private static func highlightedCellIndex(
+    for definition: PolychoronDefinition,
+    animationTime: Float,
+    inspectionEnabled: Bool
+  ) -> Int? {
+    guard inspectionEnabled, !definition.cells.isEmpty else { return nil }
+
+    let queryPoint = inverseRotate4D(point: -nPole, time: animationTime)
+    var bestIndex: Int?
+    var bestScore = -Float.greatestFiniteMagnitude
+
+    for (cellIndex, cell) in definition.cells.enumerated() {
+      let score = simd_dot(queryPoint, cell.direction4D)
+      if score > bestScore {
+        bestScore = score
+        bestIndex = cellIndex
+      }
+    }
+
+    return bestIndex
+  }
+
+  private static func rotateInPlane(point: SIMD4<Float>, i: Int, j: Int, angle: Float) -> SIMD4<
+    Float
+  > {
     var rotated = point
     let cosine = cos(angle)
     let sine = sin(angle)
@@ -764,13 +1145,14 @@ final class StereographicRenderer: VisualPatternController {
     let dotWithPole = simd_dot(point, nPole)
     let denominator = max(1e-4, 1.0 - dotWithPole)
     let projection = (point - dotWithPole * nPole) / denominator
+    let worldScale = style.worldScale * polychoronScaleMultiplier
 
     let u = simd_dot(projection, e1)
     let v = simd_dot(projection, e2)
     let w = simd_dot(projection, e3)
-    let position = SIMD3<Float>(u, v, w) * style.worldScale + style.worldOffset
+    let position = SIMD3<Float>(u, v, w) * worldScale + style.worldOffset
 
-    let perspectiveRadius = style.baseRadius * style.worldScale / denominator
+    let perspectiveRadius = style.baseRadius * worldScale / denominator
     let radius = min(max(perspectiveRadius, style.minimumRadius), style.maximumRadius)
     return (position, radius)
   }
@@ -785,6 +1167,10 @@ final class StereographicRenderer: VisualPatternController {
       + axis * simd_dot(axis, vector) * (1 - cosine)
   }
 
+  private static func dimmedColor(_ color: SIMD4<Float>, factor: Float) -> SIMD4<Float> {
+    SIMD4<Float>(color.x * factor, color.y * factor, color.z * factor, color.w)
+  }
+
   private static func appendUnique(_ candidate: SIMD4<Double>, to vertices: inout [SIMD4<Double>]) {
     if vertices.contains(where: { simd_length_squared($0 - candidate) < 1e-16 }) {
       return
@@ -793,7 +1179,8 @@ final class StereographicRenderer: VisualPatternController {
   }
 
   private static func normalized(_ vector: SIMD4<Double>) -> SIMD4<Double> {
-    let length = sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z + vector.w * vector.w)
+    let length = sqrt(
+      vector.x * vector.x + vector.y * vector.y + vector.z * vector.z + vector.w * vector.w)
     return vector / length
   }
 

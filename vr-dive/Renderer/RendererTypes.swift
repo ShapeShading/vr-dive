@@ -32,7 +32,7 @@ struct PatternSimulationContext {
 struct PatternRenderContext {
   let viewData: ViewRenderingData
   let time: Float
-  let renderTargetWidth: Int   // actual color texture width (not display viewport)
+  let renderTargetWidth: Int  // actual color texture width (not display viewport)
   let renderTargetHeight: Int  // actual color texture height
 
   func applyViewConfiguration(on encoder: MTLRenderCommandEncoder) {
@@ -59,10 +59,14 @@ protocol VisualPatternController: AnyObject {
 
   func synchronizeState(_ context: PatternSimulationContext)
   func updateSimulation(_ context: PatternSimulationContext)
+  /// Optional compute pre-pass (runs before the render encoder is created).
+  /// Use this to dispatch compute kernels that produce data consumed by encodeFrame.
+  func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext)
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext)
   func resetToInitialState()
 }
 
 extension VisualPatternController {
   func synchronizeState(_ context: PatternSimulationContext) {}
+  func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext) {}
 }

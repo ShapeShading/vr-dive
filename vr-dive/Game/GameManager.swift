@@ -29,7 +29,7 @@ class GameManager {
   private let yawSpeed: Float = .pi / 2.0
   private let deadZone: Float = 0.2
   private let residualStickClamp: Float = 0.025
-  private let boostMovementMultiplier: Float = 5.0
+  private let boostMovementMultiplier: Float = 150.0
   private let boostYawMultiplier: Float = 2.0
 
   private(set) var playerOffset: SIMD3<Float> = .zero

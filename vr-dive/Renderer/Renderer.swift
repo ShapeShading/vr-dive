@@ -388,7 +388,25 @@ class Renderer {
       }
     }
 
-    let clearColor = pattern?.preferredClearColor ?? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+    let clearColor =
+      pattern?.preferredClearColor ?? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+
+    // ── Compute pre-pass (before render encoder is created) ──────────────────
+    if let activePattern = pattern, let anchor = anchorToUse {
+      let viewData = makeViewRenderingData(
+        drawable: drawable,
+        deviceAnchor: anchor,
+        colorTexture: colorTexture,
+        viewCount: viewCount
+      )
+      let prepassContext = PatternRenderContext(
+        viewData: viewData,
+        time: time,
+        renderTargetWidth: colorTexture.width,
+        renderTargetHeight: colorTexture.height
+      )
+      activePattern.encodeComputePrepass(commandBuffer: commandBuffer, context: prepassContext)
+    }
 
     guard
       let descriptor = makeRenderPassDescriptor(

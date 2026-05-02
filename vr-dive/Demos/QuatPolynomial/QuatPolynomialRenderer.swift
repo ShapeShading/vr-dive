@@ -16,26 +16,26 @@ final class QuatPolynomialRenderer: VisualPatternController {
   private let maxViewCount: Int
 
   // Grid layout — must match the #define constants in the metal file.
-  private static let theta1Grid  = 64
-  private static let theta2Grid  = 64
-  private static let polyDegree  = 5
+  private static let theta1Grid = 64
+  private static let theta2Grid = 64
+  private static let polyDegree = 5
   private static let circlePoints = 20
   // Total: 64 × 64 × 5 × 20 = 409 600 particles
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
-    self.maxViewCount  = max(1, maxViewCount)
+    self.maxViewCount = max(1, maxViewCount)
     self.particleCount = Self.theta1Grid * Self.theta2Grid * Self.polyDegree * Self.circlePoints
 
-    renderPipelineState  = try QuatPolynomialRenderer.makeRenderPipeline(
+    renderPipelineState = try QuatPolynomialRenderer.makeRenderPipeline(
       device: device, library: library, maxViewCount: self.maxViewCount)
     computePipelineState = try QuatPolynomialRenderer.makeComputePipeline(
       device: device, library: library)
-    depthStencilState    = QuatPolynomialRenderer.makeDepthStencilState(device: device)
+    depthStencilState = QuatPolynomialRenderer.makeDepthStencilState(device: device)
 
     let geo = MeshGeometryFactory.makeOctahedron(device: device)
     meshVertexBuffer = geo.vertexBuffer
-    meshIndexBuffer  = geo.indexBuffer
-    meshIndexCount   = geo.indexCount
+    meshIndexBuffer = geo.indexBuffer
+    meshIndexCount = geo.indexCount
 
     particleStateBuffer = device.makeBuffer(
       length: MemoryLayout<QuatPolynomialParticleState>.stride * particleCount,
@@ -55,7 +55,7 @@ final class QuatPolynomialRenderer: VisualPatternController {
     )
 
     guard let commandBuffer = context.commandQueue.makeCommandBuffer(),
-          let encoder = commandBuffer.makeComputeCommandEncoder()
+      let encoder = commandBuffer.makeComputeCommandEncoder()
     else { return }
 
     encoder.setComputePipelineState(computePipelineState)
@@ -120,21 +120,21 @@ extension QuatPolynomialRenderer {
     maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let descriptor = MTLRenderPipelineDescriptor()
-    descriptor.vertexFunction   = library.makeFunction(name: "quatPolyVertexShader")
+    descriptor.vertexFunction = library.makeFunction(name: "quatPolyVertexShader")
     descriptor.fragmentFunction = library.makeFunction(name: "quatPolyFragmentShader")
     descriptor.colorAttachments[0].pixelFormat = .rgba16Float
     descriptor.depthAttachmentPixelFormat = .depth32Float
     descriptor.inputPrimitiveTopology = .triangle
 
     let vd = MTLVertexDescriptor()
-    vd.attributes[0].format      = .float3
-    vd.attributes[0].offset      = 0
+    vd.attributes[0].format = .float3
+    vd.attributes[0].offset = 0
     vd.attributes[0].bufferIndex = 0
-    vd.attributes[1].format      = .float3
-    vd.attributes[1].offset      = MemoryLayout<SIMD3<Float>>.stride
+    vd.attributes[1].format = .float3
+    vd.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
     vd.attributes[1].bufferIndex = 0
-    vd.layouts[0].stride         = MemoryLayout<MeshVertex>.stride
-    descriptor.vertexDescriptor  = vd
+    vd.layouts[0].stride = MemoryLayout<MeshVertex>.stride
+    descriptor.vertexDescriptor = vd
 
     descriptor.maxVertexAmplificationCount = max(maxViewCount, 1)
     return try device.makeRenderPipelineState(descriptor: descriptor)
@@ -150,8 +150,8 @@ extension QuatPolynomialRenderer {
 
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let desc = MTLDepthStencilDescriptor()
-    desc.depthCompareFunction = .greater   // reverse-Z
-    desc.isDepthWriteEnabled  = true
+    desc.depthCompareFunction = .greater  // reverse-Z
+    desc.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: desc)!
   }
 }

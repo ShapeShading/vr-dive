@@ -85,104 +85,151 @@ inline float3 computeCov2D(float3x3 Sigma3D,
   return float3(c00 + 0.3, c01, c11 + 0.3);
 }
 
-// ── Vertex shader output ───────────────────────────────────────────────────────
-struct VertexOut {
-  float4 clipPos       [[position]];
-  float2 uv;           // normalised ellipse coords, ±1 at 3σ boundary
-  float4 color;        // pre-multiplied: rgba with r,g,b pre-multiplied by alpha
+// ── Per-splat precomputed data (matches HuashanSplatPrecomp in HuashanTypes.swift) ─
+struct SplatPrecomp {
+  float4 clipPos0;   // clip position eye 0
+  float4 clipPos1;   // clip position eye 1
+  float4 axesU;      // xy = NDC axis-U eye0,  zw = NDC axis-U eye1
+  float4 axesV;      // xy = NDC axis-V eye0,  zw = NDC axis-V eye1
+  float4 color;      // pre-multiplied RGBA
 };
 
-// ── Vertex shader: 3DGS ellipse billboard with covariance ────────────────────
-vertex VertexOut huashanVertexShader(
-    ushort             amplificationID [[amplification_id]],
-    uint               vertexID        [[vertex_id]],
-    uint               instanceID      [[instance_id]],
-    const device SplatPoint    *splats         [[buffer(0)]],
-    const device uint32_t      *sortedIndices  [[buffer(1)]],
-    constant HuashanUniforms   &uniforms       [[buffer(2)]])
+// ── Compute kernel: precompute per-splat 2D covariance for both eyes ──────────
+// Runs once per splat per frame (NOT amplified). Results stored in precompBuffer.
+// Vertex shader just reads the result — no heavy math in VS.
+kernel void huashanComputePrecomp(
+    uint                         gid      [[thread_position_in_grid]],
+    const device SplatPoint     *splats   [[buffer(0)]],
+    constant HuashanUniforms    &uniforms [[buffer(1)]],
+    device SplatPrecomp         *output   [[buffer(2)]],
+    constant uint               &splatStep [[buffer(3)]])
 {
-  VertexOut out;
-  out.uv      = float2(0);
-  out.clipPos = float4(0, 0, -1, 1);  // default: invisible (reverse-Z)
-  out.color   = float4(0);
+  // Thread gid handles splat[gid * splatStep] — strided for even spatial distribution
+  uint splatIdx = gid * splatStep;
+  if (splatIdx >= uniforms.splatCount) { return; }
 
-  // amplificationID → per-eye VP (avoids relying on uniforms.viewCount layout)
-  PerEyeUniforms eye = (amplificationID == 0) ? uniforms.eye0 : uniforms.eye1;
+  SplatPrecomp out;
+  // Default: invisible (behind camera in reverse-Z)
+  out.clipPos0 = float4(0, 0, -1, 1);
+  out.clipPos1 = float4(0, 0, -1, 1);
+  out.axesU    = float4(0);
+  out.axesV    = float4(0);
+  out.color    = float4(0);
 
-  // Sample raw buffer at fixed physical stride (not sorted indices).
-  // Sorted indices change every ~1s as background sort completes, causing visible
-  // flicker when sparsely sampling. Physical-index sampling is perfectly stable.
-  uint splatIdx = instanceID * 16u;  // stride=16 → ~77k splats, within GPU budget
-  if (splatIdx >= uniforms.splatCount) { return out; }
   SplatPoint sp = splats[splatIdx];
 
-  // ── Colour & opacity ─────────────────────────────────────────────────────
   float alpha = float(sp.colorRGBA.a) / 255.0;
-  if (alpha < 0.02) { return out; }  // skip near-invisible splats
+  if (alpha < 0.02) { output[gid] = out; return; }
 
   float3 srgb   = float3(sp.colorRGBA.rgb) / 255.0;
   float3 linRGB = pow(max(srgb, 0.0), float3(2.2));
-  // Store as pre-multiplied alpha so fragment can just return it
   out.color = float4(linRGB * alpha, alpha);
 
-  // ── View-space position ───────────────────────────────────────────────────
-  float3 posScene = float3(sp.position);
-  float4 posView4 = eye.viewMatrix * float4(posScene, 1.0);
-  float3 posView  = posView4.xyz;
-  if (posView.z >= 0.0) { return out; }  // behind camera
-
-  float4 clipCenter = eye.vpMatrix * float4(posScene, 1.0);
-  if (clipCenter.w <= 0.0) { return out; }
-
-  // ── Decode quaternion (xyzw stored as uchar4: component*128+128) ──────────
+  // Decode quaternion (xyzw, each byte = component*128+128)
   float4 q;
   q.x = (float(sp.rotWXYZ.x) - 128.0) / 128.0;
   q.y = (float(sp.rotWXYZ.y) - 128.0) / 128.0;
   q.z = (float(sp.rotWXYZ.z) - 128.0) / 128.0;
   q.w = (float(sp.rotWXYZ.w) - 128.0) / 128.0;
-  q   = normalize(q);  // guard against quantisation error
+  q   = normalize(q);
 
-  // ── Scale: .splat format stores linear scale (already exp'd by converter) ──
-  float3 sc = float3(sp.scale);
-
-  // ── 3D covariance Σ = R·S²·Rᵀ in scene space ─────────────────────────────
   float3x3 R    = quatToMatrix(q);
+  float3 sc     = float3(sp.scale);
+  // Filter out background/sky splats with huge scale values — they contribute
+  // no structural detail and show as blobs that obscure the mountain shape.
+  float scMax = max(sc.x, max(sc.y, sc.z));
+  if (scMax > 1.5) { output[gid] = out; return; }
   float3x3 S2   = float3x3(
     float3(sc.x*sc.x, 0, 0),
     float3(0, sc.y*sc.y, 0),
     float3(0, 0, sc.z*sc.z));
   float3x3 Sig3 = R * S2 * transpose(R);
 
-  // ── Project to 2D screen-space covariance ────────────────────────────────
-  float3 cov2d = computeCov2D(Sig3, posView, eye.focalXY, eye.viewMatrix);
-  float c00 = cov2d.x, c01 = cov2d.y, c11 = cov2d.z;
+  float3 posScene = float3(sp.position);
+  float maxR = 12.0;
 
-  // ── Eigendecomposition of 2×2 symmetric cov → half-axes in pixels ─────────
-  float mid   = 0.5 * (c00 + c11);
-  float disc  = sqrt(max(0.25*(c00-c11)*(c00-c11) + c01*c01, 0.0));
-  float lam1  = mid + disc;     // larger eigenvalue
-  float lam2  = mid - disc;     // smaller eigenvalue
-  float r1    = sqrt(max(lam1, 0.0));  // half-axis radii in pixels
-  float r2    = sqrt(max(lam2, 0.0));
-  // Eigenvector for lam1:
-  float2 v1   = normalize(float2(c01, lam1 - c00) + float2(1e-6));
+  // Compute for each eye
+  for (uint eyeIdx = 0; eyeIdx < 2; eyeIdx++) {
+    PerEyeUniforms eye = (eyeIdx == 0) ? uniforms.eye0 : uniforms.eye1;
 
-  // Billboard corners in pixel-space (±3σ extent, clamped to avoid huge splats)
-  float maxR  = 8.0;   // max half-axis in pixels; limits fragment fill rate
-  r1 = min(r1 * 3.0, maxR);
-  r2 = min(r2 * 3.0, maxR);
+    float4 posView4 = eye.viewMatrix * float4(posScene, 1.0);
+    float3 posView  = posView4.xyz;
+    if (posView.z >= 0.0) { continue; }
+
+    float4 clipCenter = eye.vpMatrix * float4(posScene, 1.0);
+    if (clipCenter.w <= 0.0) { continue; }
+
+    float3 cov2d = computeCov2D(Sig3, posView, eye.focalXY, eye.viewMatrix);
+    float c00 = cov2d.x, c01 = cov2d.y, c11 = cov2d.z;
+
+    float mid  = 0.5 * (c00 + c11);
+    float disc = sqrt(max(0.25*(c00-c11)*(c00-c11) + c01*c01, 0.0));
+    float lam1 = mid + disc;
+    float lam2 = mid - disc;
+    float r1   = min(sqrt(max(lam1, 0.0)) * 3.0, maxR);
+    float r2   = min(sqrt(max(lam2, 0.0)) * 3.0, maxR);
+    r2 = max(r2, r1 * 0.33);  // cap aspect ratio at 3:1 to avoid needle splats
+
+    // Sub-pixel cull: skip splats too small to contribute meaningfully
+    if (r1 < 1.0) { continue; }
+    float2 v1  = normalize(float2(c01, lam1 - c00) + float2(1e-6));
+    float2 v2  = float2(-v1.y, v1.x);
+
+    // Axes in NDC space: axisU/V such that vertex offset = (uv.x*axisU + uv.y*axisV) * w
+    float2 axisU = v1 * r1 / (eye.renderTargetSize * 0.5);
+    float2 axisV = v2 * r2 / (eye.renderTargetSize * 0.5);
+
+    if (eyeIdx == 0) {
+      out.clipPos0  = clipCenter;
+      out.axesU.xy  = axisU;
+      out.axesV.xy  = axisV;
+    } else {
+      out.clipPos1  = clipCenter;
+      out.axesU.zw  = axisU;
+      out.axesV.zw  = axisV;
+    }
+  }
+
+  output[gid] = out;
+}
+
+// ── Vertex shader output ───────────────────────────────────────────────────────
+struct VertexOut {
+  float4 clipPos       [[position]];
+  float2 uv;           // normalised ellipse coords, ±1 at 3σ boundary
+  float4 color;        // pre-multiplied RGBA
+};
+
+// ── Vertex shader: reads precomputed data, trivial billboard projection ───────
+vertex VertexOut huashanVertexShader(
+    ushort                    amplificationID [[amplification_id]],
+    uint                      vertexID        [[vertex_id]],
+    uint                      instanceID      [[instance_id]],
+    const device SplatPrecomp *precomp        [[buffer(0)]],
+    constant HuashanUniforms  &uniforms       [[buffer(1)]])
+{
+  VertexOut out;
+  out.clipPos = float4(0, 0, -1, 1);
+  out.uv      = float2(0);
+  out.color   = float4(0);
+
+  if (instanceID >= uniforms.splatCount) { return out; }
+
+  SplatPrecomp sp = precomp[instanceID];
+  out.color = sp.color;
+  if (out.color.a < 0.02) { return out; }
+
+  float4 clipCenter = (amplificationID == 0) ? sp.clipPos0 : sp.clipPos1;
+  if (clipCenter.w <= 0.0) { return out; }
+
+  float2 axisU = (amplificationID == 0) ? sp.axesU.xy : sp.axesU.zw;
+  float2 axisV = (amplificationID == 0) ? sp.axesV.xy : sp.axesV.zw;
 
   float2 corners[4] = { float2(-1,-1), float2(1,-1), float2(-1,1), float2(1,1) };
   uint   triVtx[6]  = { 0, 1, 2, 1, 3, 2 };
-  float2 uv  = corners[triVtx[vertexID % 6]];
+  float2 uv = corners[triVtx[vertexID % 6]];
 
-  // Local billboard coordinate in pixels, oriented along principal axes
-  float2 v2 = float2(-v1.y, v1.x);
-  float2 pxOffset = uv.x * r1 * v1 + uv.y * r2 * v2;
-
-  // Convert pixel offset to NDC offset (renderTargetSize in physical pixels)
-  float2 ndcOffset = pxOffset / (eye.renderTargetSize * 0.5) * clipCenter.w;
-
+  float2 ndcOffset = (uv.x * axisU + uv.y * axisV) * clipCenter.w;
   out.clipPos = clipCenter + float4(ndcOffset, 0.0, 0.0);
   out.uv      = uv;
   return out;
@@ -193,10 +240,8 @@ fragment float4 huashanFragmentShader(VertexOut in [[stage_in]])
 {
   float r2 = dot(in.uv, in.uv);
   if (r2 > 1.0) { discard_fragment(); }
-  float gauss = exp(-0.5 * r2 * 9.0);  // billboard is ±3σ; at |uv|=1 → exp(-4.5)≈0.01
+  float gauss = exp(-0.5 * r2 * 3.5);
   if (gauss < 0.02) { discard_fragment(); }
-  // Pre-multiplied alpha: BOTH rgb and alpha must be scaled by gauss
-  // in.color = float4(linRGB * alpha, alpha) from vertex shader
   return in.color * gauss;
 }
 

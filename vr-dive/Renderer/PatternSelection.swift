@@ -19,6 +19,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case snake3D
   case rhombicDodecahedron
   case metaball
+  case quatPolynomial
+  case huashan
 
   var id: String { rawValue }
 
@@ -69,13 +71,17 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "菱形十二面体镜室"
     case .metaball:
       return "圆球水滴"
+    case .quatPolynomial:
+      return "四元数多项式根"
+    case .huashan:
+      return "华山3D扫描"
     }
   }
 }
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .snake3D
+  private var _current: VisualPatternKind = .huashan
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

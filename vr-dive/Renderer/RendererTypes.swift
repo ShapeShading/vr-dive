@@ -32,6 +32,8 @@ struct PatternSimulationContext {
 struct PatternRenderContext {
   let viewData: ViewRenderingData
   let time: Float
+  let renderTargetWidth: Int   // actual color texture width (not display viewport)
+  let renderTargetHeight: Int  // actual color texture height
 
   func applyViewConfiguration(on encoder: MTLRenderCommandEncoder) {
     if !viewData.viewports.isEmpty {
@@ -46,9 +48,8 @@ struct PatternRenderContext {
         )
       }
       encoder.setVertexAmplificationCount(viewData.viewCount, viewMappings: &viewMappings)
-    } else {
-      encoder.setVertexAmplificationCount(1, viewMappings: nil)
     }
+    // Single-view: no amplification call needed (default count is 1)
   }
 }
 

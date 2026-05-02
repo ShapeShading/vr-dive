@@ -388,7 +388,7 @@ class Renderer {
       }
     }
 
-    let clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+    let clearColor = pattern?.preferredClearColor ?? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
 
     guard
       let descriptor = makeRenderPassDescriptor(
@@ -408,7 +408,9 @@ class Renderer {
       )
       let sceneContext = PatternRenderContext(
         viewData: viewData,
-        time: time
+        time: time,
+        renderTargetWidth: colorTexture.width,
+        renderTargetHeight: colorTexture.height
       )
       activePattern.encodeFrame(encoder: sceneEncoder, context: sceneContext)
     }
@@ -704,6 +706,26 @@ class Renderer {
       controllers[.metaball] = metaball
     } else {
       print("[Renderer] Metaball pattern unavailable.")
+    }
+
+    if let quatPoly = try? QuatPolynomialRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.quatPolynomial] = quatPoly
+    } else {
+      print("[Renderer] QuatPolynomial pattern unavailable.")
+    }
+
+    if let huashan = try? HuashanSplatRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.huashan] = huashan
+    } else {
+      print("[Renderer] Huashan 3DGS pattern unavailable (missing huashan.splat?).")
     }
 
     return controllers

@@ -686,6 +686,26 @@ class Renderer {
       print("[Renderer] Julia3D pattern unavailable.")
     }
 
+    if let rhombic = try? RhombicDodecahedronRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.rhombicDodecahedron] = rhombic
+    } else {
+      print("[Renderer] RhombicDodecahedron pattern unavailable.")
+    }
+
+    if let metaball = try? MetaballRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.metaball] = metaball
+    } else {
+      print("[Renderer] Metaball pattern unavailable.")
+    }
+
     return controllers
   }
 

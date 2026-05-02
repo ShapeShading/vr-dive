@@ -303,7 +303,8 @@ final class StereographicRenderer: VisualPatternController {
         let point = sphericalInterpolate(from: start4D, to: end4D, t: interpolation)
         let projected = projectedPoint(for: point, style: style)
         centers[segmentIndex] = projected.position
-        radii[segmentIndex] = projected.radius * (isHighlighted ? inspectionEdgeRadiusMultiplier : 1.0)
+        radii[segmentIndex] =
+          projected.radius * (isHighlighted ? inspectionEdgeRadiusMultiplier : 1.0)
       }
 
       for segmentIndex in 0...style.edgeSegments {
@@ -317,7 +318,8 @@ final class StereographicRenderer: VisualPatternController {
       let frames = makeTransportFrames(centers: centers, tangents: tangents)
       let color: SIMD4<Float>
       if inspectionEnabled {
-        color = isHighlighted
+        color =
+          isHighlighted
           ? inspectionHighlightColor
           : dimmedColor(definition.edgeColors[edgeIndex], factor: inspectionDimFactor)
       } else {
@@ -341,14 +343,16 @@ final class StereographicRenderer: VisualPatternController {
       let rotated = rotate4D(point: point4D, time: animationTime)
       let projected = projectedPoint(for: rotated, style: style)
       let isHighlighted = highlightedVertices.contains(vertexIndex)
-      let radiusMultiplier = inspectionEnabled && isHighlighted ? inspectionJunctionRadiusMultiplier : 1.0
+      let radiusMultiplier =
+        inspectionEnabled && isHighlighted ? inspectionJunctionRadiusMultiplier : 1.0
       let radius = min(
         projected.radius * style.junctionRadiusScale * radiusMultiplier,
         style.maximumRadius * 1.3
       )
       let color: SIMD4<Float>
       if inspectionEnabled {
-        color = isHighlighted
+        color =
+          isHighlighted
           ? inspectionHighlightColor
           : dimmedColor(style.junctionColor, factor: inspectionDimFactor)
       } else {
@@ -714,7 +718,8 @@ final class StereographicRenderer: VisualPatternController {
     }
 
     precondition(cells.count == 120, "Expected 120 dodecahedral cells for the 120-cell")
-    precondition(cells.allSatisfy { $0.count == 20 }, "Expected each 120-cell cell to have 20 vertices")
+    precondition(
+      cells.allSatisfy { $0.count == 20 }, "Expected each 120-cell cell to have 20 vertices")
     return cells
   }
 

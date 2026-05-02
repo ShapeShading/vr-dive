@@ -17,12 +17,15 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case pagoda
   case tetris3D
   case snake3D
+  case rhombicDodecahedron
+  case metaball
 
   var id: String { rawValue }
 
   var supportsOriginCellInspection: Bool {
     switch self {
-    case .fiveCellProjection, .eightCellProjection, .sixteenCellProjection, .twentyFourCellProjection,
+    case .fiveCellProjection, .eightCellProjection, .sixteenCellProjection,
+      .twentyFourCellProjection,
       .oneHundredTwentyCellProjection, .sixHundredCellProjection:
       return true
     default:
@@ -62,6 +65,10 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "3D 俄罗斯方块"
     case .snake3D:
       return "3D 贪食蛇"
+    case .rhombicDodecahedron:
+      return "菱形十二面体镜室"
+    case .metaball:
+      return "圆球水滴"
     }
   }
 }

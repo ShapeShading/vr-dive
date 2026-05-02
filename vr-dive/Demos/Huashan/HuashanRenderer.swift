@@ -1,3 +1,4 @@
+import Foundation
 import Metal
 import simd
 
@@ -7,13 +8,13 @@ final class HuashanSplatRenderer: VisualPatternController {
 
   // MARK: - GPU resources
   private let splatBuffer: MTLBuffer  // SplatPoint × N  (read-only)
-  private let sortedIndexBuffers: [MTLBuffer]  // triple-buffered uint32 × N
+  private let sortedIndexBuffers: [MTLBuffer]  // triple-buffered uint32 × renderCount
   private let renderPipelineState: MTLRenderPipelineState
   private let computePipelineState: MTLComputePipelineState
   private let depthStencilState: MTLDepthStencilState
   private let precompBuffer: MTLBuffer  // SplatPrecomp × renderCount (written by compute, read by vertex)
   private let splatCount: Int
-  private let renderCount: Int   // = splatCount / renderStride
+  private let renderCount: Int
   private let renderStride: UInt32
   private let maxViewCount: Int
 
@@ -23,12 +24,16 @@ final class HuashanSplatRenderer: VisualPatternController {
   private var sortAvailable = false  // true once first sort completes
   private let sortQueue = DispatchQueue(label: "vr-dive.huashan.sort", qos: .userInitiated)
   private var sortInFlight = false
+  private var lastSortedCameraPos: SIMD3<Float> = SIMD3(repeating: .greatestFiniteMagnitude)
+  private var lastSortedCameraFwd: SIMD3<Float> = SIMD3(0, 0, -1)
+  private var lastSortTime: CFTimeInterval = 0
   // Camera state for sort (updated each frame from render thread, read on sort thread)
   private var sortCameraPos: SIMD3<Float> = .zero
   private var sortCameraFwd: SIMD3<Float> = SIMD3(0, 0, -1)
   private let sortLock = NSLock()
-  // Positions extracted once at load time for fast sort
-  private let splatPositions: [SIMD3<Float>]
+  // Sampled positions/indices extracted once at load time for fast sort
+  private let sampledSplatPositions: [SIMD3<Float>]
+  private let sampledSplatIndices: [UInt32]
 
   // MARK: - Scene placement
   // Translates + scales the splat cloud so it appears in front of and below the user.
@@ -48,8 +53,8 @@ final class HuashanSplatRenderer: VisualPatternController {
     }
     let data = try Data(contentsOf: url, options: .mappedIfSafe)
 
-    let stride = MemoryLayout<HuashanSplatPoint>.stride  // 32 bytes
-    let count = data.count / stride
+    let recordStride = MemoryLayout<HuashanSplatPoint>.stride  // 32 bytes
+    let count = data.count / recordStride
     guard count > 0 else {
       throw NSError(
         domain: "Huashan", code: 2,
@@ -61,7 +66,7 @@ final class HuashanSplatRenderer: VisualPatternController {
     guard
       let buf = device.makeBuffer(
         bytes: (data as NSData).bytes,
-        length: count * stride,
+        length: count * recordStride,
         options: .storageModeShared)
     else {
       throw NSError(
@@ -76,28 +81,51 @@ final class HuashanSplatRenderer: VisualPatternController {
     )
     print("[Huashan] SplatPrecomp stride=\(MemoryLayout<HuashanSplatPrecomp>.stride) (expect 80)")
 
-    // Precomp buffer: one SplatPrecomp per splat
-    let precompSize = count * MemoryLayout<HuashanSplatPrecomp>.stride
+    let splatStride: UInt32 = 2  // aggressive half-density background sampling
+    self.renderStride = splatStride
+
+    // Extract a mixed-density sample set for CPU sorting.
+    // Keep a center-front ROI at full density and the rest at half density.
+    var sampledPositions = [SIMD3<Float>]()
+    var sampledIndices = [UInt32]()
+    let rawPtr = buf.contents().assumingMemoryBound(to: HuashanSplatPoint.self)
+    let dataCenterX: Float = -0.15462685
+    let dataCenterY: Float = 0.09616375
+    let dataCenterZ: Float = 0.07551384
+    let sceneScale: Float = 0.26
+    let sceneTranslateZ: Float = -1.25
+    let denseCenterWorldZ: Float = -1.6
+    let denseHalfWidthX: Float = 3.4
+    let denseHalfWidthY: Float = 3.5
+    for i in 0..<count {
+      let px = rawPtr[i].px
+      let py = rawPtr[i].py
+      let pz = rawPtr[i].pz
+      let worldX = (px - dataCenterX) * sceneScale
+      let worldY = (py - dataCenterY) * sceneScale
+      let worldZ = (pz - dataCenterZ) * sceneScale + sceneTranslateZ
+      let inDenseROI = abs(worldX) < denseHalfWidthX && abs(worldY) < denseHalfWidthY
+        && worldZ > denseCenterWorldZ
+      if inDenseROI || i % Int(splatStride) == 0 {
+        sampledPositions.append(SIMD3<Float>(px, py, pz))
+        sampledIndices.append(UInt32(i))
+      }
+    }
+    self.renderCount = sampledIndices.count
+    self.sampledSplatPositions = sampledPositions
+    self.sampledSplatIndices = sampledIndices
+
+    // Precomp buffer: one SplatPrecomp per rendered sampled splat
+    let precompSize = renderCount * MemoryLayout<HuashanSplatPrecomp>.stride
     guard let pcBuf = device.makeBuffer(length: precompSize, options: .storageModePrivate) else {
       throw NSError(
         domain: "Huashan", code: 6,
         userInfo: [NSLocalizedDescriptionKey: "Failed to allocate precomp buffer"])
     }
     self.precompBuffer = pcBuf
-    let splatStride: UInt32 = 16         // ~77k splats — proven stable
-    self.renderStride = splatStride
-    self.renderCount  = count / Int(splatStride)
-
-    // Extract positions once for fast CPU sort
-    var positions = [SIMD3<Float>](repeating: .zero, count: count)
-    let rawPtr = buf.contents().assumingMemoryBound(to: HuashanSplatPoint.self)
-    for i in 0..<count {
-      positions[i] = SIMD3<Float>(rawPtr[i].px, rawPtr[i].py, rawPtr[i].pz)
-    }
-    self.splatPositions = positions
 
     // Triple-buffered sort index buffers
-    let idxSize = count * MemoryLayout<UInt32>.stride
+    let idxSize = renderCount * MemoryLayout<UInt32>.stride
     var sortBufs = [MTLBuffer]()
     for _ in 0..<3 {
       guard let b = device.makeBuffer(length: idxSize, options: .storageModeShared) else {
@@ -105,36 +133,40 @@ final class HuashanSplatRenderer: VisualPatternController {
           domain: "Huashan", code: 4,
           userInfo: [NSLocalizedDescriptionKey: "Failed to allocate sort buffer"])
       }
-      // Default: sequential order (no sort yet)
+      // Default: sequential sampled order (no sort yet)
       let ptr = b.contents().assumingMemoryBound(to: UInt32.self)
-      for i in 0..<count { ptr[i] = UInt32(i) }
+      for i in 0..<renderCount { ptr[i] = sampledIndices[i] }
       sortBufs.append(b)
     }
     self.sortedIndexBuffers = sortBufs
 
-    // Scene transform: scale 1.0 — positions ±10 scene = ±10m world
-    // Camera at origin, mountain entirely ahead at -80..-100m.
-    // At this distance with corrected focal (~694px RT), median splat (scale≈0.4)
-    // has natural radius ≈ 9 physical px — shape visible, fill rate safe.
-    let s: Float = 1.0
-    let tx: Float = 0
-    let ty: Float = 0
-    let tz: Float = -90
-    sceneTransform = simd_float4x4(
+    // Place the cloud directly in front of the user in local immersive space.
+    // Bias a bit closer/larger so local structure occupies more retinal area.
+    let dataCenter = SIMD3<Float>(-0.15462685, 0.09616375, 0.07551384)
+    let centerShift = simd_float4x4(
       columns: (
-        SIMD4<Float>(s, 0, 0, 0),
-        SIMD4<Float>(0, s, 0, 0),
-        SIMD4<Float>(0, 0, s, 0),
-        SIMD4<Float>(tx, ty, tz, 1)
+        SIMD4<Float>(1, 0, 0, 0),
+        SIMD4<Float>(0, 1, 0, 0),
+        SIMD4<Float>(0, 0, 1, 0),
+        SIMD4<Float>(-dataCenter.x, -dataCenter.y, -dataCenter.z, 1)
       ))
-    let si: Float = 1 / s
-    sceneInverse = simd_float4x4(
+    let scale: Float = 0.26
+    let scaleMatrix = simd_float4x4(
       columns: (
-        SIMD4<Float>(si, 0, 0, 0),
-        SIMD4<Float>(0, si, 0, 0),
-        SIMD4<Float>(0, 0, si, 0),
-        SIMD4<Float>(-tx * si, -ty * si, -tz * si, 1)
+        SIMD4<Float>(scale, 0, 0, 0),
+        SIMD4<Float>(0, scale, 0, 0),
+        SIMD4<Float>(0, 0, scale, 0),
+        SIMD4<Float>(0, 0, 0, 1)
       ))
+    let placeInFront = simd_float4x4(
+      columns: (
+        SIMD4<Float>(1, 0, 0, 0),
+        SIMD4<Float>(0, 1, 0, 0),
+        SIMD4<Float>(0, 0, 1, 0),
+        SIMD4<Float>(0.0, -0.03, -1.25, 1)
+      ))
+    sceneTransform = placeInFront * scaleMatrix * centerShift
+    sceneInverse = simd_inverse(sceneTransform)
 
     // Depth stencil: always pass (3DGS is sorted back-to-front; depth test would break blending)
     // Write depth at splat center so compositor detects rendered content.
@@ -168,12 +200,12 @@ final class HuashanSplatRenderer: VisualPatternController {
     guard splatCount > 0 else { return }
     var uniforms = makeUniforms(context: context)
     guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+    let sortBuf = sortedIndexBuffers[sortAvailable ? gpuSortBuf : 0]
     encoder.setComputePipelineState(computePipelineState)
     encoder.setBuffer(splatBuffer, offset: 0, index: 0)
     encoder.setBytes(&uniforms, length: MemoryLayout<HuashanUniforms>.stride, index: 1)
     encoder.setBuffer(precompBuffer, offset: 0, index: 2)
-    var step = renderStride
-    encoder.setBytes(&step, length: MemoryLayout<UInt32>.size, index: 3)
+    encoder.setBuffer(sortBuf, offset: 0, index: 3)
     let w = min(computePipelineState.maxTotalThreadsPerThreadgroup, 256)
     encoder.dispatchThreadgroups(
       MTLSize(width: (renderCount + w - 1) / w, height: 1, depth: 1),
@@ -205,7 +237,8 @@ final class HuashanSplatRenderer: VisualPatternController {
       let ndc = SIMD3<Float>(
         centerClip.x / centerClip.w, centerClip.y / centerClip.w, centerClip.z / centerClip.w)
       print(
-        "[Huashan] scene-origin ndc=\(ndc)  splatCount=\(splatCount) renderCount=\(renderCount) stride=\(renderStride)")
+        "[Huashan] scene-origin ndc=\(ndc)  splatCount=\(splatCount) renderCount=\(renderCount) stride=\(renderStride)"
+      )
     }
 
     encoder.setRenderPipelineState(renderPipelineState)
@@ -251,6 +284,15 @@ final class HuashanSplatRenderer: VisualPatternController {
 
   // MARK: - Background sort
   private func triggerSortIfNeeded(cameraPos: SIMD3<Float>, cameraForward: SIMD3<Float>) {
+    let now = CFAbsoluteTimeGetCurrent()
+    let movement = simd_length(cameraPos - lastSortedCameraPos)
+    let forwardDot = simd_dot(cameraForward, lastSortedCameraFwd)
+    let needsFirstSort = !sortAvailable
+    let needsResort = movement > 0.26 || forwardDot < 0.98
+    if !needsFirstSort && (!needsResort || now - lastSortTime < 0.40) {
+      return
+    }
+
     sortLock.lock()
     sortCameraPos = cameraPos
     sortCameraFwd = cameraForward
@@ -265,8 +307,9 @@ final class HuashanSplatRenderer: VisualPatternController {
     let fwd = sortCameraFwd
     sortLock.unlock()
 
-    let positions = self.splatPositions
-    let n = self.splatCount
+    let positions = self.sampledSplatPositions
+    let sampledIndices = self.sampledSplatIndices
+    let n = self.renderCount
 
     // Pick the buffer that neither the GPU nor previous sort is using
     let writeBuf = (gpuSortBuf + 1) % 3
@@ -281,9 +324,13 @@ final class HuashanSplatRenderer: VisualPatternController {
         depths[i] = dot(positions[i] - pos, fwd)
       }
 
-      // Build index array sorted by descending depth (far → near = back-to-front)
-      var indices = [UInt32](0..<UInt32(n))
-      indices.sort { depths[Int($0)] > depths[Int($1)] }
+      // Build sampled splat index array sorted by descending depth (far → near = back-to-front)
+      var order = [Int](0..<n)
+      order.sort { depths[$0] > depths[$1] }
+      var indices = [UInt32](repeating: 0, count: n)
+      for i in 0..<n {
+        indices[i] = sampledIndices[order[i]]
+      }
 
       // Copy to GPU buffer
       indices.withUnsafeBytes { rawBytes in
@@ -295,6 +342,9 @@ final class HuashanSplatRenderer: VisualPatternController {
       self.gpuSortBuf = writeBuf
       self.sortAvailable = true
       self.sortInFlight = false
+      self.lastSortedCameraPos = pos
+      self.lastSortedCameraFwd = fwd
+      self.lastSortTime = now
       self.sortLock.unlock()
     }
   }

@@ -102,10 +102,10 @@ kernel void huashanComputePrecomp(
     const device SplatPoint     *splats   [[buffer(0)]],
     constant HuashanUniforms    &uniforms [[buffer(1)]],
     device SplatPrecomp         *output   [[buffer(2)]],
-    constant uint               &splatStep [[buffer(3)]])
+    const device uint           *sortedIndices [[buffer(3)]])
 {
-  // Thread gid handles splat[gid * splatStep] — strided for even spatial distribution
-  uint splatIdx = gid * splatStep;
+  // Thread gid handles one entry of the sampled back-to-front sorted splat list.
+  uint splatIdx = sortedIndices[gid];
   if (splatIdx >= uniforms.splatCount) { return; }
 
   SplatPrecomp out;
@@ -119,13 +119,14 @@ kernel void huashanComputePrecomp(
   SplatPoint sp = splats[splatIdx];
 
   float alpha = float(sp.colorRGBA.a) / 255.0;
-  if (alpha < 0.02) { output[gid] = out; return; }
+  if (alpha < 0.008) { output[gid] = out; return; }
 
   float3 srgb   = float3(sp.colorRGBA.rgb) / 255.0;
   float3 linRGB = pow(max(srgb, 0.0), float3(2.2));
   out.color = float4(linRGB * alpha, alpha);
 
-  // Decode quaternion (xyzw, each byte = component*128+128)
+  // Most raw scales are already linear, but a tiny fraction are huge outliers.
+  // Clamp only the tail so we keep real anisotropic detail without giant blob splats.
   float4 q;
   q.x = (float(sp.rotWXYZ.x) - 128.0) / 128.0;
   q.y = (float(sp.rotWXYZ.y) - 128.0) / 128.0;
@@ -134,11 +135,7 @@ kernel void huashanComputePrecomp(
   q   = normalize(q);
 
   float3x3 R    = quatToMatrix(q);
-  float3 sc     = float3(sp.scale);
-  // Filter out background/sky splats with huge scale values — they contribute
-  // no structural detail and show as blobs that obscure the mountain shape.
-  float scMax = max(sc.x, max(sc.y, sc.z));
-  if (scMax > 1.5) { output[gid] = out; return; }
+  float3 sc     = clamp(abs(float3(sp.scale)), float3(0.0005), float3(1.15));
   float3x3 S2   = float3x3(
     float3(sc.x*sc.x, 0, 0),
     float3(0, sc.y*sc.y, 0),
@@ -146,7 +143,7 @@ kernel void huashanComputePrecomp(
   float3x3 Sig3 = R * S2 * transpose(R);
 
   float3 posScene = float3(sp.position);
-  float maxR = 12.0;
+  float maxR = 1.45;
 
   // Compute for each eye
   for (uint eyeIdx = 0; eyeIdx < 2; eyeIdx++) {
@@ -154,10 +151,13 @@ kernel void huashanComputePrecomp(
 
     float4 posView4 = eye.viewMatrix * float4(posScene, 1.0);
     float3 posView  = posView4.xyz;
-    if (posView.z >= 0.0) { continue; }
+    float viewDepth = -posView.z;
 
     float4 clipCenter = eye.vpMatrix * float4(posScene, 1.0);
     if (clipCenter.w <= 0.0) { continue; }
+
+    float2 clipNDC = clipCenter.xy / clipCenter.w;
+    float centerDist2 = dot(clipNDC, clipNDC);
 
     float3 cov2d = computeCov2D(Sig3, posView, eye.focalXY, eye.viewMatrix);
     float c00 = cov2d.x, c01 = cov2d.y, c11 = cov2d.z;
@@ -168,10 +168,20 @@ kernel void huashanComputePrecomp(
     float lam2 = mid - disc;
     float r1   = min(sqrt(max(lam1, 0.0)) * 3.0, maxR);
     float r2   = min(sqrt(max(lam2, 0.0)) * 3.0, maxR);
-    r2 = max(r2, r1 * 0.33);  // cap aspect ratio at 3:1 to avoid needle splats
+    r2 = max(r2, r1 * 0.08);  // keep elongated structure but avoid collapsing to circles
+    r1 = max(r1, 0.02);
+    r2 = max(r2, 0.008);
 
-    // Sub-pixel cull: skip splats too small to contribute meaningfully
-    if (r1 < 1.0) { continue; }
+    // Stable far-field thinning: preserve central splats, thin peripheral distant tiny ones first.
+    uint hash = splatIdx * 1664525u + 1013904223u;
+    bool peripheral = centerDist2 > 0.40;
+    bool farPeripheral = centerDist2 > 0.85;
+    bool edgePeripheral = centerDist2 > 1.40;
+    if (peripheral && viewDepth > 2.35 && r1 < 0.30 && (hash & 1u) != 0u) { continue; }
+    if (farPeripheral && viewDepth > 2.60 && r1 < 0.20 && (hash & 3u) != 0u) { continue; }
+    if (farPeripheral && viewDepth > 2.80 && r1 < 0.12 && (hash & 7u) != 0u) { continue; }
+    if (edgePeripheral && viewDepth > 3.00 && r1 < 0.08 && (hash & 15u) != 0u) { continue; }
+
     float2 v1  = normalize(float2(c01, lam1 - c00) + float2(1e-6));
     float2 v2  = float2(-v1.y, v1.x);
 
@@ -213,6 +223,10 @@ vertex VertexOut huashanVertexShader(
   out.uv      = float2(0);
   out.color   = float4(0);
 
+  float2 corners[4] = { float2(-1,-1), float2(1,-1), float2(-1,1), float2(1,1) };
+  uint   triVtx[6]  = { 0, 1, 2, 1, 3, 2 };
+  float2 uv = corners[triVtx[vertexID % 6]];
+
   if (instanceID >= uniforms.splatCount) { return out; }
 
   SplatPrecomp sp = precomp[instanceID];
@@ -225,10 +239,6 @@ vertex VertexOut huashanVertexShader(
   float2 axisU = (amplificationID == 0) ? sp.axesU.xy : sp.axesU.zw;
   float2 axisV = (amplificationID == 0) ? sp.axesV.xy : sp.axesV.zw;
 
-  float2 corners[4] = { float2(-1,-1), float2(1,-1), float2(-1,1), float2(1,1) };
-  uint   triVtx[6]  = { 0, 1, 2, 1, 3, 2 };
-  float2 uv = corners[triVtx[vertexID % 6]];
-
   float2 ndcOffset = (uv.x * axisU + uv.y * axisV) * clipCenter.w;
   out.clipPos = clipCenter + float4(ndcOffset, 0.0, 0.0);
   out.uv      = uv;
@@ -240,8 +250,8 @@ fragment float4 huashanFragmentShader(VertexOut in [[stage_in]])
 {
   float r2 = dot(in.uv, in.uv);
   if (r2 > 1.0) { discard_fragment(); }
-  float gauss = exp(-0.5 * r2 * 3.5);
-  if (gauss < 0.02) { discard_fragment(); }
+  float gauss = exp(-0.5 * r2 * 6.5);
+  if (gauss < 0.015) { discard_fragment(); }
   return in.color * gauss;
 }
 

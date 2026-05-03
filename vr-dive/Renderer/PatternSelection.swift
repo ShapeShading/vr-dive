@@ -33,6 +33,10 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case waveySpheres
   case fractalFlythrough
   case apollonianIIv4
+  case magnetar
+  case spiraledLayers
+  case angleFire
+  case glowingMountainLines
   case interferenceCascadeCube
   case orbitalSphereCube
   case huashan
@@ -114,6 +118,14 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Fractal Flythrough"
     case .apollonianIIv4:
       return "Apollonian-II-v4"
+    case .magnetar:
+      return "Magnetar"
+    case .spiraledLayers:
+      return "Spiraled Layers"
+    case .angleFire:
+      return "Angle Fire"
+    case .glowingMountainLines:
+      return "Glowing Mountain Lines"
     case .interferenceCascadeCube:
       return "InterferenceCascadeCube"
     case .orbitalSphereCube:
@@ -126,7 +138,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .apollonianIIv4
+  private var _current: VisualPatternKind = .glowingMountainLines
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

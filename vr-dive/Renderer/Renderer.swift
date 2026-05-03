@@ -915,6 +915,46 @@ class Renderer {
       print("[Renderer] Apollonian-II-v4 pattern unavailable.")
     }
 
+    if let magnetar = try? MagnetarRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.magnetar] = magnetar
+    } else {
+      print("[Renderer] Magnetar pattern unavailable.")
+    }
+
+    if let spiraledLayers = try? SpiraledLayersRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.spiraledLayers] = spiraledLayers
+    } else {
+      print("[Renderer] Spiraled Layers pattern unavailable.")
+    }
+
+    if let angleFire = try? AngleFireRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.angleFire] = angleFire
+    } else {
+      print("[Renderer] Angle Fire pattern unavailable.")
+    }
+
+    if let glowingMountainLines = try? GlowingMountainLinesRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.glowingMountainLines] = glowingMountainLines
+    } else {
+      print("[Renderer] Glowing Mountain Lines pattern unavailable.")
+    }
+
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(
       device: device,
       library: library,

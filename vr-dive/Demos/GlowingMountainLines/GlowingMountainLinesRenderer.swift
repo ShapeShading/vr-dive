@@ -1,15 +1,16 @@
 import Metal
 import simd
 
-// ApollonianIIv4Renderer.swift
+// GlowingMountainLinesRenderer.swift
 //
 // Source reference:
-// https://www.shadertoy.com/view/WlcXR2
-// "Apollonian II" by inigo quilez - iq/2016
-// License: Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported
+// https://www.shadertoy.com/view/wcjyDm
+// "CC0: Glowing mountain lines"
+// Uses XorDev's dot noise: https://www.shadertoy.com/view/wfsyRX
+// License: CC0
 
-final class ApollonianIIv4Renderer: VisualPatternController {
-  let identifier: VisualPatternKind = .apollonianIIv4
+final class GlowingMountainLinesRenderer: VisualPatternController {
+  let identifier: VisualPatternKind = .glowingMountainLines
   let preferredClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
   private let pipelineState: MTLRenderPipelineState
@@ -19,9 +20,8 @@ final class ApollonianIIv4Renderer: VisualPatternController {
   private let indexCount: Int
   private let maxViewCount: Int
 
-  // 4 metre cube. Front face at z = objectCenter.z + cubeScale = -1.75 + 2.0 = +0.25
-  private let cubeScale: Float = 2.0
-  private let travelSpeed: Float = 0.5
+  // 2 metre cube (half-extent = 1 m)
+  private let cubeScale: Float = 1.0
   private let objectCenter = SIMD3<Float>(0.0, 0.0, -1.75)
 
   private var animationTime: Float = 0
@@ -30,14 +30,13 @@ final class ApollonianIIv4Renderer: VisualPatternController {
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
 
-    let geo = ApollonianIIv4Renderer.makeBox(device: device)
+    let geo = GlowingMountainLinesRenderer.makeBox(device: device)
     vertexBuffer = geo.vertexBuffer
-    indexBuffer = geo.indexBuffer
-    indexCount = geo.indexCount
+    indexBuffer  = geo.indexBuffer
+    indexCount   = geo.indexCount
 
-    pipelineState = try ApollonianIIv4Renderer.makePipelineState(
-      device: device, library: library, maxViewCount: self.maxViewCount)
-    depthStencilState = ApollonianIIv4Renderer.makeDepthStencilState(device: device)
+    pipelineState     = try GlowingMountainLinesRenderer.makePipelineState(device: device, library: library, maxViewCount: self.maxViewCount)
+    depthStencilState = GlowingMountainLinesRenderer.makeDepthStencilState(device: device)
   }
 
   func updateSimulation(_ context: PatternSimulationContext) {
@@ -60,15 +59,14 @@ final class ApollonianIIv4Renderer: VisualPatternController {
 
     encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-    var uniforms = ApollonianIIv4Uniforms(
+    var uniforms = GlowingMountainLinesUniforms(
       time: animationTime,
       viewCount: UInt32(context.viewData.viewCount),
       cubeScale: cubeScale,
-      travelSpeed: travelSpeed,
+      padding: 0,
       objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0))
 
-    encoder.setVertexBytes(
-      &uniforms, length: MemoryLayout<ApollonianIIv4Uniforms>.stride, index: 1)
+    encoder.setVertexBytes(&uniforms, length: MemoryLayout<GlowingMountainLinesUniforms>.stride, index: 1)
 
     var vpMatrices = context.viewData.viewProjectionMatrices
     if vpMatrices.isEmpty { vpMatrices = [matrix_identity_float4x4] }
@@ -78,8 +76,7 @@ final class ApollonianIIv4Renderer: VisualPatternController {
       }
     }
 
-    encoder.setFragmentBytes(
-      &uniforms, length: MemoryLayout<ApollonianIIv4Uniforms>.stride, index: 0)
+    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<GlowingMountainLinesUniforms>.stride, index: 0)
 
     var viewToWorld = context.viewData.viewToWorldTransforms
     if viewToWorld.isEmpty { viewToWorld = [matrix_identity_float4x4] }
@@ -98,7 +95,7 @@ final class ApollonianIIv4Renderer: VisualPatternController {
   }
 }
 
-extension ApollonianIIv4Renderer {
+extension GlowingMountainLinesRenderer {
   fileprivate static func makeBox(
     device: MTLDevice
   ) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
@@ -107,12 +104,12 @@ extension ApollonianIIv4Renderer {
     let y: Float = 1.0
     let z: Float = 1.0
     let faces: [(positions: [SIMD3<Float>], normal: SIMD3<Float>)] = [
-      ([[-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]], [0, 0, 1]),
-      ([[x, -y, -z], [-x, -y, -z], [-x, y, -z], [x, y, -z]], [0, 0, -1]),
-      ([[x, -y, z], [x, -y, -z], [x, y, -z], [x, y, z]], [1, 0, 0]),
-      ([[-x, -y, -z], [-x, -y, z], [-x, y, z], [-x, y, -z]], [-1, 0, 0]),
-      ([[-x, y, z], [x, y, z], [x, y, -z], [-x, y, -z]], [0, 1, 0]),
-      ([[-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z]], [0, -1, 0]),
+      ([[-x, -y,  z], [ x, -y,  z], [ x,  y,  z], [-x,  y,  z]], [0, 0, 1]),
+      ([[ x, -y, -z], [-x, -y, -z], [-x,  y, -z], [ x,  y, -z]], [0, 0, -1]),
+      ([[ x, -y,  z], [ x, -y, -z], [ x,  y, -z], [ x,  y,  z]], [1, 0, 0]),
+      ([[-x, -y, -z], [-x, -y,  z], [-x,  y,  z], [-x,  y, -z]], [-1, 0, 0]),
+      ([[-x,  y,  z], [ x,  y,  z], [ x,  y, -z], [-x,  y, -z]], [0, 1, 0]),
+      ([[-x, -y, -z], [ x, -y, -z], [ x, -y,  z], [-x, -y,  z]], [0, -1, 0]),
     ]
 
     var vertices: [V] = []
@@ -142,17 +139,17 @@ extension ApollonianIIv4Renderer {
     device: MTLDevice, library: MTLLibrary, maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let desc = MTLRenderPipelineDescriptor()
-    desc.vertexFunction = library.makeFunction(name: "apollonianIIv4Vertex")
-    desc.fragmentFunction = library.makeFunction(name: "apollonianIIv4Fragment")
+    desc.vertexFunction   = library.makeFunction(name: "glowingMountainLinesVertex")
+    desc.fragmentFunction = library.makeFunction(name: "glowingMountainLinesFragment")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
     desc.depthAttachmentPixelFormat = .depth32Float
 
     let vd = MTLVertexDescriptor()
-    vd.attributes[0].format = .float3
-    vd.attributes[0].offset = 0
+    vd.attributes[0].format      = .float3
+    vd.attributes[0].offset      = 0
     vd.attributes[0].bufferIndex = 0
-    vd.attributes[1].format = .float3
-    vd.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
+    vd.attributes[1].format      = .float3
+    vd.attributes[1].offset      = MemoryLayout<SIMD3<Float>>.stride
     vd.attributes[1].bufferIndex = 0
     vd.layouts[0].stride = MemoryLayout<MeshVertex>.stride
     desc.vertexDescriptor = vd
@@ -164,7 +161,7 @@ extension ApollonianIIv4Renderer {
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let desc = MTLDepthStencilDescriptor()
     desc.depthCompareFunction = .greater
-    desc.isDepthWriteEnabled = true
+    desc.isDepthWriteEnabled  = true
     return device.makeDepthStencilState(descriptor: desc)!
   }
 }

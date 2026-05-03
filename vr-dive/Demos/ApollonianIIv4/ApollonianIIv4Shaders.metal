@@ -14,7 +14,7 @@ using namespace metal;
 
 // Scene is scaled so that the repeating Apollonian cell (period 2) comfortably
 // fills the cube. Smaller values = larger structures visible from outside.
-#define AP_SCENE_SCALE   5.0f
+#define AP_SCENE_SCALE   1.0f
 #define AP_MAXD          20.0f
 #define AP_MAX_STEPS     256
 
@@ -88,6 +88,12 @@ static float3 ap_faceNormal(float3 p) {
   return float3(0.0f, 0.0f, sign(p.z));
 }
 
+// GLSL-compatible mod: x - y*floor(x/y), always non-negative when y > 0.
+// Metal's fmod() truncates toward zero and gives wrong results for negative x.
+static float3 glsl_mod(float3 x, float y) {
+  return x - y * floor(x / y);
+}
+
 // ---------------------------------------------------------------------------
 // Apollonian SDF  (direct port of map() from ShaderToy WlcXR2)
 // Returns float3( distance, adr, k*0.5 )
@@ -103,7 +109,7 @@ static float3 ap_map(float3 ppp, float iTime)
 
   // Repeat Apollonian fractal — 6 iterations.
   while (i++ < 6.0f) {
-    float3 pp = fmod(p - 1.0f, 2.0f) - 1.0f;
+    float3 pp = glsl_mod(p - 1.0f, 2.0f) - 1.0f;
     p = pp;
     k = 1.0f / dot(pp, p);
     p *= k;

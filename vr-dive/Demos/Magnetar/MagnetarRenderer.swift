@@ -1,15 +1,15 @@
 import Metal
 import simd
 
-// ApollonianIIv4Renderer.swift
+// MagnetarRenderer.swift
 //
 // Source reference:
-// https://www.shadertoy.com/view/WlcXR2
-// "Apollonian II" by inigo quilez - iq/2016
-// License: Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported
+// https://www.shadertoy.com/view/NclXWn
+// "Magnetar" — reworked from https://www.shadertoy.com/view/XfK3zV
+// License: see original ShaderToy page
 
-final class ApollonianIIv4Renderer: VisualPatternController {
-  let identifier: VisualPatternKind = .apollonianIIv4
+final class MagnetarRenderer: VisualPatternController {
+  let identifier: VisualPatternKind = .magnetar
   let preferredClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
   private let pipelineState: MTLRenderPipelineState
@@ -19,9 +19,8 @@ final class ApollonianIIv4Renderer: VisualPatternController {
   private let indexCount: Int
   private let maxViewCount: Int
 
-  // 4 metre cube. Front face at z = objectCenter.z + cubeScale = -1.75 + 2.0 = +0.25
-  private let cubeScale: Float = 2.0
-  private let travelSpeed: Float = 0.5
+  // 2 metre cube (half-extent = 1 m → cubeScale = 1.0 maps [-1,1] local to [-1m,1m] world)
+  private let cubeScale: Float = 1.0
   private let objectCenter = SIMD3<Float>(0.0, 0.0, -1.75)
 
   private var animationTime: Float = 0
@@ -30,14 +29,14 @@ final class ApollonianIIv4Renderer: VisualPatternController {
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
 
-    let geo = ApollonianIIv4Renderer.makeBox(device: device)
+    let geo = MagnetarRenderer.makeBox(device: device)
     vertexBuffer = geo.vertexBuffer
     indexBuffer = geo.indexBuffer
     indexCount = geo.indexCount
 
-    pipelineState = try ApollonianIIv4Renderer.makePipelineState(
+    pipelineState = try MagnetarRenderer.makePipelineState(
       device: device, library: library, maxViewCount: self.maxViewCount)
-    depthStencilState = ApollonianIIv4Renderer.makeDepthStencilState(device: device)
+    depthStencilState = MagnetarRenderer.makeDepthStencilState(device: device)
   }
 
   func updateSimulation(_ context: PatternSimulationContext) {
@@ -60,15 +59,14 @@ final class ApollonianIIv4Renderer: VisualPatternController {
 
     encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-    var uniforms = ApollonianIIv4Uniforms(
+    var uniforms = MagnetarUniforms(
       time: animationTime,
       viewCount: UInt32(context.viewData.viewCount),
       cubeScale: cubeScale,
-      travelSpeed: travelSpeed,
+      padding: 0,
       objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0))
 
-    encoder.setVertexBytes(
-      &uniforms, length: MemoryLayout<ApollonianIIv4Uniforms>.stride, index: 1)
+    encoder.setVertexBytes(&uniforms, length: MemoryLayout<MagnetarUniforms>.stride, index: 1)
 
     var vpMatrices = context.viewData.viewProjectionMatrices
     if vpMatrices.isEmpty { vpMatrices = [matrix_identity_float4x4] }
@@ -78,8 +76,7 @@ final class ApollonianIIv4Renderer: VisualPatternController {
       }
     }
 
-    encoder.setFragmentBytes(
-      &uniforms, length: MemoryLayout<ApollonianIIv4Uniforms>.stride, index: 0)
+    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<MagnetarUniforms>.stride, index: 0)
 
     var viewToWorld = context.viewData.viewToWorldTransforms
     if viewToWorld.isEmpty { viewToWorld = [matrix_identity_float4x4] }
@@ -98,7 +95,7 @@ final class ApollonianIIv4Renderer: VisualPatternController {
   }
 }
 
-extension ApollonianIIv4Renderer {
+extension MagnetarRenderer {
   fileprivate static func makeBox(
     device: MTLDevice
   ) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
@@ -142,8 +139,8 @@ extension ApollonianIIv4Renderer {
     device: MTLDevice, library: MTLLibrary, maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let desc = MTLRenderPipelineDescriptor()
-    desc.vertexFunction = library.makeFunction(name: "apollonianIIv4Vertex")
-    desc.fragmentFunction = library.makeFunction(name: "apollonianIIv4Fragment")
+    desc.vertexFunction = library.makeFunction(name: "magnetarVertex")
+    desc.fragmentFunction = library.makeFunction(name: "magnetarFragment")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
     desc.depthAttachmentPixelFormat = .depth32Float
 

@@ -9,10 +9,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
-#define GEC_FAR         34.0f
+#define GEC_FAR         28.0f
 #define GEC_PI          3.14159265f
-#define GEC_MAX_STEPS   112
-#define GEC_BOUNCES     4
+#define GEC_MAX_STEPS   84
+#define GEC_BOUNCES     2
 #define GEC_SCENE_SCALE 10.0f
 
 struct GyroidEchoCubeUniforms {
@@ -98,7 +98,7 @@ static GecHit gec_raymarch(float3 ro, float3 rd) {
       result.material = sample.material;
       break;
     }
-    result.dist += sample.dist * 0.92f;
+    result.dist += clamp(sample.dist * 0.82f, 0.01f, 0.6f);
     result.material = sample.material;
     if (result.dist > GEC_FAR) { break; }
   }
@@ -132,12 +132,12 @@ static float3 gec_trace(float3 ro, float3 rd, float time) {
     GecHit hit = gec_raymarch(ro, rd);
     if (hit.dist > GEC_FAR) {
       float skyMix = clamp(0.5f + 0.5f * rd.y, 0.0f, 1.0f);
-      float3 sky = mix(float3(0.03f, 0.04f, 0.09f), float3(0.18f, 0.12f, 0.26f), skyMix);
+      float3 sky = mix(float3(0.08f, 0.06f, 0.12f), float3(0.25f, 0.16f, 0.30f), skyMix);
       color += throughput * sky;
       break;
     }
 
-    float fog = 1.0f - exp(-0.008f * hit.dist * hit.dist);
+    float fog = 1.0f - exp(-0.010f * hit.dist * hit.dist);
     throughput *= 1.0f - fog;
 
     float3 p = ro + rd * hit.dist;
@@ -157,7 +157,7 @@ static float3 gec_trace(float3 ro, float3 rd, float time) {
     light += float3(0.4f, 0.6f, 0.9f) * diff;
     light += float3(0.5f, 0.1f, 0.1f) * diff2;
     light += float3(0.9f, 0.1f, 0.4f) * diff3;
-    light += float3(0.3f, 0.25f, 0.25f) * pow(spec, 4.0f) * 8.0f;
+    light += float3(0.18f, 0.16f, 0.18f) * pow(spec, 6.0f) * 2.2f;
 
     float3 albedo = float3(0.0f);
     if (hit.material == 1) {
@@ -167,11 +167,13 @@ static float3 gec_trace(float3 ro, float3 rd, float time) {
     }
 
     float ao = gec_ao(p, sn);
-    color += throughput * light * albedo * ao;
+    float3 localColor = light * albedo * ao;
+    localColor += albedo * (0.08f + 0.18f * diff3);
+    color += throughput * localColor;
 
     rd = reflect(rd, sn);
     ro = p + sn * 0.012f;
-    throughput *= 0.9f * pow(fres, 1.0f);
+    throughput *= 0.22f + 0.28f * fres;
   }
 
   return color;
@@ -220,7 +222,6 @@ fragment float4 gyroidEchoCubeFragment(
   rd = gec_lookAt(normalize(ta)) * rd;
 
   float3 color = gec_trace(float3(GEC_PI * 0.5f, 0.0f, -time * 5.0f), rd, time);
-  color *= smoothstep(0.0f, 1.0f, 1.15f - length((in.worldPos.xy - center.xy) / uniforms.cubeScale * 0.9f));
   color = pow(max(color, 0.0f), float3(0.4545f));
   return float4(clamp(color, 0.0f, 1.0f), 1.0f);
 }

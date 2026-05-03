@@ -1,8 +1,8 @@
 import simd
 
-/// Must stay in sync with the Metal struct PathTilesCubeUniforms in
-/// PathTilesCubeShaders.metal.
-struct PathTilesCubeUniforms {
+/// Must stay in sync with the Metal struct VoxelEdgesUniforms in
+/// VoxelEdgesShaders.metal.
+struct VoxelEdgesUniforms {
   var time: Float
   var viewCount: UInt32
   var cubeScale: Float

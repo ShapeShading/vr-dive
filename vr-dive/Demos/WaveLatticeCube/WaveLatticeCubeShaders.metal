@@ -11,7 +11,7 @@ using namespace metal;
 
 #define WLC_MAX_STEPS   96
 #define WLC_MAX_DIST    36.0f
-#define WLC_HIT_EPS     0.0012f
+#define WLC_HIT_EPS     0.0010f
 #define WLC_SCENE_SCALE 10.0f
 
 struct WaveLatticeCubeUniforms {
@@ -57,31 +57,25 @@ static float2 wlc_rot(float2 p, float a) {
   return float2(p.x * c - p.y * s, p.x * s + p.y * c);
 }
 
-static float wlc_map(float3 p) {
-  float k1 = 1.75f;
-  float k2 = (sin(p.x * k1) + sin(p.z * k1)) * 0.7f;
-  float k3 = (sin(p.y * k1) + sin(p.z * k1)) * 0.7f;
-
-  float3 n0 = normalize(float3(0.0f, 1.0f, 0.0f));
-  float3 n1 = normalize(float3(1.0f, 0.0f, 1.0f));
-  float w1 = 3.8f - dot(abs(p), n0) + k2;
-  float w2 = 3.6f - dot(abs(p), n1) + k3;
-
-  float2 j0 = float2(sin((p.z + p.x) * 1.8f) * 0.25f, cos((p.z + p.x) * 0.9f) * 0.45f);
-  float2 j1 = float2(sin((p.z - p.y) * 1.7f) * 0.25f, cos((p.x + p.y) * 1.1f) * 0.28f);
-  float s1 = length(fmod(p.xy + j0 + 100.0f, 2.0f) - 1.0f) - 0.19f;
-  float s2 = length(fmod(p.yz + j1 + 100.5f, 2.0f) - 1.0f) - 0.18f;
-  float s3 = length(fmod(p.xz + j0.yx + 101.0f, 2.2f) - 1.1f) - 0.14f;
-
-  return min(w1, min(w2, min(s1, min(s2, s3))));
+static float2 wlc_mod(float2 x, float y) {
+  return x - y * floor(x / y);
 }
 
-static float3 wlc_normal(float3 p) {
-  const float e = 0.002f;
-  return normalize(float3(
-    wlc_map(p + float3(e, 0, 0)) - wlc_map(p - float3(e, 0, 0)),
-    wlc_map(p + float3(0, e, 0)) - wlc_map(p - float3(0, e, 0)),
-    wlc_map(p + float3(0, 0, e)) - wlc_map(p - float3(0, 0, e))));
+static float wlc_map(float3 p) {
+  float3 n = float3(0.0f, 1.0f, 0.0f);
+  float k1 = 1.9f;
+  float k2 = (sin(p.x * k1) + sin(p.z * k1)) * 0.8f;
+  float k3 = (sin(p.y * k1) + sin(p.z * k1)) * 0.8f;
+
+  float w1 = 4.0f - dot(abs(p), normalize(n)) + k2;
+  float w2 = 4.0f - dot(abs(p), normalize(n.yzx)) + k3;
+
+  float2 j0 = float2(sin((p.z + p.x) * 2.0f) * 0.3f, cos((p.z + p.x) * 1.0f) * 0.5f);
+  float2 j1 = float2(sin((p.z + p.x) * 2.0f) * 0.3f, cos((p.z + p.x) * 1.0f) * 0.3f);
+  float s1 = length(wlc_mod(p.xy + j0, 2.0f) - 1.0f) - 0.2f;
+  float s2 = length(wlc_mod(0.5f + p.yz + j1, 2.0f) - 1.0f) - 0.2f;
+
+  return min(w1, min(w2, min(s1, s2)));
 }
 
 static bool wlc_boxHit(
@@ -118,6 +112,7 @@ fragment float4 waveLatticeCubeFragment(
 
   float time = uniforms.time * uniforms.travelSpeed;
   float3 ro = (roLocal + rdLocal * max(tEntry, 0.0f)) * WLC_SCENE_SCALE;
+  ro += float3(0.0f, 0.0f, time * 3.8f);
   float3 rd = normalize(rdLocal);
   rd.xz = wlc_rot(rd.xz, time * 0.23f);
   rd = rd.yzx;
@@ -126,12 +121,10 @@ fragment float4 waveLatticeCubeFragment(
 
   float t = 0.0f;
   float tt = 0.0f;
-  bool hit = false;
   for (int i = 0; i < WLC_MAX_STEPS; ++i) {
     float3 p = ro + rd * t;
     tt = wlc_map(p);
     if (tt < WLC_HIT_EPS) {
-      hit = true;
       break;
     }
     t += tt * 0.45f;
@@ -139,20 +132,9 @@ fragment float4 waveLatticeCubeFragment(
   }
 
   float3 p = ro + rd * t;
-  float3 col = sqrt(max(float3(t * 0.08f), 0.0f));
-  float accent = max(0.0f, wlc_map(p - float3(0.08f)) - tt);
+  float3 col = sqrt(max(float3(t * 0.1f), 0.0f));
+  float accent = max(0.0f, wlc_map(p - float3(0.1f)) - tt);
   float3 color = 0.05f * t + abs(rd) * col + accent;
-
-  if (hit) {
-    float3 normal = wlc_normal(p);
-    float rim = pow(clamp(1.0f - max(dot(-rd, normal), 0.0f), 0.0f, 1.0f), 2.0f);
-    float diffuse = max(dot(normal, normalize(float3(0.6f, 0.8f, 0.4f))), 0.0f);
-    color += float3(0.12f, 0.22f, 0.38f) * diffuse;
-    color += float3(0.5f, 0.35f, 0.8f) * rim * 0.4f;
-  } else {
-    float skyMix = clamp(0.5f + 0.5f * rd.y, 0.0f, 1.0f);
-    color = mix(float3(0.01f, 0.01f, 0.03f), float3(0.10f, 0.06f, 0.18f), skyMix);
-  }
 
   color = clamp(color, 0.0f, 1.0f);
   return float4(color, 1.0f);

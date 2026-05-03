@@ -23,10 +23,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case glassBox
   case platonicMirror
   case synthwaveSunset
-  case voxelTerrainCube
-  case octagramFieldCube
+  case voxelEdges
   case pathTilesCube
-  case fractalFoldCube
   case cartoonFractalCube
   case gyroidEchoCube
   case waveLatticeCube
@@ -91,14 +89,10 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "反射多面体"
     case .synthwaveSunset:
       return "合成波日落"
-    case .voxelTerrainCube:
-      return "VoxelTerrainCube"
-    case .octagramFieldCube:
-      return "OctagramFieldCube"
+    case .voxelEdges:
+      return "Voxel Edges"
     case .pathTilesCube:
       return "PathTilesCube"
-    case .fractalFoldCube:
-      return "FractalFoldCube"
     case .cartoonFractalCube:
       return "CartoonFractalCube"
     case .gyroidEchoCube:

@@ -125,16 +125,39 @@ static float osc_heightMap(float3 pos, float time) {
 }
 
 static float osc_rayMarchPlane(float3 ro, float3 rd, float tmax, float time) {
-  float t = 0.0f;
-  float h = (1.0f - ro.y) / rd.y;
-  if (h > 0.0f) { t = h; }
-  for (int i = 0; i < 24; ++i) {
-    float3 pos = ro + t * rd;
-    float dh = osc_heightMap(pos, time);
-    if (dh < 0.001f || t > tmax) { break; }
-    t += dh;
+  if (tmax <= 0.0f) {
+    return tmax + 1.0f;
   }
-  return t;
+
+  const int coarseSteps = 48;
+  float prevT = 0.0f;
+  float prevH = osc_heightMap(ro, time);
+  float stepSize = tmax / float(coarseSteps);
+
+  for (int i = 1; i <= coarseSteps; ++i) {
+    float t = min(tmax, stepSize * float(i));
+    float h = osc_heightMap(ro + t * rd, time);
+    if ((prevH <= 0.0f && h >= 0.0f) || (prevH >= 0.0f && h <= 0.0f)) {
+      float a = prevT;
+      float b = t;
+      float ha = prevH;
+      for (int j = 0; j < 6; ++j) {
+        float mid = 0.5f * (a + b);
+        float hm = osc_heightMap(ro + mid * rd, time);
+        if ((ha <= 0.0f && hm <= 0.0f) || (ha >= 0.0f && hm >= 0.0f)) {
+          a = mid;
+          ha = hm;
+        } else {
+          b = mid;
+        }
+      }
+      return 0.5f * (a + b);
+    }
+    prevT = t;
+    prevH = h;
+  }
+
+  return tmax + 1.0f;
 }
 
 static bool osc_boxHit(
@@ -182,34 +205,9 @@ fragment float4 orbitalSphereCubeFragment(
   if (sphereHit > 0.0f) {
     float3 pos = ro + sphereHit * rd;
     float3 nor = osc_sphereNormal(pos, sphere);
-
-    float am = 0.1f * time;
-    float2 pr = float2(cos(am), sin(am));
-    float3 tnor = nor;
-    tnor.xz = float2(pr.x * tnor.x - pr.y * tnor.z, pr.y * tnor.x + pr.x * tnor.z);
-
-    float am2 = 0.08f * time - (1.0f - nor.y * nor.y);
-    pr = float2(cos(am2), sin(am2));
-    float3 tnor2 = nor;
-    tnor2.xz = float2(pr.x * tnor2.x - pr.y * tnor2.z, pr.y * tnor2.x + pr.x * tnor2.z);
-
-    float fre = clamp(1.0f + dot(nor, rd), 0.0f, 1.0f);
-    float lat = asin(clamp(tnor.y, -1.0f, 1.0f));
-    float lon = atan2(tnor.z, tnor.x);
-    float2 uv = float2(lon / (2.0f * OSC_PI) + 0.5f, lat / OSC_PI + 0.5f);
-    float sheen = 0.5f + 0.5f * sin(8.0f * uv.x + 3.5f * uv.y + time * 0.15f);
-    float horizonBand = smoothstep(0.15f, 0.95f, 1.0f - abs(nor.y));
-    float3 mat = mix(float3(0.015f, 0.02f, 0.04f), float3(0.02f, 0.10f, 0.18f), 0.35f * sheen);
-    mat += horizonBand * float3(0.01f, 0.05f, 0.10f) * 0.45f;
-
-    float dif = clamp(dot(nor, lightDir), 0.0f, 1.0f);
-    float3 lin = float3(1.0f, 1.15f, 1.35f) * (0.08f + 0.55f * dif);
-    color = mat * lin;
-    color += 0.75f * fre * fre * float3(0.72f, 0.82f, 1.0f) * (0.45f + 0.55f * dif);
-
-    float spe = clamp(dot(reflect(rd, nor), lightDir), 0.0f, 1.0f);
-    float tspe = 0.18f * pow(spe, 6.0f) + 0.65f * pow(spe, 28.0f);
-    color += float3(0.70f, 0.80f, 1.0f) * tspe * (0.2f + 0.8f * dif);
+    (void)pos;
+    (void)nor;
+    color = float3(0.028f, 0.105f, 0.185f);
   }
 
   float planeHit = osc_rayMarchPlane(ro, rd, tmax, time);
@@ -217,21 +215,18 @@ fragment float4 orbitalSphereCubeFragment(
     float3 pos = ro + planeHit * rd;
     float2 scp = sin(2.0f * 6.2831f * pos.xz);
     float3 wire = float3(0.0f);
-    wire += exp(-12.0f * abs(scp.x));
-    wire += exp(-12.0f * abs(scp.y));
-    wire += 0.45f * exp(-4.0f * abs(scp.x));
-    wire += 0.45f * exp(-4.0f * abs(scp.y));
-    wire *= 0.16f + 0.95f * osc_sphereSoftShadow(pos, lightDir, sphere, 4.0f);
-    color += wire * float3(0.40f, 0.95f, 0.72f) * 0.52f * exp(-0.035f * planeHit * planeHit);
+    wire += exp(-24.0f * abs(scp.x));
+    wire += exp(-24.0f * abs(scp.y));
+    color += wire * float3(0.40f, 0.95f, 0.72f) * 0.26f * exp(-0.03f * planeHit * planeHit);
   }
 
   if (dot(rd, sphere.xyz - ro) > 0.0f) {
     float d = osc_sphereDistance(ro, rd, sphere);
     float3 glow = float3(0.0f);
-    glow += float3(0.40f, 0.75f, 1.00f) * 0.75f * exp(-2.3f * abs(d)) * step(0.0f, d);
-    glow += float3(0.45f, 0.80f, 1.00f) * 0.22f * exp(-9.0f * abs(d));
-    glow += float3(0.82f, 0.90f, 1.00f) * 0.30f * exp(-110.0f * abs(d));
-    color += glow * 1.35f;
+    glow += float3(0.40f, 0.75f, 1.00f) * 0.24f * exp(-3.8f * abs(d)) * step(0.0f, d);
+    glow += float3(0.45f, 0.80f, 1.00f) * 0.07f * exp(-13.0f * abs(d));
+    glow += float3(0.82f, 0.90f, 1.00f) * 0.08f * exp(-150.0f * abs(d));
+    color += glow * 0.7f;
   }
 
   color *= smoothstep(0.0f, 2.5f, time + 0.3f);

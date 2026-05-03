@@ -21,7 +21,7 @@ final class CartoonFractalCubeRenderer: VisualPatternController {
   private let maxViewCount: Int
 
   private let cubeScale: Float = 2.0
-  private let travelSpeed: Float = 0.75
+  private let travelSpeed: Float = 0.075
   private let objectCenter = SIMD3<Float>(0.0, -0.04, -1.75)
 
   private var animationTime: Float = 0

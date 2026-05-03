@@ -815,24 +815,14 @@ class Renderer {
       print("[Renderer] SynthwaveSunset pattern unavailable.")
     }
 
-    if let voxelTerrainCube = try? VoxelTerrainCubeRenderer(
+    if let voxelEdges = try? VoxelEdgesRenderer(
       device: device,
       library: library,
       maxViewCount: maxViewCount
     ) {
-      controllers[.voxelTerrainCube] = voxelTerrainCube
+      controllers[.voxelEdges] = voxelEdges
     } else {
-      print("[Renderer] VoxelTerrainCube pattern unavailable.")
-    }
-
-    if let octagramFieldCube = try? OctagramFieldCubeRenderer(
-      device: device,
-      library: library,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.octagramFieldCube] = octagramFieldCube
-    } else {
-      print("[Renderer] OctagramFieldCube pattern unavailable.")
+      print("[Renderer] VoxelEdges pattern unavailable.")
     }
 
     if let pathTilesCube = try? PathTilesCubeRenderer(
@@ -843,16 +833,6 @@ class Renderer {
       controllers[.pathTilesCube] = pathTilesCube
     } else {
       print("[Renderer] PathTilesCube pattern unavailable.")
-    }
-
-    if let fractalFoldCube = try? FractalFoldCubeRenderer(
-      device: device,
-      library: library,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.fractalFoldCube] = fractalFoldCube
-    } else {
-      print("[Renderer] FractalFoldCube pattern unavailable.")
     }
 
     if let cartoonFractalCube = try? CartoonFractalCubeRenderer(

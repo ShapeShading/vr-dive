@@ -9,8 +9,8 @@
 #include <metal_stdlib>
 using namespace metal;
 
-#define ICC_STEPS       52
-#define ICC_MAX_DIST    28.0f
+#define ICC_STEPS       42
+#define ICC_MAX_DIST    22.0f
 #define ICC_SCENE_SCALE 11.0f
 
 struct InterferenceCascadeCubeUniforms {
@@ -139,17 +139,18 @@ fragment float4 interferenceCascadeCubeFragment(
     float d = icc_map(p, time);
     float lxy = max(length(p.xy), 1e-3f);
     float pulse = smoothstep(0.9f, 1.0f, cos(lxy * 1.8f + p.z * 0.65f - time));
-    float4 glow = (0.01f + 0.025f * pulse)
+    float4 glow = (0.008f + 0.018f * pulse)
           * (1.0f + cos(lxy * 2.0f + float(i) * 0.2f + float4(0.0f, 1.0f, 2.0f, 0.0f)))
-          / lxy;
-    float density = exp(-10.0f * abs(d));
+          / (0.45f + 1.25f * lxy);
+    float density = exp(-15.0f * abs(d));
     float4 tint = icc_palette(lxy + p.z * 0.4f + time * 0.5f);
-    accum += tint * glow * density;
+    accum += tint * glow * density * 1.7f;
 
-    t += clamp(d * 0.7f + 0.02f, 0.035f, 0.8f);
+    t += clamp(d * 0.82f + 0.035f, 0.05f, 0.9f);
     if (t > ICC_MAX_DIST) { break; }
   }
 
-  float3 color = tanh(accum.xyz * 0.65f);
+  float3 color = tanh(accum.xyz * 0.95f);
+  color = pow(color, float3(0.88f));
   return float4(clamp(color, 0.0f, 1.0f), 1.0f);
 }

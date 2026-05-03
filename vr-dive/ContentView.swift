@@ -22,7 +22,7 @@ struct ContentView: View {
     }
     .padding(.horizontal, 28)
     .padding(.vertical, 32)
-    .frame(maxWidth: 560, minHeight: 280)
+    .frame(maxWidth: 760, minHeight: 280)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
 }
@@ -42,7 +42,7 @@ struct PatternMenuView: View {
       }
       .pickerStyle(.menu)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(minWidth: 360, maxWidth: .infinity, alignment: .leading)
   }
 }
 

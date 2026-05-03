@@ -9,9 +9,9 @@
 #include <metal_stdlib>
 using namespace metal;
 
-#define CFC_RAY_STEPS   88
-#define CFC_MAX_DIST    30.0f
-#define CFC_DETAIL_EPS  0.002f
+#define CFC_RAY_STEPS   150
+#define CFC_MAX_DIST    25.0f
+#define CFC_DETAIL_EPS  0.001f
 #define CFC_SCENE_SCALE 12.0f
 
 struct CartoonFractalCubeUniforms {
@@ -62,20 +62,24 @@ static float2 cfc_rot(float2 p, float a) {
   return float2(c * p.x - s * p.y, s * p.x + c * p.y);
 }
 
+static float cfc_mod(float x, float y) {
+  return x - y * floor(x / y);
+}
+
 static float4 cfc_formula(float4 p) {
-  p.xz = abs(p.xz + 0.9f) - abs(p.xz - 0.9f) - p.xz;
-  p.y -= 0.22f;
-  p.xy = cfc_rot(p.xy, 0.5585054f);
-  float denom = clamp(dot(p.xyz, p.xyz), 0.25f, 1.25f);
-  p *= 1.9f / denom;
+  p.xz = abs(p.xz + 1.0f) - abs(p.xz - 1.0f) - p.xz;
+  p.y -= 0.25f;
+  p.xy = cfc_rot(p.xy, 0.61086524f);
+  float denom = clamp(dot(p.xyz, p.xyz), 0.2f, 1.0f);
+  p *= 2.0f / denom;
   return p;
 }
 
 static CfcMapSample cfc_map(float3 pos, float time) {
-  pos.y += 0.12f * sin(pos.z - time * 3.8f);
+  pos.y += sin(pos.z - time * 0.6f) * 0.15f;
 
   float3 tpos = pos;
-  tpos.z = abs(2.8f - fmod(tpos.z + 300.0f, 5.6f));
+  tpos.z = abs(3.0f - cfc_mod(tpos.z, 6.0f));
   float4 p = float4(tpos, 1.0f);
   float edgeShape = 0.0f;
   for (int i = 0; i < 4; ++i) {
@@ -83,14 +87,14 @@ static CfcMapSample cfc_map(float3 pos, float time) {
     edgeShape += exp(-1.4f * abs(p.y));
   }
 
-  float fractal = (length(max(float2(0.0f), p.yz - 1.35f)) - 0.9f) / p.w;
+  float fractal = (length(max(float2(0.0f), p.yz - 1.5f)) - 1.0f) / p.w;
 
-  float ribs = max(abs(pos.x + 0.9f) - 0.26f, pos.y - 0.34f);
-  ribs = max(ribs, -max(abs(pos.x + 0.9f) - 0.09f, pos.y - 0.48f));
+  float ribs = max(abs(pos.x + 1.0f) - 0.3f, pos.y - 0.35f);
+  ribs = max(ribs, -max(abs(pos.x + 1.0f) - 0.1f, pos.y - 0.5f));
 
-  float stripes = abs(0.22f - fmod(pos.z + 100.0f, 0.44f));
-  ribs = max(ribs, -max(abs(stripes) - 0.17f, pos.y - 0.26f));
-  ribs = max(ribs, -max(abs(stripes) - 0.012f, -pos.y + 0.30f));
+  float stripes = abs(0.25f - cfc_mod(pos.z, 0.5f));
+  ribs = max(ribs, -max(abs(stripes) - 0.2f, pos.y - 0.3f));
+  ribs = max(ribs, -max(abs(stripes) - 0.01f, -pos.y + 0.32f));
 
   CfcMapSample sample;
   sample.dist = min(fractal, ribs);
@@ -125,14 +129,48 @@ static float cfc_edgeMetric(float3 p, float time, float det) {
   return min(1.0f, pow(edge, 0.55f) * 15.0f);
 }
 
+static float3 cfc_path(float time) {
+  float ti = time * 1.5f;
+  return float3(
+    sin(ti),
+    (1.0f - sin(ti * 2.0f)) * 0.5f,
+    ti * 5.0f) * 0.5f;
+}
+
+static void cfc_applyPath(thread float3 &ro, thread float3 &rd, float time) {
+  float3 go = cfc_path(time);
+  float3 adv = cfc_path(time + 0.7f);
+  float3 advec = normalize(adv - go);
+
+  float an = adv.x - go.x;
+  an *= min(1.0f, abs(adv.z - go.z)) * sign(adv.z - go.z) * 0.7f;
+  rd.xy = cfc_rot(rd.xy, an);
+
+  an = advec.y * 1.7f;
+  rd.yz = cfc_rot(rd.yz, an);
+
+  an = atan2(advec.x, advec.z);
+  rd.xz = cfc_rot(rd.xz, an);
+
+  ro += float3(-1.0f, 0.7f, 0.0f) + go;
+}
+
 static float3 cfc_sky(float3 rd, float time) {
-  float y = mix(0.45f, 1.2f, pow(smoothstep(0.0f, 1.0f, 0.75f - rd.y), 2.0f));
-  float sun = pow(clamp(1.0f - length(rd.xy) * 4.2f, 0.0f, 1.0f), 0.3f);
-  float rays = pow(clamp(1.0f - length(rd.xy) * 1.5f, 0.0f, 1.0f), 4.0f);
-  float sweep = 0.5f + 0.5f * sin(time * 1.2f + atan2(rd.x, rd.y) * 10.0f);
-  float3 backg = float3(0.5f, 0.0f, 1.0f) * ((1.0f - sun) * y + rays * (0.5f + 0.5f * sweep));
+  float3 skyDir = rd;
+  skyDir.y -= 0.02f;
+  float sunSize = 6.2f;
+  float angle = atan2(skyDir.x, skyDir.y) + time * 1.5f;
+  float spoke = abs(0.2f - cfc_mod(angle, 0.4f));
+  float radial = length(skyDir.xy);
+  float sun = pow(clamp(1.0f - radial * sunSize - spoke, 0.0f, 1.0f), 0.1f);
+  float sunBorder = pow(clamp(1.0f - radial * (sunSize - 0.2f) - spoke, 0.0f, 1.0f), 0.1f);
+  float rays = pow(clamp(1.0f - radial * (sunSize - 4.5f) - 0.5f * spoke, 0.0f, 1.0f), 3.0f);
+  float y = mix(0.45f, 1.2f, pow(smoothstep(0.0f, 1.0f, 0.75f - skyDir.y), 2.0f)) * (1.0f - sunBorder * 0.5f);
+
+  float3 backg = float3(0.5f, 0.0f, 1.0f)
+    * ((1.0f - sun) * (1.0f - rays) * y + (1.0f - sunBorder) * rays * float3(1.0f, 0.8f, 0.15f) * 3.0f);
   backg += float3(1.0f, 0.9f, 0.1f) * sun;
-  backg = max(backg, rays * float3(1.0f, 0.85f, 0.45f));
+  backg = max(backg, rays * float3(1.0f, 0.9f, 0.5f));
   return backg;
 }
 
@@ -168,9 +206,10 @@ fragment float4 cartoonFractalCubeFragment(
     discard_fragment();
   }
 
-  float time = uniforms.time * uniforms.travelSpeed;
+  float time = uniforms.time * uniforms.travelSpeed * 0.5f;
   float3 ro = (roLocal + rdLocal * max(tEntry, 0.0f)) * CFC_SCENE_SCALE;
   float3 rd = rdLocal;
+  cfc_applyPath(ro, rd, time);
 
   float dist = 0.0f;
   float d = 100.0f;

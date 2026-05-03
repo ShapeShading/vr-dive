@@ -104,7 +104,8 @@ final class HuashanSplatRenderer: VisualPatternController {
       let worldX = (px - dataCenterX) * sceneScale
       let worldY = (py - dataCenterY) * sceneScale
       let worldZ = (pz - dataCenterZ) * sceneScale + sceneTranslateZ
-      let inDenseROI = abs(worldX) < denseHalfWidthX && abs(worldY) < denseHalfWidthY
+      let inDenseROI =
+        abs(worldX) < denseHalfWidthX && abs(worldY) < denseHalfWidthY
         && worldZ > denseCenterWorldZ
       if inDenseROI || i % Int(splatStride) == 0 {
         sampledPositions.append(SIMD3<Float>(px, py, pz))

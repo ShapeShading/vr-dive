@@ -64,9 +64,15 @@ protocol VisualPatternController: AnyObject {
   func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext)
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext)
   func resetToInitialState()
+
+  /// Optional pre-warm hook. Called once at startup on the CPU thread to force
+  /// Metal's JIT pipeline compilation before the first real frame is submitted.
+  /// Implement this for any pattern whose shader compilation takes >100 ms.
+  func warmupPipeline(device: MTLDevice, commandQueue: MTLCommandQueue)
 }
 
 extension VisualPatternController {
   func synchronizeState(_ context: PatternSimulationContext) {}
   func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext) {}
+  func warmupPipeline(device: MTLDevice, commandQueue: MTLCommandQueue) {}
 }

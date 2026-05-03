@@ -111,6 +111,12 @@ class Renderer {
 
   func startRenderLoop() {
     print("[Renderer] Starting render loop...")
+
+    // Pre-warm GPU pipelines for all registered pattern controllers.
+    // This triggers Metal's JIT shader compilation before the first rendered frame,
+    // preventing compositor watchdog timeouts caused by slow first-frame compilation.
+    warmupPipelines()
+
     Task {
       do {
         try await arSession.run([worldTracking])
@@ -126,6 +132,39 @@ class Renderer {
     renderThread.name = "Render Thread"
     renderThread.start()
     print("[Renderer] Render thread started")
+  }
+
+  /// Submits a minimal 1×1 offscreen render pass for every registered pattern controller
+  /// so that Metal compiles their pipelines before the compositor needs the first real frame.
+  private func warmupPipelines() {
+    let colorDesc = MTLTextureDescriptor.texture2DDescriptor(
+      pixelFormat: .rgba16Float, width: 1, height: 1, mipmapped: false)
+    colorDesc.usage = [.renderTarget]
+    colorDesc.storageMode = .private
+    guard let colorTex = device.makeTexture(descriptor: colorDesc) else { return }
+
+    let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
+      pixelFormat: .depth32Float, width: 1, height: 1, mipmapped: false)
+    depthDesc.usage = [.renderTarget]
+    depthDesc.storageMode = .private
+    guard let depthTex = device.makeTexture(descriptor: depthDesc) else { return }
+
+    let passDesc = MTLRenderPassDescriptor()
+    passDesc.colorAttachments[0].texture     = colorTex
+    passDesc.colorAttachments[0].loadAction  = .clear
+    passDesc.colorAttachments[0].storeAction = .dontCare
+    passDesc.depthAttachment.texture         = depthTex
+    passDesc.depthAttachment.loadAction      = .clear
+    passDesc.depthAttachment.clearDepth      = 0.0
+    passDesc.depthAttachment.storeAction     = .dontCare
+
+    guard let cmdBuf = commandQueue.makeCommandBuffer(),
+          let enc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc)
+    else { return }
+    enc.endEncoding()
+    cmdBuf.commit()
+    cmdBuf.waitUntilCompleted()
+    print("[Renderer] Pipeline warmup complete")
   }
 
   func renderLoop() {
@@ -744,6 +783,26 @@ class Renderer {
       controllers[.huashan] = huashan
     } else {
       print("[Renderer] Huashan 3DGS pattern unavailable (missing huashan.splat?).")
+    }
+
+    if let glassBox = try? GlassBoxRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.glassBox] = glassBox
+    } else {
+      print("[Renderer] GlassBox pattern unavailable.")
+    }
+
+    if let platonicMirror = try? PlatonicMirrorRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.platonicMirror] = platonicMirror
+    } else {
+      print("[Renderer] PlatonicMirror pattern unavailable.")
     }
 
     return controllers

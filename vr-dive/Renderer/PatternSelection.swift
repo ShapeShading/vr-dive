@@ -20,6 +20,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case rhombicDodecahedron
   case metaball
   case quatPolynomial
+  case glassBox
+  case platonicMirror
   case huashan
 
   var id: String { rawValue }
@@ -73,6 +75,10 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "圆球水滴"
     case .quatPolynomial:
       return "四元数多项式根"
+    case .glassBox:
+      return "玻璃魔方"
+    case .platonicMirror:
+      return "反射多面体"
     case .huashan:
       return "华山3D扫描"
     }
@@ -81,7 +87,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .huashan
+  private var _current: VisualPatternKind = .rhombicDodecahedron
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0
@@ -185,6 +191,6 @@ final class PatternMenuModel {
   }
 
   func toggleSpeed() {
-    speedMultiplier = speedMultiplier > 1.0 ? 1.0 : 8.0
+    speedMultiplier = speedMultiplier > 1.0 ? 1.0 : 5.0
   }
 }

@@ -72,7 +72,7 @@ struct ControlButtonsView: View {
           model.toggleSpeed()
         }) {
           Label(
-            model.speedMultiplier > 1.0 ? "x8" : "x1",
+            model.speedMultiplier > 1.0 ? "x5" : "x1",
             systemImage: model.speedMultiplier > 1.0 ? "hare.fill" : "tortoise.fill")
         }
         .buttonStyle(.bordered)

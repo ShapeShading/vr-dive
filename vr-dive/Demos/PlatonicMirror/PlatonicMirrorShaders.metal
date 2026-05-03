@@ -64,14 +64,14 @@ vertex PlatonicVertexOut platonicMirrorVertex(
 #define INNER_SPHERE 1.0f
 #define REFR_INDEX   0.9f
 #define RREFR_INDEX  (1.0f / REFR_INDEX)
+#define PM_BOUND_RADIUS 3.1f
 
 // Ray-march budgets
-#define MAX_BOUNCES2   2      // 2 internal bounces gives visible mirror reflections
-#define MAX_MARCHES2   12     // internal surface march
+#define MAX_BOUNCES2   4      // increased for deeper internal mirror recursion
+#define MAX_MARCHES2   16     // slightly higher to support the extra bounces
 #define TOLERANCE2     0.002f
 #define NORM_OFF2      0.007f
-#define MAX_MARCHES3   15     // outer surface march (15 steps is enough at this scale)
-#define MAX_RAY_LEN3   6.0f
+#define MAX_MARCHES3   24     // allow more iterations for distant views
 #define TOLERANCE3     0.002f
 #define NORM_OFF3      0.007f
 
@@ -206,17 +206,32 @@ static float pm_rayMarch2(float3 ro, float3 rd, float tinit, thread PlatonicCtx 
     return t;
 }
 
-static float pm_rayMarch3(float3 ro, float3 rd, float tinit, thread PlatonicCtx &ctx,
-                          thread int &iter) {
+static float pm_rayMarch3(float3 ro, float3 rd, float tinit, float maxRayLen,
+                          thread PlatonicCtx &ctx, thread int &iter) {
     float t = tinit;
     int i;
     for (i = 0; i < MAX_MARCHES3; ++i) {
         float d = pm_df3(ro + rd*t, ctx);
-        if (d < TOLERANCE3 || t > MAX_RAY_LEN3) break;
+        if (d < TOLERANCE3 || t > maxRayLen) break;
         t += d;
     }
     iter = i;
     return t;
+}
+
+static bool pm_sphereHit(float3 ro, float3 rd, float radius,
+                         thread float &tNear, thread float &tFar) {
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0f) {
+        return false;
+    }
+
+    float root = sqrt(h);
+    tNear = -b - root;
+    tFar = -b + root;
+    return tFar >= max(tNear, 0.0f);
 }
 
 // ─── Procedural background environment ───────────────────────────────────────
@@ -289,7 +304,7 @@ static float3 pm_render2(float3 ro, float3 rd, float db, thread PlatonicCtx &ctx
 }
 
 // ─── Outer-surface render (render3) ──────────────────────────────────────────
-static float3 pm_render3(float3 ro, float3 rd, thread PlatonicCtx &ctx) {
+static float3 pm_render3(float3 ro, float3 rd, float maxRayLen, thread PlatonicCtx &ctx) {
     // Colour constants (matching original ShaderToy verbatim)
     float3 sunCol   = pm_hsv2rgb(float3(0.06f, 0.90f, 1e-2f));
     float3 botCol   = pm_hsv2rgb(float3(0.66f, 0.80f, 0.5f));
@@ -303,7 +318,7 @@ static float3 pm_render3(float3 ro, float3 rd, thread PlatonicCtx &ctx) {
 
     ctx.g_gd = float2(1e3f);
     int   iter;
-    float t1   = pm_rayMarch3(ro, rd, 0.1f, ctx, iter);
+    float t1   = pm_rayMarch3(ro, rd, 0.1f, maxRayLen, ctx, iter);
     float2 gd1 = ctx.g_gd;
 
     float3 p1  = ro + t1*rd;
@@ -313,7 +328,7 @@ static float3 pm_render3(float3 ro, float3 rd, thread PlatonicCtx &ctx) {
     float ifo = mix(0.5f, 1.0f,
                     smoothstep(1.0f, 0.9f, float(iter) / float(MAX_MARCHES3)));
 
-    if (t1 < MAX_RAY_LEN3) {
+    if (t1 < maxRayLen) {
         // Only compute expensive derivatives on hit fragments
         float3 n1  = pm_normal3(p1, ctx);
         float3 r1  = reflect(rd, n1);
@@ -382,7 +397,13 @@ fragment float4 platonicMirrorFragment(
     ctx.poly_pca = normalize(pca_);
     ctx.poly_p   = normalize(POLY_U*pab + POLY_V*pbc_ + POLY_W*pca_);
 
-    float3 col = pm_render3(ro, rd, ctx);
+    float sphereEntry;
+    float sphereExit;
+    float primaryMaxRayLen = 8.0f;
+    if (pm_sphereHit(ro, rd, PM_BOUND_RADIUS, sphereEntry, sphereExit)) {
+        primaryMaxRayLen = max(sphereExit + 0.35f, 1.5f);
+    }
+    float3 col = pm_render3(ro, rd, primaryMaxRayLen, ctx);
 
     // ACES filmic tone-mapping + gamma
     col = pm_aces(col);

@@ -150,16 +150,16 @@ class Renderer {
     guard let depthTex = device.makeTexture(descriptor: depthDesc) else { return }
 
     let passDesc = MTLRenderPassDescriptor()
-    passDesc.colorAttachments[0].texture     = colorTex
-    passDesc.colorAttachments[0].loadAction  = .clear
+    passDesc.colorAttachments[0].texture = colorTex
+    passDesc.colorAttachments[0].loadAction = .clear
     passDesc.colorAttachments[0].storeAction = .dontCare
-    passDesc.depthAttachment.texture         = depthTex
-    passDesc.depthAttachment.loadAction      = .clear
-    passDesc.depthAttachment.clearDepth      = 0.0
-    passDesc.depthAttachment.storeAction     = .dontCare
+    passDesc.depthAttachment.texture = depthTex
+    passDesc.depthAttachment.loadAction = .clear
+    passDesc.depthAttachment.clearDepth = 0.0
+    passDesc.depthAttachment.storeAction = .dontCare
 
     guard let cmdBuf = commandQueue.makeCommandBuffer(),
-          let enc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc)
+      let enc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc)
     else { return }
     enc.endEncoding()
     cmdBuf.commit()
@@ -803,6 +803,106 @@ class Renderer {
       controllers[.platonicMirror] = platonicMirror
     } else {
       print("[Renderer] PlatonicMirror pattern unavailable.")
+    }
+
+    if let synthwaveSunset = try? SynthwaveSunsetRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.synthwaveSunset] = synthwaveSunset
+    } else {
+      print("[Renderer] SynthwaveSunset pattern unavailable.")
+    }
+
+    if let voxelTerrainCube = try? VoxelTerrainCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.voxelTerrainCube] = voxelTerrainCube
+    } else {
+      print("[Renderer] VoxelTerrainCube pattern unavailable.")
+    }
+
+    if let octagramFieldCube = try? OctagramFieldCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.octagramFieldCube] = octagramFieldCube
+    } else {
+      print("[Renderer] OctagramFieldCube pattern unavailable.")
+    }
+
+    if let pathTilesCube = try? PathTilesCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.pathTilesCube] = pathTilesCube
+    } else {
+      print("[Renderer] PathTilesCube pattern unavailable.")
+    }
+
+    if let fractalFoldCube = try? FractalFoldCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.fractalFoldCube] = fractalFoldCube
+    } else {
+      print("[Renderer] FractalFoldCube pattern unavailable.")
+    }
+
+    if let cartoonFractalCube = try? CartoonFractalCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.cartoonFractalCube] = cartoonFractalCube
+    } else {
+      print("[Renderer] CartoonFractalCube pattern unavailable.")
+    }
+
+    if let gyroidEchoCube = try? GyroidEchoCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.gyroidEchoCube] = gyroidEchoCube
+    } else {
+      print("[Renderer] GyroidEchoCube pattern unavailable.")
+    }
+
+    if let waveLatticeCube = try? WaveLatticeCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.waveLatticeCube] = waveLatticeCube
+    } else {
+      print("[Renderer] WaveLatticeCube pattern unavailable.")
+    }
+
+    if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.interferenceCascadeCube] = interferenceCascadeCube
+    } else {
+      print("[Renderer] InterferenceCascadeCube pattern unavailable.")
+    }
+
+    if let orbitalSphereCube = try? OrbitalSphereCubeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.orbitalSphereCube] = orbitalSphereCube
+    } else {
+      print("[Renderer] OrbitalSphereCube pattern unavailable.")
     }
 
     return controllers

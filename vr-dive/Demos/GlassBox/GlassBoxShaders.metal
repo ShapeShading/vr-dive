@@ -387,10 +387,16 @@ fragment float4 glassBoxFragment(
     // (Time rotation is now applied inside gb_insides, after per-face remapping,
     //  so that all faces show the same rotational phase.)
 
-    // Box intersection — entry
-    float3 ni;
-    float  t = gb_boxHit(eye, rd, GB_BOXDIMS, ni, true);
+    bool insideBox = all(abs(eye) < (GB_BOXDIMS - 1e-3f));
+
+    // Box intersection: outside cameras use the entry face; inside cameras use the
+    // exit face, then flip the face normal so the local wall frame still points
+    // inward into the box interior.
+    float3 boxNormal;
+    float  t = gb_boxHit(eye, rd, GB_BOXDIMS, boxNormal, !insideBox);
     if (t < 0.0f) discard_fragment();
+
+    float3 ni = insideBox ? -boxNormal : boxNormal;
 
     float3 ro        = eye + t * rd;
     float2 coords    = ro.xy * ni.z / GB_BOXDIMS.xy
@@ -407,13 +413,13 @@ fragment float4 glassBoxFragment(
     float  R0 = (GB_IOR - 1.0f) / (GB_IOR + 1.0f);
     R0 *= R0;
 
-    float  talpha_bg;
-    float3 reflcol = gb_background(ro, reflect(rd, nr), l_dir, talpha_bg);
+    float  talpha_bg = 0.0f;
+    float3 reflcol = insideBox ? float3(0.0f) : gb_background(ro, reflect(rd, nr), l_dir, talpha_bg);
     float3 rd2     = rd;
 
     float  accum    = 1.0f;
     float3 no2      = ni;
-    float3 ro_refr  = ro;
+    float3 ro_refr  = ro + rd2 * 1e-3f;
     float4 colo[2]  = { float4(0), float4(0) };
 
     for (int j = 0; j < 2; j++) {
@@ -440,7 +446,9 @@ fragment float4 glassBoxFragment(
         }
     }
 
-    float  fresnel = R0 + (1.0f - R0) * pow(max(1.0f - dot(-rd, nr), 0.0f), 5.0f);
+    float  fresnel = insideBox
+                   ? 0.0f
+                   : R0 + (1.0f - R0) * pow(max(1.0f - dot(-rd, nr), 0.0f), 5.0f);
     float3 col     = mix(
         mix(colo[1].rgb * colo[1].a, colo[0].rgb, colo[0].a) * fadeborders,
         reflcol,

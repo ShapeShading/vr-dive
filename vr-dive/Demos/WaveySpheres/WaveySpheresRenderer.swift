@@ -1,15 +1,15 @@
 import Metal
 import simd
 
-// VoxelEdgesRenderer.swift
+// WaveySpheresRenderer.swift
 //
-// Original implementation for a voxel edges scene rendered through a cube portal.
-// Visual inspiration was requested from ShaderToy 4dfGzs, but the original source
-// license forbids reuse in products/projects. This implementation is original and
-// only follows the high-level idea of a voxel landscape with glowing edge lines.
+// Source reference requested by user:
+// https://www.shadertoy.com/view/WX3cR4
+// This is an original Metal adaptation for vr-dive that reinterprets the
+// reference as a 3D raymarched volume inside a 2 meter cube container.
 
-final class VoxelEdgesRenderer: VisualPatternController {
-  let identifier: VisualPatternKind = .voxelEdges
+final class WaveySpheresRenderer: VisualPatternController {
+  let identifier: VisualPatternKind = .waveySpheres
   let preferredClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
   private let pipelineState: MTLRenderPipelineState
@@ -19,9 +19,10 @@ final class VoxelEdgesRenderer: VisualPatternController {
   private let indexCount: Int
   private let maxViewCount: Int
 
-  private let cubeScale: Float = 2.0
+  // Mesh vertices span [-1, 1], so a scale of 1.0 yields a 2 meter cube.
+  private let cubeScale: Float = 1.0
   private let travelSpeed: Float = 0.7
-  private let objectCenter = SIMD3<Float>(0.0, -0.04, -1.75)
+  private let objectCenter = SIMD3<Float>(0.0, 0.0, -1.75)
 
   private var animationTime: Float = 0
   private var lastSimulationTime: Float?
@@ -29,14 +30,14 @@ final class VoxelEdgesRenderer: VisualPatternController {
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
 
-    let geo = VoxelEdgesRenderer.makeBox(device: device)
+    let geo = WaveySpheresRenderer.makeBox(device: device)
     vertexBuffer = geo.vertexBuffer
     indexBuffer = geo.indexBuffer
     indexCount = geo.indexCount
 
-    pipelineState = try VoxelEdgesRenderer.makePipelineState(
+    pipelineState = try WaveySpheresRenderer.makePipelineState(
       device: device, library: library, maxViewCount: self.maxViewCount)
-    depthStencilState = VoxelEdgesRenderer.makeDepthStencilState(device: device)
+    depthStencilState = WaveySpheresRenderer.makeDepthStencilState(device: device)
   }
 
   func updateSimulation(_ context: PatternSimulationContext) {
@@ -59,7 +60,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
 
     encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-    var uniforms = VoxelEdgesUniforms(
+    var uniforms = WaveySpheresUniforms(
       time: animationTime,
       viewCount: UInt32(context.viewData.viewCount),
       cubeScale: cubeScale,
@@ -67,7 +68,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
       objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0))
 
     encoder.setVertexBytes(
-      &uniforms, length: MemoryLayout<VoxelEdgesUniforms>.stride, index: 1)
+      &uniforms, length: MemoryLayout<WaveySpheresUniforms>.stride, index: 1)
 
     var vpMatrices = context.viewData.viewProjectionMatrices
     if vpMatrices.isEmpty { vpMatrices = [matrix_identity_float4x4] }
@@ -78,7 +79,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
     }
 
     encoder.setFragmentBytes(
-      &uniforms, length: MemoryLayout<VoxelEdgesUniforms>.stride, index: 0)
+      &uniforms, length: MemoryLayout<WaveySpheresUniforms>.stride, index: 0)
 
     var viewToWorld = context.viewData.viewToWorldTransforms
     if viewToWorld.isEmpty { viewToWorld = [matrix_identity_float4x4] }
@@ -97,7 +98,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
   }
 }
 
-extension VoxelEdgesRenderer {
+extension WaveySpheresRenderer {
   fileprivate static func makeBox(
     device: MTLDevice
   ) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
@@ -141,8 +142,8 @@ extension VoxelEdgesRenderer {
     device: MTLDevice, library: MTLLibrary, maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let desc = MTLRenderPipelineDescriptor()
-    desc.vertexFunction = library.makeFunction(name: "voxelEdgesVertex")
-    desc.fragmentFunction = library.makeFunction(name: "voxelEdgesFragment")
+    desc.vertexFunction = library.makeFunction(name: "waveySpheresVertex")
+    desc.fragmentFunction = library.makeFunction(name: "waveySpheresFragment")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
     desc.depthAttachmentPixelFormat = .depth32Float
 

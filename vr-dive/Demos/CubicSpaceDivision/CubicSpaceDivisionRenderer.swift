@@ -1,16 +1,18 @@
 import Metal
 import simd
 
-// VoxelEdgesRenderer.swift
+// CubicSpaceDivisionRenderer.swift
 //
-// Original implementation for a voxel edges scene rendered through a cube portal.
-// Visual inspiration was requested from ShaderToy 4dfGzs, but the original source
-// license forbids reuse in products/projects. This implementation is original and
-// only follows the high-level idea of a voxel landscape with glowing edge lines.
+// Original implementation for a cube-contained adaptation of Escher-inspired
+// cubic space division geometry.
+// Visual inspiration requested from ShaderToy 4ltyWl:
+// https://www.shadertoy.com/view/4ltyWl
+// The original source is not reused here; this renderer drives a clean-room
+// Metal implementation adapted to the app's cube portal rendering model.
 
-final class VoxelEdgesRenderer: VisualPatternController {
-  let identifier: VisualPatternKind = .voxelEdges
-  let preferredClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+final class CubicSpaceDivisionRenderer: VisualPatternController {
+  let identifier: VisualPatternKind = .cubicSpaceDivision
+  let preferredClearColor = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
 
   private let pipelineState: MTLRenderPipelineState
   private let depthStencilState: MTLDepthStencilState
@@ -19,9 +21,10 @@ final class VoxelEdgesRenderer: VisualPatternController {
   private let indexCount: Int
   private let maxViewCount: Int
 
-  private let cubeScale: Float = 2.0
-  private let travelSpeed: Float = 0.7
-  private let objectCenter = SIMD3<Float>(0.0, -0.04, -1.75)
+  // The unit cube mesh spans [-1, 1], so 1.0 yields a 2 m wide container.
+  private let cubeScale: Float = 1.0
+  private let travelSpeed: Float = 1.0
+  private let objectCenter = SIMD3<Float>(0.0, 0.0, -1.35)
 
   private var animationTime: Float = 0
   private var lastSimulationTime: Float?
@@ -29,14 +32,14 @@ final class VoxelEdgesRenderer: VisualPatternController {
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
 
-    let geo = VoxelEdgesRenderer.makeBox(device: device)
+    let geo = CubicSpaceDivisionRenderer.makeBox(device: device)
     vertexBuffer = geo.vertexBuffer
     indexBuffer = geo.indexBuffer
     indexCount = geo.indexCount
 
-    pipelineState = try VoxelEdgesRenderer.makePipelineState(
+    pipelineState = try CubicSpaceDivisionRenderer.makePipelineState(
       device: device, library: library, maxViewCount: self.maxViewCount)
-    depthStencilState = VoxelEdgesRenderer.makeDepthStencilState(device: device)
+    depthStencilState = CubicSpaceDivisionRenderer.makeDepthStencilState(device: device)
   }
 
   func updateSimulation(_ context: PatternSimulationContext) {
@@ -59,7 +62,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
 
     encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-    var uniforms = VoxelEdgesUniforms(
+    var uniforms = CubicSpaceDivisionUniforms(
       time: animationTime,
       viewCount: UInt32(context.viewData.viewCount),
       cubeScale: cubeScale,
@@ -67,7 +70,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
       objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0))
 
     encoder.setVertexBytes(
-      &uniforms, length: MemoryLayout<VoxelEdgesUniforms>.stride, index: 1)
+      &uniforms, length: MemoryLayout<CubicSpaceDivisionUniforms>.stride, index: 1)
 
     var vpMatrices = context.viewData.viewProjectionMatrices
     if vpMatrices.isEmpty { vpMatrices = [matrix_identity_float4x4] }
@@ -78,7 +81,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
     }
 
     encoder.setFragmentBytes(
-      &uniforms, length: MemoryLayout<VoxelEdgesUniforms>.stride, index: 0)
+      &uniforms, length: MemoryLayout<CubicSpaceDivisionUniforms>.stride, index: 0)
 
     var viewToWorld = context.viewData.viewToWorldTransforms
     if viewToWorld.isEmpty { viewToWorld = [matrix_identity_float4x4] }
@@ -97,7 +100,7 @@ final class VoxelEdgesRenderer: VisualPatternController {
   }
 }
 
-extension VoxelEdgesRenderer {
+extension CubicSpaceDivisionRenderer {
   fileprivate static func makeBox(
     device: MTLDevice
   ) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
@@ -141,8 +144,8 @@ extension VoxelEdgesRenderer {
     device: MTLDevice, library: MTLLibrary, maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let desc = MTLRenderPipelineDescriptor()
-    desc.vertexFunction = library.makeFunction(name: "voxelEdgesVertex")
-    desc.fragmentFunction = library.makeFunction(name: "voxelEdgesFragment")
+    desc.vertexFunction = library.makeFunction(name: "cubicSpaceDivisionVertex")
+    desc.fragmentFunction = library.makeFunction(name: "cubicSpaceDivisionFragment")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
     desc.depthAttachmentPixelFormat = .depth32Float
 

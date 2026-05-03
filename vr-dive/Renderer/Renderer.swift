@@ -815,6 +815,26 @@ class Renderer {
       print("[Renderer] SynthwaveSunset pattern unavailable.")
     }
 
+    if let tunnel = try? TunnelRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.tunnel] = tunnel
+    } else {
+      print("[Renderer] Tunnel pattern unavailable.")
+    }
+
+    if let cubicSpaceDivision = try? CubicSpaceDivisionRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.cubicSpaceDivision] = cubicSpaceDivision
+    } else {
+      print("[Renderer] CubicSpaceDivision pattern unavailable.")
+    }
+
     if let voxelEdges = try? VoxelEdgesRenderer(
       device: device,
       library: library,
@@ -863,6 +883,36 @@ class Renderer {
       controllers[.waveLatticeCube] = waveLatticeCube
     } else {
       print("[Renderer] WaveLatticeCube pattern unavailable.")
+    }
+
+    if let waveySpheres = try? WaveySpheresRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.waveySpheres] = waveySpheres
+    } else {
+      print("[Renderer] Wavey spheres pattern unavailable.")
+    }
+
+    if let fractalFlythrough = try? FractalFlythroughRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.fractalFlythrough] = fractalFlythrough
+    } else {
+      print("[Renderer] Fractal Flythrough pattern unavailable.")
+    }
+
+    if let apollonianIIv4 = try? ApollonianIIv4Renderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.apollonianIIv4] = apollonianIIv4
+    } else {
+      print("[Renderer] Apollonian-II-v4 pattern unavailable.")
     }
 
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(

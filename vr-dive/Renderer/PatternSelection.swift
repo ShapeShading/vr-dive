@@ -23,11 +23,16 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case glassBox
   case platonicMirror
   case synthwaveSunset
+  case tunnel
+  case cubicSpaceDivision
   case voxelEdges
   case pathTilesCube
   case cartoonFractalCube
   case gyroidEchoCube
   case waveLatticeCube
+  case waveySpheres
+  case fractalFlythrough
+  case apollonianIIv4
   case interferenceCascadeCube
   case orbitalSphereCube
   case huashan
@@ -89,6 +94,10 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "反射多面体"
     case .synthwaveSunset:
       return "合成波日落"
+    case .tunnel:
+      return "Tunnel"
+    case .cubicSpaceDivision:
+      return "Cubic Space Division"
     case .voxelEdges:
       return "Voxel Edges"
     case .pathTilesCube:
@@ -99,6 +108,12 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "GyroidEchoCube"
     case .waveLatticeCube:
       return "WaveLatticeCube"
+    case .waveySpheres:
+      return "Wavey spheres"
+    case .fractalFlythrough:
+      return "Fractal Flythrough"
+    case .apollonianIIv4:
+      return "Apollonian-II-v4"
     case .interferenceCascadeCube:
       return "InterferenceCascadeCube"
     case .orbitalSphereCube:
@@ -111,7 +126,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .orbitalSphereCube
+  private var _current: VisualPatternKind = .apollonianIIv4
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

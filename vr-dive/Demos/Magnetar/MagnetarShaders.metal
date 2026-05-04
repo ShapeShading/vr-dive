@@ -86,6 +86,12 @@ static float mag_map(float3 p, float T)
   float density = mag_oscillate(T / 8.0f, 10.0f, 30.0f);
   float b = (dot(p, p) - 1.0f) / density;  // coordinate transform
 
+  // Inside or right at the unit sphere b≤0: the coordinate transform p/=b
+  // would divide by zero or flip the sign of all coordinates, producing
+  // completely wrong tube distances (white blob / red arcs artifact).
+  // Return a large step so the march passes cleanly through the sphere.
+  if (b <= 0.05f) return 1.0f;
+
   p /= b;
   float x = T + round(p.x - T);   // tile and move along x
   p.x -= x;
@@ -120,13 +126,12 @@ fragment float4 magnetarFragment(
 
   // Start march from the entry point (or camera if inside the box)
   float tStart = max(tNear, 0.0f);
-  float tLimit = min(tFar, MAG_FAR);
 
-  // Scale the local coord into the scene: the SDF operates on coordinates
-  // around the unit sphere (dot(p,p)~1 at density inflection), so we map
-  // the [-1,1] cube to a small neighbourhood around the origin.
-  // Scene radius ~1 corresponds to the cube half-extent.
-  const float SCENE_SCALE = 1.2f;
+  // SCENE_SCALE = 6: local [-1,1] → scene [-6,6]. The unit sphere (r=1) sits at
+  // the origin; interesting field-line content is at r=1.5–5. With scale=1.2
+  // (the old value) the box barely reached r=1.2 — almost entirely inside the
+  // sphere where b=(|p|²-1)/density≤0 → p/=b blows up → white blob artifact.
+  const float SCENE_SCALE = 6.0f;
 
   float3 ro = roLocal * SCENE_SCALE;
   float3 rd = normalize(rdLocal);
@@ -134,29 +139,31 @@ fragment float4 magnetarFragment(
   float T = uniforms.time * 0.25f;  // matches original T = iTime/4.
 
   // Accumulated colour (emission-only volumetric, matches original c += min(.001/s, s))
-  float3 c = float3(0.1f);
+  float3 c = float3(0.0f);
   float d = tStart * SCENE_SCALE;
-  float travelMax = tLimit * SCENE_SCALE;
+  float travelMax = tFar * SCENE_SCALE;
 
   for (int i = 0; i < MAG_STEPS; ++i) {
+    if (d >= travelMax) break;
     float3 p = ro + rd * d;
     float s = mag_map(p, T);
 
-    if (s < MAG_NEAR || d > travelMax) break;
+    if (s < MAG_NEAR) break;
 
     c += min(0.001f / s, s);
 
-    // Adaptive step: coord-transform shrinks steps near centre (anti-clipping)
+    // Adaptive step: coord-transform shrinks steps near sphere surface.
+    // b is re-evaluated at the current march position (same as original B macro).
     float density = mag_oscillate(T / 8.0f, 10.0f, 30.0f);
     float b = (dot(p, p) - 1.0f) / density;
     d += s * clamp(b, 0.3f, 2.0f);
   }
 
-  // Colour tint and brightness (original: c *= vec3(.7,.8,.9)/min(sqrt(length(uv)),1.))
-  // uv is not meaningful here; use distance from box axis instead for similar radial rolloff
-  float3 boxCoord = ro + rd * (tStart * SCENE_SCALE);
-  float radial = length(boxCoord.xy) / (SCENE_SCALE * 1.415f);  // normalise to ~1 at corner
-  c *= float3(0.7f, 0.8f, 0.9f) / max(sqrt(radial), 0.15f);
+  // Colour tint — original: c *= vec3(.7,.8,.9) / min(sqrt(length(uv)), 1.)
+  // uv is 2D pixel offset from screen centre; analogous in VR is the angular
+  // distance of the ray from the viewing axis (length of rd.xy).
+  float radialUV = length(rd.xy);  // 0 at straight-ahead, ~0.7 at 45°
+  c *= float3(0.7f, 0.8f, 0.9f) / max(sqrt(radialUV), 0.15f);
 
   // tanh(c^3) for contrast + HDR limiting
   float3 col = tanh(c * c * c);

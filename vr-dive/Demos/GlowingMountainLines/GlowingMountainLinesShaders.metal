@@ -115,6 +115,11 @@ fragment float4 glowingMountainLinesFragment(
   float zStart = tStart * GML_SCENE_SCALE;
   float zEnd   = tFar   * GML_SCENE_SCALE;
 
+  // Camera origin in scene space. Must be added to every sampled point so that
+  // the left and right eyes sample different scene positions — without this the
+  // two eyes see identical images and there is no stereo depth perception.
+  float3 roScene = roLocal * GML_SCENE_SCALE;
+
   // ── DDA state vector Z ────────────────────────────────────────────────────
   // Original: Z = fract(-T)/I.z  where T = vec3(0,0,iTime)
   //   → Z.x = 0,  Z.y = 0,  Z.z = fract(-iTime)/I.z
@@ -136,19 +141,24 @@ fragment float4 glowingMountainLinesFragment(
   // ── Ray march — port of mainImage() from ShaderToy wcjyDm ────────────────
   float4 o  = float4(0.0f);  // accumulated volumetric colour (original: vec4 o)
   float4 O4 = float4(0.0f);  // per-sample colour (original: vec4 O)
-  int    j  = 0;              // DDA arm index: alternates 0 (X) and 2 (Z)
 
   for (int i = 0; i < GML_STEPS; i++) {
-    // Alternate DDA arm: j = 0 → 2 → 0 → ... (matches original j^=2)
-    j ^= 2;
+    // Pick whichever DDA arm is currently at the smaller depth (original: j = Z.x<Z.z ? 0 : 2).
+    // This ensures mountain layers are sampled in depth order and the sampling density
+    // adapts to the ray direction — eyes with different I.x/I.z ratios get the same
+    // layer count.  The previous j^=2 alternation broke this, causing unequal line
+    // counts between left/right eyes and near-field artefacts.
+    int j = (Z.x < Z.z) ? 0 : 2;
     float z = 0.2f * Z[j];
-    Z += dZ;  // always step (matches for-loop update Z+=.5/abs(I))
+    Z += dZ;  // step both arms every iteration (matches original Z+=.5/abs(I))
 
     // Skip samples outside the box depth range
     if (z < zStart || z > zEnd) continue;
 
-    // 3D world position — matches: p = z*I + 0.2*T
-    float3 p = z * I + 0.2f * T;
+    // 3D world position. roScene carries the per-eye camera offset so that
+    // left/right eyes sample different scene points at the same depth → stereo.
+    // Original: p = z*I + 0.2*T (camera at origin); VR: p = roScene + z*I + 0.2*T
+    float3 p = roScene + z * I + 0.2f * T;
 
     // Height-field base distance (original: d = p.y)
     float d = p.y;

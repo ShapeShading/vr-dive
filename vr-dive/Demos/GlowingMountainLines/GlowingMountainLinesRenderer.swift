@@ -32,10 +32,11 @@ final class GlowingMountainLinesRenderer: VisualPatternController {
 
     let geo = GlowingMountainLinesRenderer.makeBox(device: device)
     vertexBuffer = geo.vertexBuffer
-    indexBuffer  = geo.indexBuffer
-    indexCount   = geo.indexCount
+    indexBuffer = geo.indexBuffer
+    indexCount = geo.indexCount
 
-    pipelineState     = try GlowingMountainLinesRenderer.makePipelineState(device: device, library: library, maxViewCount: self.maxViewCount)
+    pipelineState = try GlowingMountainLinesRenderer.makePipelineState(
+      device: device, library: library, maxViewCount: self.maxViewCount)
     depthStencilState = GlowingMountainLinesRenderer.makeDepthStencilState(device: device)
   }
 
@@ -66,7 +67,8 @@ final class GlowingMountainLinesRenderer: VisualPatternController {
       padding: 0,
       objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0))
 
-    encoder.setVertexBytes(&uniforms, length: MemoryLayout<GlowingMountainLinesUniforms>.stride, index: 1)
+    encoder.setVertexBytes(
+      &uniforms, length: MemoryLayout<GlowingMountainLinesUniforms>.stride, index: 1)
 
     var vpMatrices = context.viewData.viewProjectionMatrices
     if vpMatrices.isEmpty { vpMatrices = [matrix_identity_float4x4] }
@@ -76,7 +78,8 @@ final class GlowingMountainLinesRenderer: VisualPatternController {
       }
     }
 
-    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<GlowingMountainLinesUniforms>.stride, index: 0)
+    encoder.setFragmentBytes(
+      &uniforms, length: MemoryLayout<GlowingMountainLinesUniforms>.stride, index: 0)
 
     var viewToWorld = context.viewData.viewToWorldTransforms
     if viewToWorld.isEmpty { viewToWorld = [matrix_identity_float4x4] }
@@ -104,12 +107,12 @@ extension GlowingMountainLinesRenderer {
     let y: Float = 1.0
     let z: Float = 1.0
     let faces: [(positions: [SIMD3<Float>], normal: SIMD3<Float>)] = [
-      ([[-x, -y,  z], [ x, -y,  z], [ x,  y,  z], [-x,  y,  z]], [0, 0, 1]),
-      ([[ x, -y, -z], [-x, -y, -z], [-x,  y, -z], [ x,  y, -z]], [0, 0, -1]),
-      ([[ x, -y,  z], [ x, -y, -z], [ x,  y, -z], [ x,  y,  z]], [1, 0, 0]),
-      ([[-x, -y, -z], [-x, -y,  z], [-x,  y,  z], [-x,  y, -z]], [-1, 0, 0]),
-      ([[-x,  y,  z], [ x,  y,  z], [ x,  y, -z], [-x,  y, -z]], [0, 1, 0]),
-      ([[-x, -y, -z], [ x, -y, -z], [ x, -y,  z], [-x, -y,  z]], [0, -1, 0]),
+      ([[-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]], [0, 0, 1]),
+      ([[x, -y, -z], [-x, -y, -z], [-x, y, -z], [x, y, -z]], [0, 0, -1]),
+      ([[x, -y, z], [x, -y, -z], [x, y, -z], [x, y, z]], [1, 0, 0]),
+      ([[-x, -y, -z], [-x, -y, z], [-x, y, z], [-x, y, -z]], [-1, 0, 0]),
+      ([[-x, y, z], [x, y, z], [x, y, -z], [-x, y, -z]], [0, 1, 0]),
+      ([[-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z]], [0, -1, 0]),
     ]
 
     var vertices: [V] = []
@@ -139,17 +142,17 @@ extension GlowingMountainLinesRenderer {
     device: MTLDevice, library: MTLLibrary, maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let desc = MTLRenderPipelineDescriptor()
-    desc.vertexFunction   = library.makeFunction(name: "glowingMountainLinesVertex")
+    desc.vertexFunction = library.makeFunction(name: "glowingMountainLinesVertex")
     desc.fragmentFunction = library.makeFunction(name: "glowingMountainLinesFragment")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
     desc.depthAttachmentPixelFormat = .depth32Float
 
     let vd = MTLVertexDescriptor()
-    vd.attributes[0].format      = .float3
-    vd.attributes[0].offset      = 0
+    vd.attributes[0].format = .float3
+    vd.attributes[0].offset = 0
     vd.attributes[0].bufferIndex = 0
-    vd.attributes[1].format      = .float3
-    vd.attributes[1].offset      = MemoryLayout<SIMD3<Float>>.stride
+    vd.attributes[1].format = .float3
+    vd.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
     vd.attributes[1].bufferIndex = 0
     vd.layouts[0].stride = MemoryLayout<MeshVertex>.stride
     desc.vertexDescriptor = vd
@@ -161,7 +164,7 @@ extension GlowingMountainLinesRenderer {
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let desc = MTLDepthStencilDescriptor()
     desc.depthCompareFunction = .greater
-    desc.isDepthWriteEnabled  = true
+    desc.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: desc)!
   }
 }

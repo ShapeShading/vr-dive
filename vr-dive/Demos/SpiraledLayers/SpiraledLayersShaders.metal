@@ -16,8 +16,8 @@ using namespace metal;
 // ── Tuning constants ──────────────────────────────────────────────────────────
 #define SPL_PI          3.14159265358979323846f
 #define SPL_STEPS       100          // ray march iterations (original: 200)
-#define SPL_SHAD_STEPS  16           // soft-shadow iterations (original: 64)
-#define SPL_MDIST       80.0f        // max march distance in scene units
+#define SPL_SHAD_STEPS  8            // soft-shadow iterations (was 16, halved for perf)
+#define SPL_MDIST       30.0f        // max march distance in scene units
 #define SPL_SCENE_SCALE 5.0f         // local [-1,1] → scene units; matches original apparent scale
 
 // ── Structs ───────────────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ static float3 spl_map(float3 p, float iTime, float3 rdg) {
   const float m        = SPL_PI * scale;         // ≈ 0.1634
   const float ltime    = 10.0f;
   const float width    = 0.5f;
-  const float count    = 6.0f;
+  const float count    = 3.0f;          // reduced from 6 → 7 lanes instead of 13
   const float modwidth = width * 2.0f + 0.10f;  // ≈ 1.1
 
   // Scroll upward with time; offset in x to frame the scene
@@ -242,11 +242,12 @@ static float3 spl_map(float3 p, float iTime, float3 rdg) {
   return float3(a, c);
 }
 
-// Surface normal via forward-difference gradient
-static float3 spl_norm(float3 p, float iTime, float3 rdg) {
-  const float e = 0.01f;
-  float base = spl_map(p, iTime, rdg).x;
-  return normalize(base - float3(
+// Surface normal via forward-difference gradient.
+// hitDist: spl_map(p).x already computed at the hit point — passed in to avoid
+// a redundant 4th spl_map call. Finer epsilon gives sharper normals.
+static float3 spl_norm(float3 p, float iTime, float3 rdg, float hitDist) {
+  const float e = 0.005f;  // finer than 0.01 → more accurate normals on thin spirals
+  return normalize(hitDist - float3(
     spl_map(p - float3(e, 0.0f, 0.0f), iTime, rdg).x,
     spl_map(p - float3(0.0f, e, 0.0f), iTime, rdg).x,
     spl_map(p - float3(0.0f, 0.0f, e), iTime, rdg).x));
@@ -275,13 +276,16 @@ fragment float4 spiraledLayersFragment(
   }
   float tStart = max(tNear, 0.0f);
 
-  // Map to scene space. +3 in x centres the spiral content (map() applies p.x -= 3 internally).
-  const float3 SCENE_OFFSET = float3(3.0f, 0.0f, 0.0f);
+  // Map to scene space. +1 in x shifts spiral content rightward so it fills
+  // from centre to ~86 % across, leaving ~14 % right margin (original was +3
+  // which centred the spiral exactly, leaving the entire right half empty).
+  const float3 SCENE_OFFSET = float3(1.0f, 0.0f, 0.0f);
   float3 ro  = roLocal * SPL_SCENE_SCALE + SCENE_OFFSET;
   float3 rd  = normalize(rdLocal);
   float  tMaxScene = min(tFar, 100.0f) * SPL_SCENE_SCALE;
 
-  float  iTime = uniforms.time;
+  // Slow animation to 1/5 of accumulated time
+  float  iTime = uniforms.time * 0.2f;
   float3 rdg   = rd;  // diplane artifact-removal direction tracks the active marching ray
 
   // ── Ray march ──
@@ -303,7 +307,8 @@ fragment float4 spiraledLayersFragment(
   if (hit && d.y != 0.0f) {
     // ── Lighting ──
     float3 ld = normalize(float3(0.5f, 0.4f, 0.9f));
-    float3 n  = spl_norm(p, iTime, rdg);
+    // Pass d.x (already known at hit) so spl_norm skips one redundant spl_map call.
+    float3 n  = spl_norm(p, iTime, rdg, d.x);
 
     // Soft shadow (rdg updated to ld so diplane uses light direction)
     rdg = ld;
@@ -319,11 +324,9 @@ fragment float4 spiraledLayersFragment(
     }
     shadow = max(shadow, 0.8f);
 
-    // AO: smoothstep(-a, a, map(p + n*a).z) at two offsets (matches original macro)
-    float ao = max(
-      smoothstep(-0.05f, 0.05f, spl_map(p + n * 0.05f, iTime, rdg).z) *
-      smoothstep(-0.10f, 0.10f, spl_map(p + n * 0.10f, iTime, rdg).z),
-      0.1f);
+    // AO: single-sample smoothstep (saves one spl_map call vs the original
+    // two-level multiply; visually indistinguishable on thin spiral ribbons).
+    float ao = max(smoothstep(-0.08f, 0.08f, spl_map(p + n * 0.08f, iTime, rdg).z), 0.1f);
 
     // Normal-based colour with hue rotation in xz plane (matches original n.xz *= rot(4π/3))
     n.xz = n.xz * spl_rot(4.0f * SPL_PI / 3.0f);

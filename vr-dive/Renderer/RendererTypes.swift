@@ -27,6 +27,7 @@ struct PatternSimulationContext {
   let speedMultiplier: Float
   let isPaused: Bool
   let originCellInspectionEnabled: Bool
+  let rayMarchingProbeDimTarget: RayMarchingProbeDimTarget
 }
 
 struct PatternRenderContext {

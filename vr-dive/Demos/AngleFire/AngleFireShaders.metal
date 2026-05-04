@@ -18,7 +18,7 @@ using namespace metal;
 // Maps local box coords [-1,1] → scene units. Cylinder radius is 0.5 in scene
 // units; turbulence displaces ~±5 units. Scale 4 gives the best view density.
 #define AF_SCENE_SCALE  4.0f
-#define AF_STEPS        100
+#define AF_STEPS        60           // reduced from 100 for performance
 #define AF_MAX_T        30.0f   // max march distance cap in local box units
 
 // ── Structs ───────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ fragment float4 angleFireFragment(
   float3 ro = roLocal * AF_SCENE_SCALE;
   float3 rd = normalize(rdLocal);
 
-  float iTime = uniforms.time;
+  float iTime = uniforms.time * 0.2f;  // slow to 1/5 of accumulated time
 
   // ── Volumetric ray march — port of mainImage() from ShaderToy 3XXSDB ─────
   //
@@ -119,22 +119,26 @@ fragment float4 angleFireFragment(
   float  d;
 
   for (int i = 0; i < AF_STEPS && z < zEnd; i++) {
-    float3 p = ro + rd * z;
+    // Scale scene coordinates ×4 so the flame content appears 1/4 the size
+    // (two successive halvings) while the outer box container is unchanged.
+    float3 p = (ro + rd * z) * 4.0f;
 
     // Twist shape: y-dependent rotation in xz plane.
-    // GLSL original: p.xz *= mat2(cos(p.y*.5 + vec4(0,33,11,0)))
-    // mat2(a,b,c,d) in GLSL is col-major: col0=(a,b), col1=(c,d).
-    // p.xz = p.xz * M: new.x = dot(p.xz, col0), new.z = dot(p.xz, col1).
+    // Precompute the 3 unique cos values to avoid redundant evaluations.
     float py = p.y * 0.5f;
+    float c0  = cos(py);
+    float c33 = cos(py + 33.0f);
+    float c11 = cos(py + 11.0f);
     float2x2 twistMat = float2x2(
-      float2(cos(py),        cos(py + 33.0f)),   // col0
-      float2(cos(py + 11.0f), cos(py)));          // col1
+      float2(c0, c33),   // col0
+      float2(c11, c0));  // col1
     p.xz = p.xz * twistMat;
 
-    // Turbulence distortion loop (10 octaves, d: 1.0 → ~9.3 via ×1.25 each step).
-    // GLSL: for(d=1.; d<9.; d/=.8)  p += cos((p.yzx - t*vec3(3,1,0))*d)/d;
+    // Turbulence distortion loop — reduced to ~7 octaves (d: 1→3.8 via ×1.25).
+    // Original used 10 octaves (d<9); reducing to d<4 cuts ~30% of GPU cost
+    // with minimal visual difference since high-frequency octaves contribute little.
     float3 tdir = float3(3.0f, 1.0f, 0.0f);
-    for (d = 1.0f; d < 9.0f; d /= 0.8f)
+    for (d = 1.0f; d < 4.0f; d /= 0.8f)
       p += cos((p.yzx - iTime * tdir) * d) / d;
 
     // Distorted cylinder SDF (radius 0.5) as the step size.

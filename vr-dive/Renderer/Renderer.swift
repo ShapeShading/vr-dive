@@ -282,7 +282,8 @@ class Renderer {
           time: animationTime,
           speedMultiplier: patternCoordinator.speedMultiplier(),
           isPaused: isPaused,
-          originCellInspectionEnabled: patternCoordinator.originCellInspectionEnabled()
+          originCellInspectionEnabled: patternCoordinator.originCellInspectionEnabled(),
+          rayMarchingProbeDimTarget: patternCoordinator.rayMarchingProbeDimTarget()
         )
         pattern?.synchronizeState(simulationContext)
 
@@ -953,6 +954,28 @@ class Renderer {
       controllers[.glowingMountainLines] = glowingMountainLines
     } else {
       print("[Renderer] Glowing Mountain Lines pattern unavailable.")
+    }
+
+    if let rayMarchingDemo = try? RayMarchingDemoRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.rayMarchingDemo] = rayMarchingDemo
+      print("[Renderer] RayMarchingDemo pattern added.")
+    } else {
+      print("[Renderer] Ray Marching Demo pattern unavailable.")
+    }
+
+    if let cubeRayMarchDemo = try? CubeRayMarchDemoRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.cubeRayMarchDemo] = cubeRayMarchDemo
+      print("[Renderer] CubeRayMarchDemo pattern added.")
+    } else {
+      print("[Renderer] Cube Ray March Demo pattern unavailable.")
     }
 
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(

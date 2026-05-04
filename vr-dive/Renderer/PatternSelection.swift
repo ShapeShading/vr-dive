@@ -18,28 +18,30 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case tetris3D
   case snake3D
   case rhombicDodecahedron
-  case metaball
   case quatPolynomial
-  case glassBox
-  case platonicMirror
+  case huashan
+  case rayMarchingDemo
+  case cubeRayMarchDemo
+  case metaball
   case synthwaveSunset
   case tunnel
+  case interferenceCascadeCube
   case cubicSpaceDivision
   case voxelEdges
   case pathTilesCube
-  case cartoonFractalCube
   case gyroidEchoCube
   case waveLatticeCube
   case waveySpheres
-  case fractalFlythrough
-  case apollonianIIv4
+  case glowingMountainLines
   case magnetar
   case spiraledLayers
   case angleFire
-  case glowingMountainLines
-  case interferenceCascadeCube
   case orbitalSphereCube
-  case huashan
+  case apollonianIIv4
+  case platonicMirror
+  case glassBox
+  case cartoonFractalCube
+  case fractalFlythrough
 
   var id: String { rawValue }
 
@@ -132,17 +134,50 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "OrbitalSphereCube"
     case .huashan:
       return "华山3D扫描"
+    case .rayMarchingDemo:
+      return "Ray Marching 演示"
+    case .cubeRayMarchDemo:
+      return "方块内 Ray Marching"
+    }
+  }
+}
+
+enum RayMarchingProbeDimTarget: Int, CaseIterable {
+  case none
+  case sphere
+  case torus
+
+  var buttonTitle: String {
+    switch self {
+    case .none:
+      return "灰化: 无"
+    case .sphere:
+      return "灰化: 球"
+    case .torus:
+      return "灰化: 圆环"
+    }
+  }
+
+  func next() -> RayMarchingProbeDimTarget {
+    switch self {
+    case .none:
+      return .sphere
+    case .sphere:
+      return .torus
+    case .torus:
+      return .none
     }
   }
 }
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .glowingMountainLines
+  private var _current: VisualPatternKind = .rayMarchingDemo
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0
   private var _originCellInspectionEnabled: Bool = false
+  private var _rayMarchingProbeDimTarget: RayMarchingProbeDimTarget = .none
 
   func currentPattern() -> VisualPatternKind {
     queue.sync { _current }
@@ -187,6 +222,14 @@ final class PatternCoordinator {
   func setOriginCellInspectionEnabled(_ enabled: Bool) {
     queue.async(flags: .barrier) { self._originCellInspectionEnabled = enabled }
   }
+
+  func rayMarchingProbeDimTarget() -> RayMarchingProbeDimTarget {
+    queue.sync { _rayMarchingProbeDimTarget }
+  }
+
+  func setRayMarchingProbeDimTarget(_ target: RayMarchingProbeDimTarget) {
+    queue.async(flags: .barrier) { self._rayMarchingProbeDimTarget = target }
+  }
 }
 
 @MainActor
@@ -222,6 +265,12 @@ final class PatternMenuModel {
     }
   }
 
+  var rayMarchingProbeDimTarget: RayMarchingProbeDimTarget = .none {
+    didSet {
+      coordinator.setRayMarchingProbeDimTarget(rayMarchingProbeDimTarget)
+    }
+  }
+
   private let coordinator: PatternCoordinator
 
   init(coordinator: PatternCoordinator) {
@@ -229,12 +278,14 @@ final class PatternMenuModel {
     self.selectedPattern = coordinator.currentPattern()
     self.isPaused = coordinator.isPaused()
     self.originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
+    self.rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
   }
 
   func refreshFromCoordinator() {
     selectedPattern = coordinator.currentPattern()
     isPaused = coordinator.isPaused()
     originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
+    rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
   }
 
   func reset() {
@@ -243,5 +294,9 @@ final class PatternMenuModel {
 
   func toggleSpeed() {
     speedMultiplier = speedMultiplier > 1.0 ? 1.0 : 5.0
+  }
+
+  func cycleRayMarchingProbeDimTarget() {
+    rayMarchingProbeDimTarget = rayMarchingProbeDimTarget.next()
   }
 }

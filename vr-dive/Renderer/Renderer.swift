@@ -978,6 +978,50 @@ class Renderer {
       print("[Renderer] Cube Ray March Demo pattern unavailable.")
     }
 
+    if let hyperbolicGroupLimitSet = try? HyperbolicGroupLimitSetRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.hyperbolicGroupLimitSet] = hyperbolicGroupLimitSet
+      print("[Renderer] HyperbolicGroupLimitSet pattern added.")
+    } else {
+      print("[Renderer] Hyperbolic Group Limit Set pattern unavailable.")
+    }
+
+    if let apolloSpiral = try? ApolloSpiralRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.apolloSpiral] = apolloSpiral
+      print("[Renderer] ApolloSpiral pattern added.")
+    } else {
+      print("[Renderer] Apollo Spiral pattern unavailable.")
+    }
+
+    if let voxelTunnel = try? VoxelTunnelRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.voxelTunnel] = voxelTunnel
+      print("[Renderer] VoxelTunnel pattern added.")
+    } else {
+      print("[Renderer] Voxel tunnel pattern unavailable.")
+    }
+
+    if let nearLoxodrome = try? NearLoxodromeRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.nearLoxodrome] = nearLoxodrome
+      print("[Renderer] NearLoxodrome pattern added.")
+    } else {
+      print("[Renderer] Near Loxodrome pattern unavailable.")
+    }
+
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(
       device: device,
       library: library,

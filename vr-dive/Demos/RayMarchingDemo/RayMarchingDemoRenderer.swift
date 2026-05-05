@@ -428,8 +428,10 @@ private func rmdBuildSceneGeometry(probeDimTarget: RayMarchingProbeDimTarget) ->
   let cSphere = SIMD3<Float>(0.3, 0.7, 1.0)
   let cTorus = SIMD3<Float>(1.0, 0.6, 0.15)
   let cDimmed = rmdDimmedProbeColor()
-  let cSphereProbe = probeDimTarget == .sphere ? cDimmed : cSphere * 0.72 + SIMD3<Float>(0.28, 0.28, 0.28)
-  let cTorusProbe = probeDimTarget == .torus ? cDimmed : cTorus * 0.72 + SIMD3<Float>(0.28, 0.28, 0.28)
+  let cSphereProbe =
+    probeDimTarget == .sphere ? cDimmed : cSphere * 0.72 + SIMD3<Float>(0.28, 0.28, 0.28)
+  let cTorusProbe =
+    probeDimTarget == .torus ? cDimmed : cTorus * 0.72 + SIMD3<Float>(0.28, 0.28, 0.28)
 
   var geometry = RMDGeometry()
   rmdAppendSphere(
@@ -446,7 +448,8 @@ private func rmdBuildSceneGeometry(probeDimTarget: RayMarchingProbeDimTarget) ->
     &geometry, from: lightLocal, to: sphereRayEnd, radius: 0.003, color: cSphere,
     radialSegments: 10)
   rmdAppendProbeSpheres(
-    &geometry, from: lightLocal, rayDir: sphereRayDir, steps: sphereTrace.steps, color: cSphereProbe,
+    &geometry, from: lightLocal, rayDir: sphereRayDir, steps: sphereTrace.steps,
+    color: cSphereProbe,
     maxProbes: sphereTrace.steps.count)
   rmdAppendCylinder(
     &geometry, from: lightLocal, to: torusRayEnd, radius: 0.003, color: cTorus,
@@ -501,7 +504,9 @@ final class RayMarchingDemoRenderer: VisualPatternController {
 
   func synchronizeState(_ context: PatternSimulationContext) {
     let target = context.rayMarchingProbeDimTarget
-    guard target != activeProbeDimTarget, let buffers = meshBuffersByDimTarget[target] else { return }
+    guard target != activeProbeDimTarget, let buffers = meshBuffersByDimTarget[target] else {
+      return
+    }
     activeProbeDimTarget = target
     vertexBuffer = buffers.vertexBuffer
     indexBuffer = buffers.indexBuffer

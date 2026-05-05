@@ -42,6 +42,10 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case glassBox
   case cartoonFractalCube
   case fractalFlythrough
+  case hyperbolicGroupLimitSet
+  case apolloSpiral
+  case voxelTunnel
+  case nearLoxodrome
 
   var id: String { rawValue }
 
@@ -138,6 +142,14 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Ray Marching 演示"
     case .cubeRayMarchDemo:
       return "方块内 Ray Marching"
+    case .hyperbolicGroupLimitSet:
+      return "Hyperbolic Group Limit Set"
+    case .apolloSpiral:
+      return "Apollo Spiral"
+    case .voxelTunnel:
+      return "Voxel tunnel"
+    case .nearLoxodrome:
+      return "Near Loxodrome"
     }
   }
 }
@@ -172,7 +184,7 @@ enum RayMarchingProbeDimTarget: Int, CaseIterable {
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .rayMarchingDemo
+  private var _current: VisualPatternKind = .nearLoxodrome
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

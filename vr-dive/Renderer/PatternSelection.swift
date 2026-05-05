@@ -46,6 +46,16 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case apolloSpiral
   case voxelTunnel
   case nearLoxodrome
+  case shield
+  case digitalLines
+  case cloudyCrystal
+  case shaderdoughFairy
+  case crystalCubeLatticinioCore1
+  case fireTornado
+  case reflectiveWythoffPolyhedra
+  case apollonian
+  case magneticLinesThatDrawInGold
+  case lanterns
 
   var id: String { rawValue }
 
@@ -150,6 +160,26 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Voxel tunnel"
     case .nearLoxodrome:
       return "Near Loxodrome"
+    case .shield:
+      return "Shield"
+    case .digitalLines:
+      return "Digital Lines"
+    case .cloudyCrystal:
+      return "Cloudy Crystal"
+    case .shaderdoughFairy:
+      return "Shaderdough Fairy"
+    case .crystalCubeLatticinioCore1:
+      return "Crystal Cube Latticinio core 1"
+    case .fireTornado:
+      return "Fire Tornado"
+    case .reflectiveWythoffPolyhedra:
+      return "Reflective Wythoff polyhedra"
+    case .apollonian:
+      return "apollonian"
+    case .magneticLinesThatDrawInGold:
+      return "Magnetic lines that draw in gold"
+    case .lanterns:
+      return "Lanterns"
     }
   }
 }
@@ -184,7 +214,7 @@ enum RayMarchingProbeDimTarget: Int, CaseIterable {
 
 final class PatternCoordinator {
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .nearLoxodrome
+  private var _current: VisualPatternKind = .lanterns
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

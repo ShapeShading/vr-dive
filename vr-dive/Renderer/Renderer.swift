@@ -1022,6 +1022,116 @@ class Renderer {
       print("[Renderer] Near Loxodrome pattern unavailable.")
     }
 
+    if let shield = try? ShieldRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.shield] = shield
+      print("[Renderer] Shield pattern added.")
+    } else {
+      print("[Renderer] Shield pattern unavailable.")
+    }
+
+    if let digitalLines = try? DigitalLinesRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.digitalLines] = digitalLines
+      print("[Renderer] Digital Lines pattern added.")
+    } else {
+      print("[Renderer] Digital Lines pattern unavailable.")
+    }
+
+    if let cloudyCrystal = try? CloudyCrystalRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.cloudyCrystal] = cloudyCrystal
+      print("[Renderer] Cloudy Crystal pattern added.")
+    } else {
+      print("[Renderer] Cloudy Crystal pattern unavailable.")
+    }
+
+    if let shaderdoughFairy = try? ShaderdoughFairyRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.shaderdoughFairy] = shaderdoughFairy
+      print("[Renderer] Shaderdough Fairy pattern added.")
+    } else {
+      print("[Renderer] Shaderdough Fairy pattern unavailable.")
+    }
+
+    if let crystalCubeLatticinioCore1 = try? CrystalCubeLatticinioCore1Renderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.crystalCubeLatticinioCore1] = crystalCubeLatticinioCore1
+      print("[Renderer] Crystal Cube Latticinio core 1 pattern added.")
+    } else {
+      print("[Renderer] Crystal Cube Latticinio core 1 pattern unavailable.")
+    }
+
+    if let fireTornado = try? FireTornadoRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.fireTornado] = fireTornado
+      print("[Renderer] Fire Tornado pattern added.")
+    } else {
+      print("[Renderer] Fire Tornado pattern unavailable.")
+    }
+
+    if let reflectiveWythoffPolyhedra = try? ReflectiveWythoffPolyhedraRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.reflectiveWythoffPolyhedra] = reflectiveWythoffPolyhedra
+      print("[Renderer] Reflective Wythoff polyhedra pattern added.")
+    } else {
+      print("[Renderer] Reflective Wythoff polyhedra pattern unavailable.")
+    }
+
+    if let apollonian = try? ApollonianRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.apollonian] = apollonian
+      print("[Renderer] apollonian pattern added.")
+    } else {
+      print("[Renderer] apollonian pattern unavailable.")
+    }
+
+    if let magneticLinesThatDrawInGold = try? MagneticLinesThatDrawInGoldRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.magneticLinesThatDrawInGold] = magneticLinesThatDrawInGold
+      print("[Renderer] Magnetic lines that draw in gold pattern added.")
+    } else {
+      print("[Renderer] Magnetic lines that draw in gold pattern unavailable.")
+    }
+
+    if let lanterns = try? LanternsRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.lanterns] = lanterns
+      print("[Renderer] Lanterns pattern added.")
+    } else {
+      print("[Renderer] Lanterns pattern unavailable.")
+    }
+
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(
       device: device,
       library: library,

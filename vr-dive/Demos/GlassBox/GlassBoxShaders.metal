@@ -53,7 +53,7 @@ vertex GlassBoxVertexOut glassBoxVertex(
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 #define GB_PI      3.14159265f
-#define GB_BOXDIMS float3(0.75f, 0.75f, 1.25f)
+#define GB_BOXDIMS float3(0.95f, 0.95f, 1.25f)
 #define GB_IOR     1.33f
 
 // ─── Rotation matrices (column-major, same as GLSL) ──────────────────────────
@@ -96,12 +96,15 @@ static void gb_calcColor(
     float3 ro, float3 rd, float d, float len, bool si, float td, float t_time,
     thread float4 &colx, thread float4 &colsi)
 {
+    const float edgeWidth = 0.03f;
     float3 pos = ro + rd * d;
-    float a = 1.0f - smoothstep(len - 0.075f, len + 1e-5f, length(pos));
+    float a = 1.0f - smoothstep(len - edgeWidth, len + 1e-5f, length(pos));
+    a = pow(clamp(a, 0.0f, 1.0f), 1.6f);
     colx = float4(gb_getColor(pos, t_time), a);
     if (si) {
         pos = ro + rd * td;
-        float ta = 1.0f - smoothstep(len - 0.075f, len + 1e-5f, length(pos));
+        float ta = 1.0f - smoothstep(len - edgeWidth, len + 1e-5f, length(pos));
+        ta = pow(clamp(ta, 0.0f, 1.0f), 1.6f);
         colsi = float4(gb_getColor(pos, t_time), ta);
     }
 }
@@ -202,6 +205,20 @@ static float gb_boxHit(float3 ro, float3 rd, float3 r, thread float3 &nn, bool e
     }
 }
 
+static float2 gb_faceCoords(float3 p, float3 faceNormal) {
+    return p.xy * faceNormal.z + p.yz * faceNormal.x + p.zx * faceNormal.y;
+}
+
+static float3 gb_faceSpacePoint(float3 p, float3 facePoint, float3 faceNormal) {
+    return float3(gb_faceCoords(p, faceNormal), dot(facePoint - p, faceNormal));
+}
+
+static float3 gb_faceSpaceDir(float3 rd, float3 faceNormal) {
+    float3 dir = rd.yzx * faceNormal.x + rd.zxy * faceNormal.y + rd.xyz * faceNormal.z;
+    dir.z = -dir.z;
+    return dir;
+}
+
 // ─── Background visible through refracted ray (simplified NO_SHADOW path) ────
 static float3 gb_background(float3 ro, float3 rd, float3 l_dir, thread float &alpha) {
     float3 bgc = mix(float3(0.01f), float3(0.336f, 0.458f, 0.668f),
@@ -220,33 +237,24 @@ static float3 gb_background(float3 ro, float3 rd, float3 l_dir, thread float &al
 }
 
 // ─── Internal bilinear-patch rendering (3 rotated layers) ────────────────────
-static float4 gb_insides(float3 ro, float3 rd, float3 nor_c, float3 l_dir,
-                          float t_time, thread float &tout)
+static void gb_applySceneRotation(thread float3 &p, float t_time) {
+    p = p * gb_roty(t_time * 0.23f);
+    p = p * gb_rotx(t_time * 0.17f);
+}
+
+static void gb_applyLayerOrientation(int layerIndex, thread float3 &p) {
+    if (layerIndex == 1) {
+        p = p * gb_rotx(GB_PI * 0.5f);
+    } else if (layerIndex == 2) {
+        p = p * gb_roty(GB_PI * 0.5f);
+        p = p * gb_rotz(GB_PI * 0.5f);
+    }
+}
+
+static float4 gb_insides(float3 ro, float3 rd, float3 l_dir,
+                          float t_time, float maxDist, thread float &tout)
 {
     tout = -1.0f;
-
-    // Remap ro/rd into the canonical face coordinate system
-    if (abs(nor_c.x) > 0.5f) {
-        rd = rd.xzy * nor_c.x;
-        ro = ro.xzy * nor_c.x;
-    } else if (abs(nor_c.z) > 0.5f) {
-        l_dir = l_dir * gb_roty(GB_PI);
-        rd    = rd.yxz * nor_c.z;
-        ro    = ro.yxz * nor_c.z;
-    } else if (abs(nor_c.y) > 0.5f) {
-        l_dir = l_dir * gb_rotz(-GB_PI * 0.5f);
-        rd    = rd    * nor_c.y;
-        ro    = ro    * nor_c.y;
-    }
-
-    // Apply time rotation AFTER face remapping so all faces animate with the same phase.
-    // Moving this here (from the fragment shader) ensures the rotation is in each face's
-    // local frame (z = into the box), giving consistent visual behaviour on every face.
-    {
-        float faceRot = t_time * 0.8999f * 0.25f;
-        ro = ro * gb_rotz(faceRot);
-        rd = rd * gb_rotz(faceRot);
-    }
 
     const float curvature = 0.5f;
     const float bil_size  = 1.0f;
@@ -259,31 +267,36 @@ static float4 gb_insides(float3 ro, float3 rd, float3 nor_c, float3 l_dir,
     int    order[3]  = { 0, 1, 2 };
 
     for (int i = 0; i < 3; i++) {
-        if (abs(nor_c.x) > 0.5f) {
-            ro = ro * gb_rotz(-GB_PI * (1.0f / 3.0f));
-            rd = rd * gb_rotz(-GB_PI * (1.0f / 3.0f));
-        } else if (abs(nor_c.z) > 0.5f) {
-            ro = ro * gb_rotz( GB_PI * (1.0f / 3.0f));
-            rd = rd * gb_rotz( GB_PI * (1.0f / 3.0f));
-        } else if (abs(nor_c.y) > 0.5f) {
-            ro = ro * gb_rotx( GB_PI * (1.0f / 3.0f));
-            rd = rd * gb_rotx( GB_PI * (1.0f / 3.0f));
-        }
+        float3 roLayer = ro;
+        float3 rdLayer = rd;
+        float3 lightLayer = l_dir;
+
+        gb_applySceneRotation(roLayer, t_time);
+        gb_applySceneRotation(rdLayer, t_time);
+        gb_applySceneRotation(lightLayer, t_time);
+        gb_applyLayerOrientation(i, roLayer);
+        gb_applyLayerOrientation(i, rdLayer);
+        gb_applyLayerOrientation(i, lightLayer);
 
         float3 normnew; float tnew;
         bool   si;      float tsi;   float3 normsi;
         float  fade;    float fadesi;
 
-        if (gb_bilinearPatch(ro, rd, ps, ph, bil_size,
+        if (gb_bilinearPatch(roLayer, rdLayer, ps, ph, bil_size,
                              tnew, normnew, si, tsi, normsi, fade, fadesi)) {
-            if (tnew > 0.0f) {
+            if (si && ((tsi <= 0.0f) || (tsi > maxDist))) {
+                si = false;
+                tsi = -1.0f;
+            }
+
+            if ((tnew > 0.0f) && (tnew <= maxDist)) {
                 float4 tcol(0), tcolsi(0);
-                gb_calcColor(ro, rd, tnew, bil_size, si, tsi, t_time, tcol, tcolsi);
+                gb_calcColor(roLayer, rdLayer, tnew, bil_size, si, tsi, t_time, tcol, tcolsi);
                 if (tcol.a > 0.0f) {
                     dx[i] = float3(tnew, si ? 1.0f : 0.0f, tsi);
 
-                    float dif = clamp(dot(normnew, l_dir), 0.0f, 1.0f);
-                    float amb = clamp(0.5f + 0.5f * dot(normnew, l_dir), 0.0f, 1.0f);
+                    float dif = clamp(dot(normnew, lightLayer), 0.0f, 1.0f);
+                    float amb = clamp(0.5f + 0.5f * dot(normnew, lightLayer), 0.0f, 1.0f);
                     float3 shad = float3(0.32f, 0.43f, 0.54f) * amb
                                 + float3(1.0f,  0.9f,  0.7f)  * dif;
                     float3 tcr  = float3(1.0f, 0.21f, 0.11f);
@@ -298,8 +311,8 @@ static float4 gb_insides(float3 ro, float3 rd, float3 nor_c, float3 l_dir,
                     colx[i]     = tv;
 
                     if (si) {
-                        dif  = clamp(dot(normsi, l_dir), 0.0f, 1.0f);
-                        amb  = clamp(0.5f + 0.5f * dot(normsi, l_dir), 0.0f, 1.0f);
+                        dif  = clamp(dot(normsi, lightLayer), 0.0f, 1.0f);
+                        amb  = clamp(0.5f + 0.5f * dot(normsi, lightLayer), 0.0f, 1.0f);
                         shad = float3(0.32f, 0.43f, 0.54f) * amb
                              + float3(1.0f,  0.9f,  0.7f)  * dif;
                         float ta2   = clamp(length(tcolsi.rgb), 0.0f, 1.0f);
@@ -384,75 +397,56 @@ fragment float4 glassBoxFragment(
     // Light direction (world-agnostic, same as original ShaderToy)
     float3 l_dir = normalize(float3(0, 1, 0)) * gb_rotz(0.5f);
 
-    // (Time rotation is now applied inside gb_insides, after per-face remapping,
-    //  so that all faces show the same rotational phase.)
-
     bool insideBox = all(abs(eye) < (GB_BOXDIMS - 1e-3f));
 
-    // Box intersection: outside cameras use the entry face; inside cameras use the
-    // exit face, then flip the face normal so the local wall frame still points
-    // inward into the box interior.
-    float3 boxNormal;
-    float  t = gb_boxHit(eye, rd, GB_BOXDIMS, boxNormal, !insideBox);
-    if (t < 0.0f) discard_fragment();
-
-    float3 ni = insideBox ? -boxNormal : boxNormal;
-
-    float3 ro        = eye + t * rd;
-    float2 coords    = ro.xy * ni.z / GB_BOXDIMS.xy
-                     + ro.yz * ni.x / GB_BOXDIMS.yz
-                     + ro.zx * ni.y / GB_BOXDIMS.zx;
-    float fadeborders = (1.0f - smoothstep(0.915f, 1.05f, abs(coords.x)))
-                      * (1.0f - smoothstep(0.915f, 1.05f, abs(coords.y)));
-
-    // Mirror-only setup: keep the surface reflection term, but do not refract the
-    // ray into the box. This preserves apparent depth across faces instead of
-    // pulling the contents toward the entry face.
-    // theta=0 simplification: n=(0,0,1), nr = ni (identity transform)
-    float3 nr = ni;
-    float  R0 = (GB_IOR - 1.0f) / (GB_IOR + 1.0f);
-    R0 *= R0;
-
-    float  talpha_bg = 0.0f;
-    float3 reflcol = insideBox ? float3(0.0f) : gb_background(ro, reflect(rd, nr), l_dir, talpha_bg);
-    float3 rd2     = rd;
-
-    float  accum    = 1.0f;
-    float3 no2      = ni;
-    float3 ro_refr  = ro + rd2 * 1e-3f;
-    float4 colo[2]  = { float4(0), float4(0) };
-
-    for (int j = 0; j < 2; j++) {
-        float  tb;
-        // Project ro_refr onto the current face coordinate system
-        float2 coords2  = ro_refr.xy * no2.z + ro_refr.yz * no2.x + ro_refr.zx * no2.y;
-        float3 eye2     = float3(coords2, -1.0f);
-        float3 rd2t     = rd2.yzx * no2.x + rd2.zxy * no2.y + rd2.xyz * no2.z;
-        rd2t.z          = -rd2t.z;
-
-        float4 internalcol = gb_insides(eye2, rd2t, no2, l_dir, uniforms.time, tb);
-        if (tb > 0.0f) {
-            internalcol.rgb *= accum;
-            colo[j]          = internalcol;
-        }
-
-        if ((tb <= 0.0f) || (internalcol.a < 1.0f)) {
-            float3 no2_exit;
-            float  tout   = gb_boxHit(ro_refr, rd2, GB_BOXDIMS, no2_exit, false);
-            rd2           = reflect(rd2, -no2_exit);
-            ro_refr       = ro_refr + tout * rd2;
-            ro_refr.z     = max(ro_refr.z, -0.999f);
-            no2           = no2_exit;
-        }
+    float3 marchOrigin = eye;
+    float3 surfacePoint;
+    float3 surfaceNormal;
+    if (!insideBox) {
+        float3 entryNormal;
+        float  tEnter = gb_boxHit(eye, rd, GB_BOXDIMS, entryNormal, true);
+        if (tEnter < 0.0f) discard_fragment();
+        surfacePoint = eye + rd * tEnter;
+        surfaceNormal = entryNormal;
+        marchOrigin = surfacePoint + rd * 1e-3f;
     }
 
-    float  fresnel = insideBox
-                   ? 0.0f
-                   : R0 + (1.0f - R0) * pow(max(1.0f - dot(-rd, nr), 0.0f), 5.0f);
-    float3 col     = mix(
-        mix(colo[1].rgb * colo[1].a, colo[0].rgb, colo[0].a) * fadeborders,
-        reflcol,
-        pow(fresnel, 1.5f));
-    col = clamp(col, 0.0f, 1.0f);
-    return float4(col, 1.0f);
+    float3 exitNormal;
+    float  tExit = gb_boxHit(marchOrigin, rd, GB_BOXDIMS, exitNormal, false);
+    if (tExit <= 0.0f) discard_fragment();
+
+    if (insideBox) {
+        surfacePoint = eye + rd * tExit;
+        surfaceNormal = -exitNormal;
+    }
+
+    float  R0 = (GB_IOR - 1.0f) / (GB_IOR + 1.0f);
+    R0 *= R0;
+    float  cosTheta = clamp(dot(-rd, surfaceNormal), 0.0f, 1.0f);
+    float  fresnel = R0 + (1.0f - R0) * pow(1.0f - cosTheta, 5.0f);
+
+    float  hitT;
+    float4 internalcol = gb_insides(marchOrigin, rd, l_dir, uniforms.time, tExit, hitT);
+    float3 motifCol = ((hitT > 0.0f) && (internalcol.a > 0.0f)) ? internalcol.rgb : float3(0.0f);
+
+    float3 bouncePoint = marchOrigin + rd * tExit;
+    float3 bounceDir = reflect(rd, -exitNormal);
+    float3 bounceOrigin = bouncePoint + bounceDir * 1e-3f;
+    float3 bounceExitNormal;
+    float  bounceMaxDist = gb_boxHit(bounceOrigin, bounceDir, GB_BOXDIMS, bounceExitNormal, false);
+    float  reflectedHitT = -1.0f;
+    float4 reflectedCol = float4(0.0f);
+    if (bounceMaxDist > 0.0f) {
+        reflectedCol = gb_insides(bounceOrigin, bounceDir, l_dir, uniforms.time, bounceMaxDist, reflectedHitT);
+    }
+
+    float  reflectionAmount = 0.0f;
+    if ((reflectedHitT > 0.0f) && (reflectedCol.a > 0.0f)) {
+        reflectionAmount = clamp(max(fresnel * 0.55f, insideBox ? 0.08f : 0.12f), 0.0f, insideBox ? 0.18f : 0.22f);
+    }
+
+    float3 reflectionCol = reflectedCol.rgb;
+    float3 col = mix(motifCol, reflectionCol, reflectionAmount);
+
+    return float4(clamp(col, 0.0f, 1.0f), 1.0f);
 }

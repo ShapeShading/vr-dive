@@ -7,7 +7,7 @@ import simd
 // Architecture follows RhombicDodecahedronRenderer: a bounding sphere mesh acts
 // as the container; the fragment shader does all ray-marching work.
 //
-// Local BOXDIMS = (0.75, 0.75, 1.25).  Circumscribed sphere radius ≈ 1.64.
+// Local BOXDIMS = (0.95, 0.95, 1.25).  Circumscribed sphere radius ≈ 1.84.
 // World-space box size = BOXDIMS * boxScale.  The sphere radius matches accordingly.
 
 final class GlassBoxRenderer: VisualPatternController {
@@ -24,6 +24,8 @@ final class GlassBoxRenderer: VisualPatternController {
   // World-space scale and placement.
   private let boxScale: Float = 0.84
   private let objectCenter = SIMD3<Float>(0.0, -0.05, -1.1)
+  private var animationTime: Float = 0
+  private var lastSimulationTime: Float?
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
@@ -31,7 +33,7 @@ final class GlassBoxRenderer: VisualPatternController {
     // Box mesh in local BOXDIMS space (slightly enlarged so the rasterised mesh
     // fully covers all visible pixels before the fragment shader takes over).
     let geo = GlassBoxRenderer.makeBox(
-      device: device, localHalfExtents: SIMD3<Float>(0.75, 0.75, 1.25) * 1.02)
+      device: device, localHalfExtents: SIMD3<Float>(0.95, 0.95, 1.25) * 1.02)
     vertexBuffer = geo.vertexBuffer
     indexBuffer = geo.indexBuffer
     indexCount = geo.indexCount
@@ -41,8 +43,17 @@ final class GlassBoxRenderer: VisualPatternController {
     depthStencilState = GlassBoxRenderer.makeDepthStencilState(device: device)
   }
 
-  func updateSimulation(_ context: PatternSimulationContext) {}
-  func resetToInitialState() {}
+  func updateSimulation(_ context: PatternSimulationContext) {
+    defer { lastSimulationTime = context.time }
+    guard let lastSimulationTime else { return }
+    let deltaTime = max(0, min(context.time - lastSimulationTime, 1.0 / 20.0))
+    animationTime += deltaTime * max(context.speedMultiplier, 0)
+  }
+
+  func resetToInitialState() {
+    animationTime = 0
+    lastSimulationTime = nil
+  }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
     encoder.setRenderPipelineState(pipelineState)
@@ -54,7 +65,7 @@ final class GlassBoxRenderer: VisualPatternController {
     encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
     var uniforms = GlassBoxUniforms(
-      time: context.time,
+      time: animationTime,
       viewCount: UInt32(context.viewData.viewCount),
       boxScale: boxScale,
       _pad: 0,

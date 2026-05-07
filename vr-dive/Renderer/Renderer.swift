@@ -13,9 +13,7 @@ struct VRConfiguration: CompositorLayerConfiguration {
     configuration.isFoveationEnabled = supportsFoveation
 
     let layoutOptions: LayerRenderer.Capabilities.SupportedLayoutsOptions =
-      supportsFoveation
-      ? [.foveationEnabled]
-      : []
+      supportsFoveation ? [.foveationEnabled] : []
     let supportedLayouts = capabilities.supportedLayouts(options: layoutOptions)
     if supportedLayouts.contains(.layered) {
       configuration.layout = .layered
@@ -315,7 +313,7 @@ class Renderer {
             frame.endUpdate()
             shouldEndUpdate = false
           }
-          completeEmptySubmissionIfPossible(for: frame)
+          completeEmptySubmissionIfPossible(for: frame, drawables: drawables)
           shouldSkipFrame = true
           return
         }
@@ -338,7 +336,7 @@ class Renderer {
         }
 
         guard !pendingCommands.isEmpty else {
-          completeEmptySubmissionIfPossible(for: frame)
+          completeEmptySubmissionIfPossible(for: frame, drawables: drawables)
           shouldSkipFrame = true
           return
         }
@@ -389,9 +387,17 @@ class Renderer {
     return seconds + attoseconds
   }
 
-  private func completeEmptySubmissionIfPossible(for frame: LayerRenderer.Frame) {
+  private func completeEmptySubmissionIfPossible(
+    for frame: LayerRenderer.Frame,
+    drawables: [LayerRenderer.Drawable] = []
+  ) {
     guard layerRenderer.state == .running else { return }
     frame.startSubmission()
+    for drawable in drawables {
+      guard let cmdBuf = commandQueue.makeCommandBuffer() else { continue }
+      drawable.encodePresent(commandBuffer: cmdBuf)
+      cmdBuf.commit()
+    }
     frame.endSubmission()
   }
 
@@ -482,8 +488,11 @@ class Renderer {
       }
     }
 
-    let clearColor =
-      pattern?.preferredClearColor ?? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+    // ⚠️ clearColor 必须是纯黑，不得改为读取 pattern?.preferredClearColor。
+    // foveation 的 rasterizationRateMap 将渲染目标分成 tile，未被几何体覆盖的
+    // tile 会被 clear 到此颜色。非黑色 clearColor 会造成可见的彩色瓦片伪影。
+    // 见 notes/05-08-tile-artifacts-and-stereo-bugs.md
+    let clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
     // ── Compute pre-pass (before render encoder is created) ──────────────────
     if let activePattern = pattern, let anchor = anchorToUse {
@@ -552,9 +561,6 @@ class Renderer {
     }
 
     descriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
-
-    // Always clear every slice in the drawable's texture, otherwise untouched
-    // foveation tiles stay black.
     descriptor.renderTargetArrayLength = colorTexture.arrayLength
 
     return descriptor
@@ -595,6 +601,9 @@ class Renderer {
         matrices[index] = projection * viewMatrix
         let textureMap = view.textureMap
         viewports.append(textureMap.viewport)
+        // ⚠️ 必须用 sliceIndex，不是 textureIndex。
+        // layered layout 下两眼在同一 texture 的不同 array slice（左眼 slice=0，右眼 slice=1）。
+        // textureIndex 对两眼都是 0，会导致两眼画面叠到左眼，右眼黑屏。
         renderTargetLayers.append(UInt32(textureMap.sliceIndex))
         viewToWorldTransforms.append(adjustedWorldFromEye)
       }

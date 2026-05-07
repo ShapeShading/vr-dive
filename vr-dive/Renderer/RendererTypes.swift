@@ -50,8 +50,14 @@ struct PatternRenderContext {
         )
       }
       encoder.setVertexAmplificationCount(viewData.viewCount, viewMappings: &viewMappings)
+    } else {
+      // ⚠️ 必须保留此 else 分支，即使 viewCount == 1。
+      // foveation 开启时，Metal 需要显式调用 setVertexAmplificationCount 才能
+      // 正确将虚拟 viewport 坐标（如 4338×3478）映射到物理 texture（如 1888×1792）。
+      // 缺少此调用会导致未被几何体覆盖的 foveation tile 以 clear color 颜色暴露，
+      // 形成可见的彩色瓦片伪影（tile artifacts）。见 notes/05-08-tile-artifacts-and-stereo-bugs.md
+      encoder.setVertexAmplificationCount(1, viewMappings: nil)
     }
-    // Single-view: no amplification call needed (default count is 1)
   }
 }
 

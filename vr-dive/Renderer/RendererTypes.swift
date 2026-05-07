@@ -28,6 +28,7 @@ struct PatternSimulationContext {
   let isPaused: Bool
   let originCellInspectionEnabled: Bool
   let rayMarchingProbeDimTarget: RayMarchingProbeDimTarget
+  let huashanSampleRatio: Float
 }
 
 struct PatternRenderContext {

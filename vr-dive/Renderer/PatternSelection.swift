@@ -213,6 +213,14 @@ enum RayMarchingProbeDimTarget: Int, CaseIterable {
 }
 
 final class PatternCoordinator {
+  static let minHuashanSampleRatio: Float = 0.05
+  static let maxHuashanSampleRatio: Float = 1.0
+  static let defaultHuashanSampleRatio: Float = 0.45
+
+  static func clampedHuashanSampleRatio(_ ratio: Float) -> Float {
+    min(max(ratio, minHuashanSampleRatio), maxHuashanSampleRatio)
+  }
+
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
   private var _current: VisualPatternKind = .lanterns
   private var _isPaused: Bool = false
@@ -220,6 +228,7 @@ final class PatternCoordinator {
   private var _speedMultiplier: Float = 1.0
   private var _originCellInspectionEnabled: Bool = false
   private var _rayMarchingProbeDimTarget: RayMarchingProbeDimTarget = .none
+  private var _huashanSampleRatio: Float = PatternCoordinator.defaultHuashanSampleRatio
 
   func currentPattern() -> VisualPatternKind {
     queue.sync { _current }
@@ -272,6 +281,15 @@ final class PatternCoordinator {
   func setRayMarchingProbeDimTarget(_ target: RayMarchingProbeDimTarget) {
     queue.async(flags: .barrier) { self._rayMarchingProbeDimTarget = target }
   }
+
+  func huashanSampleRatio() -> Float {
+    queue.sync { _huashanSampleRatio }
+  }
+
+  func setHuashanSampleRatio(_ ratio: Float) {
+    let clamped = Self.clampedHuashanSampleRatio(ratio)
+    queue.async(flags: .barrier) { self._huashanSampleRatio = clamped }
+  }
 }
 
 @MainActor
@@ -313,6 +331,12 @@ final class PatternMenuModel {
     }
   }
 
+  var huashanSampleRatio: Float = PatternCoordinator.defaultHuashanSampleRatio {
+    didSet {
+      coordinator.setHuashanSampleRatio(huashanSampleRatio)
+    }
+  }
+
   private let coordinator: PatternCoordinator
 
   init(coordinator: PatternCoordinator) {
@@ -321,6 +345,7 @@ final class PatternMenuModel {
     self.isPaused = coordinator.isPaused()
     self.originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
     self.rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
+    self.huashanSampleRatio = coordinator.huashanSampleRatio()
   }
 
   func refreshFromCoordinator() {
@@ -328,6 +353,7 @@ final class PatternMenuModel {
     isPaused = coordinator.isPaused()
     originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
     rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
+    huashanSampleRatio = coordinator.huashanSampleRatio()
   }
 
   func reset() {
@@ -340,5 +366,13 @@ final class PatternMenuModel {
 
   func cycleRayMarchingProbeDimTarget() {
     rayMarchingProbeDimTarget = rayMarchingProbeDimTarget.next()
+  }
+
+  func adjustHuashanSampleRatio(by delta: Float) {
+    huashanSampleRatio = PatternCoordinator.clampedHuashanSampleRatio(huashanSampleRatio + delta)
+  }
+
+  var huashanSampleRatioPercentText: String {
+    "\(Int((huashanSampleRatio * 100).rounded()))%"
   }
 }

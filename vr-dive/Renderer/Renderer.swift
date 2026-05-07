@@ -33,14 +33,18 @@ struct VRConfiguration: CompositorLayerConfiguration {
 }
 
 class Renderer {
+  private typealias PatternControllerBuilder = () -> VisualPatternController?
+
   let layerRenderer: LayerRenderer
   let device: MTLDevice
+  let library: MTLLibrary
   let commandQueue: MTLCommandQueue
   let arSession: ARKitSession
   let worldTracking: WorldTrackingProvider
   let gameManager: GameManager
   let patternCoordinator: PatternCoordinator
   private var patternControllers: [VisualPatternKind: VisualPatternController] = [:]
+  private var deferredPatternBuilders: [VisualPatternKind: PatternControllerBuilder] = [:]
   private var activePatternKind: VisualPatternKind
   private let maxViewCount: Int
   private var lastKnownDeviceAnchor: ARKit.DeviceAnchor?
@@ -59,14 +63,14 @@ class Renderer {
   init(_ layerRenderer: LayerRenderer, patternCoordinator: PatternCoordinator) {
     self.layerRenderer = layerRenderer
     self.device = layerRenderer.device
+    self.library = device.makeDefaultLibrary()!
     self.commandQueue = self.device.makeCommandQueue()!
     self.patternCoordinator = patternCoordinator
     self.maxViewCount = max(1, layerRenderer.properties.viewCount)
 
-    let library = device.makeDefaultLibrary()!
-    var controllers = Renderer.makePatternControllers(
+    let patternSetup = Renderer.makePatternControllers(
       device: device,
-      library: library,
+      library: self.library,
       cubeCount: Renderer.cubeObjectCount,
       lorenzCount: Renderer.lorenzParticleCount,
       fourWingCount: Renderer.fourWingParticleCount,
@@ -74,6 +78,8 @@ class Renderer {
       julia3DCount: Renderer.julia3DParticleCount,
       maxViewCount: maxViewCount
     )
+    var controllers = patternSetup.controllers
+    self.deferredPatternBuilders = patternSetup.deferredBuilders
 
     self.arSession = ARKitSession()
     self.worldTracking = WorldTrackingProvider()
@@ -83,7 +89,7 @@ class Renderer {
     Renderer.addTetris3D(
       to: &controllers,
       device: device,
-      library: library,
+      library: self.library,
       maxViewCount: maxViewCount,
       gameManager: self.gameManager
     )
@@ -92,18 +98,21 @@ class Renderer {
     Renderer.addSnake3D(
       to: &controllers,
       device: device,
-      library: library,
+      library: self.library,
       maxViewCount: maxViewCount,
       gameManager: self.gameManager
     )
 
     self.patternControllers = controllers
     let requestedPattern = patternCoordinator.currentPattern()
-    if controllers[requestedPattern] != nil {
+    if controllers[requestedPattern] != nil || deferredPatternBuilders[requestedPattern] != nil {
       self.activePatternKind = requestedPattern
     } else if let fallback = controllers.keys.first {
       self.activePatternKind = fallback
       patternCoordinator.setPattern(fallback)
+    } else if let deferredFallback = deferredPatternBuilders.keys.first {
+      self.activePatternKind = deferredFallback
+      patternCoordinator.setPattern(deferredFallback)
     } else {
       fatalError("No render patterns available")
     }
@@ -170,6 +179,8 @@ class Renderer {
   func renderLoop() {
     print("[Renderer] Render loop started, layerRenderer state: \(layerRenderer.state)")
     var frameCount = 0
+    var didLogFirstFrame = false
+    var lastMissingAnchorLogTime: CFTimeInterval = 0
     while true {
       if layerRenderer.state == .invalidated {
         print("[Renderer] Layer renderer invalidated, exiting")
@@ -192,9 +203,10 @@ class Renderer {
         continue
       }
 
-      if frameCount == 0 {
+      if !didLogFirstFrame {
         print("[Renderer] First frame rendering...")
-      } else if frameCount % 60 == 0 {
+        didLogFirstFrame = true
+      } else if frameCount > 0 && frameCount % 60 == 0 {
         print("[Renderer] Frame \(frameCount) rendered")
       }
 
@@ -271,7 +283,8 @@ class Renderer {
             deviceAnchorTransform: anchor.originFromAnchorTransform,
             currentTime: animationTime
           )
-        } else if frameCount % 120 == 0 {
+        } else if CFAbsoluteTimeGetCurrent() - lastMissingAnchorLogTime >= 1.0 {
+          lastMissingAnchorLogTime = CFAbsoluteTimeGetCurrent()
           print("[Renderer] Waiting for reliable world tracking data...")
         }
 
@@ -283,7 +296,8 @@ class Renderer {
           speedMultiplier: patternCoordinator.speedMultiplier(),
           isPaused: isPaused,
           originCellInspectionEnabled: patternCoordinator.originCellInspectionEnabled(),
-          rayMarchingProbeDimTarget: patternCoordinator.rayMarchingProbeDimTarget()
+          rayMarchingProbeDimTarget: patternCoordinator.rayMarchingProbeDimTarget(),
+          huashanSampleRatio: patternCoordinator.huashanSampleRatio()
         )
         pattern?.synchronizeState(simulationContext)
 
@@ -296,12 +310,22 @@ class Renderer {
           activePattern.updateSimulation(simulationContext)
         }
 
+        guard let validAnchor = anchorToUse else {
+          if shouldEndUpdate {
+            frame.endUpdate()
+            shouldEndUpdate = false
+          }
+          completeEmptySubmissionIfPossible(for: frame)
+          shouldSkipFrame = true
+          return
+        }
+
         var pendingCommands: [(LayerRenderer.Drawable, MTLCommandBuffer)] = []
         for drawable in drawables {
           if let commandBuffer = encodeDrawable(
             drawable: drawable,
             pattern: pattern,
-            deviceAnchor: anchorToUse,
+            deviceAnchor: validAnchor,
             time: animationTime
           ) {
             pendingCommands.append((drawable, commandBuffer))
@@ -311,6 +335,12 @@ class Renderer {
         if shouldEndUpdate {
           frame.endUpdate()
           shouldEndUpdate = false
+        }
+
+        guard !pendingCommands.isEmpty else {
+          completeEmptySubmissionIfPossible(for: frame)
+          shouldSkipFrame = true
+          return
         }
 
         // Check state before submission - if not running, skip submission entirely
@@ -331,22 +361,10 @@ class Renderer {
           return
         }
 
-        // If we have valid commands, submit them
-        if !pendingCommands.isEmpty, let validAnchor = anchorToUse {
-          for (drawable, commandBuffer) in pendingCommands {
-            drawable.deviceAnchor = validAnchor
-            drawable.encodePresent(commandBuffer: commandBuffer)
-            commandBuffer.commit()
-          }
-        } else {
-          // No valid commands - create minimal submission for each drawable
-          for drawable in drawables {
-            if let commandBuffer = commandQueue.makeCommandBuffer() {
-              drawable.encodePresent(commandBuffer: commandBuffer)
-              commandBuffer.commit()
-            }
-          }
-          shouldSkipFrame = true
+        for (drawable, commandBuffer) in pendingCommands {
+          drawable.deviceAnchor = validAnchor
+          drawable.encodePresent(commandBuffer: commandBuffer)
+          commandBuffer.commit()
         }
 
         if didStartSubmission {
@@ -371,15 +389,27 @@ class Renderer {
     return seconds + attoseconds
   }
 
+  private func completeEmptySubmissionIfPossible(for frame: LayerRenderer.Frame) {
+    guard layerRenderer.state == .running else { return }
+    frame.startSubmission()
+    frame.endSubmission()
+  }
+
   private func resolveActivePatternController() -> VisualPatternController? {
     let desiredPattern = patternCoordinator.currentPattern()
-    if desiredPattern != activePatternKind, let controller = patternControllers[desiredPattern] {
-      activePatternKind = desiredPattern
-      print("[Renderer] Switching to pattern: \(desiredPattern.rawValue)")
-      return controller
+    if desiredPattern != activePatternKind {
+      if let controller = patternControllers[desiredPattern]
+        ?? loadDeferredPatternController(for: desiredPattern)
+      {
+        activePatternKind = desiredPattern
+        print("[Renderer] Switching to pattern: \(desiredPattern.rawValue)")
+        return controller
+      }
     }
 
-    if let controller = patternControllers[activePatternKind] {
+    if let controller = patternControllers[activePatternKind]
+      ?? loadDeferredPatternController(for: activePatternKind)
+    {
       return controller
     }
 
@@ -388,7 +418,31 @@ class Renderer {
       return fallback
     }
 
+    if let deferredFallback = deferredPatternBuilders.keys.first,
+      let controller = loadDeferredPatternController(for: deferredFallback)
+    {
+      activePatternKind = deferredFallback
+      return controller
+    }
+
     return nil
+  }
+
+  private func loadDeferredPatternController(for kind: VisualPatternKind)
+    -> VisualPatternController?
+  {
+    if let existing = patternControllers[kind] {
+      return existing
+    }
+
+    guard let builder = deferredPatternBuilders.removeValue(forKey: kind),
+      let controller = builder()
+    else {
+      return nil
+    }
+
+    patternControllers[kind] = controller
+    return controller
   }
 
   private func encodeDrawable(
@@ -650,8 +704,12 @@ class Renderer {
     aizawaCount: Int,
     julia3DCount: Int,
     maxViewCount: Int
-  ) -> [VisualPatternKind: VisualPatternController] {
+  ) -> (
+    controllers: [VisualPatternKind: VisualPatternController],
+    deferredBuilders: [VisualPatternKind: PatternControllerBuilder]
+  ) {
     var controllers: [VisualPatternKind: VisualPatternController] = [:]
+    var deferredBuilders: [VisualPatternKind: PatternControllerBuilder] = [:]
     do {
       controllers[.cubeField] = try CubeFieldRenderer(
         device: device, library: library, objectCount: cubeCount, maxViewCount: maxViewCount)
@@ -692,37 +750,43 @@ class Renderer {
       }
     }
 
-    if let lorenz = try? LorenzRenderer(
-      device: device,
-      library: library,
-      particleCount: lorenzCount,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.lorenzAttractor] = lorenz
-    } else {
+    deferredBuilders[.lorenzAttractor] = {
+      if let lorenz = try? LorenzRenderer(
+        device: device,
+        library: library,
+        particleCount: lorenzCount,
+        maxViewCount: maxViewCount
+      ) {
+        return lorenz
+      }
       print("[Renderer] Lorenz attractor pattern unavailable; continuing with base pattern only.")
+      return nil
     }
 
-    if let fourWing = try? FourWingRenderer(
-      device: device,
-      library: library,
-      particleCount: fourWingCount,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.fourWingAttractor] = fourWing
-    } else {
+    deferredBuilders[.fourWingAttractor] = {
+      if let fourWing = try? FourWingRenderer(
+        device: device,
+        library: library,
+        particleCount: fourWingCount,
+        maxViewCount: maxViewCount
+      ) {
+        return fourWing
+      }
       print("[Renderer] Four-Wing attractor pattern unavailable.")
+      return nil
     }
 
-    if let aizawa = try? AizawaRenderer(
-      device: device,
-      library: library,
-      particleCount: aizawaCount,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.aizawaAttractor] = aizawa
-    } else {
+    deferredBuilders[.aizawaAttractor] = {
+      if let aizawa = try? AizawaRenderer(
+        device: device,
+        library: library,
+        particleCount: aizawaCount,
+        maxViewCount: maxViewCount
+      ) {
+        return aizawa
+      }
       print("[Renderer] Aizawa attractor pattern unavailable.")
+      return nil
     }
 
     if let pagoda = try? PagodaSolidRenderer(
@@ -776,14 +840,16 @@ class Renderer {
       print("[Renderer] QuatPolynomial pattern unavailable.")
     }
 
-    if let huashan = try? HuashanSplatRenderer(
-      device: device,
-      library: library,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.huashan] = huashan
-    } else {
+    deferredBuilders[.huashan] = {
+      if let huashan = try? HuashanSplatRenderer(
+        device: device,
+        library: library,
+        maxViewCount: maxViewCount
+      ) {
+        return huashan
+      }
       print("[Renderer] Huashan 3DGS pattern unavailable (missing huashan.splat?).")
+      return nil
     }
 
     if let glassBox = try? GlassBoxRenderer(
@@ -1152,7 +1218,7 @@ class Renderer {
       print("[Renderer] OrbitalSphereCube pattern unavailable.")
     }
 
-    return controllers
+    return (controllers: controllers, deferredBuilders: deferredBuilders)
   }
 
   private static func addTetris3D(

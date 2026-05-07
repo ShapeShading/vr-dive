@@ -21,14 +21,14 @@ struct HuashanPerEyeUniforms {
 }
 
 // ─── Per-splat precomputed data: written by compute shader, read by vertex shader
-// 5 × float4 = 80 bytes, fully float4-aligned
+// Keep clip positions in float for stable reprojection, pack axes/color into half.
 struct HuashanSplatPrecomp {
   var clipPos0: SIMD4<Float>  // clip position eye 0
   var clipPos1: SIMD4<Float>  // clip position eye 1
-  var axesU: SIMD4<Float>  // xy = NDC axis-U eye0,  zw = NDC axis-U eye1
-  var axesV: SIMD4<Float>  // xy = NDC axis-V eye0,  zw = NDC axis-V eye1
-  var color: SIMD4<Float>  // pre-multiplied RGBA (linear)
-}  // stride = 80 ✓
+  var axesU: SIMD4<Float16>  // xy = NDC axis-U eye0,  zw = NDC axis-U eye1
+  var axesV: SIMD4<Float16>  // xy = NDC axis-V eye0,  zw = NDC axis-V eye1
+  var color: SIMD4<Float16>  // pre-multiplied RGBA (linear)
+}  // stride = 56 ✓
 
 // ─── Global uniforms ─────────────────────────────────────────────────────────
 struct HuashanUniforms {

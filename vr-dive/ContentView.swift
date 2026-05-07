@@ -107,6 +107,34 @@ struct ControlButtonsView: View {
         .buttonStyle(.bordered)
       }
 
+      if model.selectedPattern == .huashan {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("华山点比例")
+            .font(.headline)
+
+          HStack(spacing: 14) {
+            Button(action: {
+              model.adjustHuashanSampleRatio(by: -0.05)
+            }) {
+              Label("减少 5%", systemImage: "minus")
+            }
+            .buttonStyle(.bordered)
+
+            Text(model.huashanSampleRatioPercentText)
+              .font(.system(.body, design: .monospaced).weight(.semibold))
+              .frame(minWidth: 52)
+
+            Button(action: {
+              model.adjustHuashanSampleRatio(by: 0.05)
+            }) {
+              Label("增加 5%", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+
       if model.selectedPattern.supportsOriginCellInspection {
         Toggle(isOn: $model.originCellInspectionEnabled) {
           VStack(alignment: .leading, spacing: 2) {

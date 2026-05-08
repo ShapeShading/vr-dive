@@ -124,9 +124,9 @@ private func completeEmptySubmissionIfPossible(
 
 ## 关键文件位置
 
-| 文件 | 关键位置 | 说明 |
-|------|---------|------|
-| `Renderer/RendererTypes.swift` | `applyViewConfiguration` | **必须**保留 else 分支调用 `setVertexAmplificationCount(1, nil)` |
-| `Renderer/Renderer.swift` | `encodeDrawable` clearColor | 硬编码黑色，不得改为读取 `preferredClearColor` |
-| `Renderer/Renderer.swift` | `makeViewRenderingData` | 用 `sliceIndex` 不是 `textureIndex` |
-| `Renderer/Renderer.swift` | `completeEmptySubmissionIfPossible` | 必须传入 drawables 并 encodePresent |
+| 文件                           | 关键位置                            | 说明                                                             |
+| ------------------------------ | ----------------------------------- | ---------------------------------------------------------------- |
+| `Renderer/RendererTypes.swift` | `applyViewConfiguration`            | **必须**保留 else 分支调用 `setVertexAmplificationCount(1, nil)` |
+| `Renderer/Renderer.swift`      | `encodeDrawable` clearColor         | 硬编码黑色，不得改为读取 `preferredClearColor`                   |
+| `Renderer/Renderer.swift`      | `makeViewRenderingData`             | 用 `sliceIndex` 不是 `textureIndex`                              |
+| `Renderer/Renderer.swift`      | `completeEmptySubmissionIfPossible` | 必须传入 drawables 并 encodePresent                              |

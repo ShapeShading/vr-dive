@@ -38,8 +38,8 @@ final class LaceTunnelRenderer: VisualPatternController {
     let geo = LaceTunnelRenderer.makeBox(
       device: device, localHalfExtents: SIMD3<Float>(1, 1, 1) * 1.02)
     vertexBuffer = geo.vertexBuffer
-    indexBuffer  = geo.indexBuffer
-    indexCount   = geo.indexCount
+    indexBuffer = geo.indexBuffer
+    indexCount = geo.indexCount
 
     pipelineState = try LaceTunnelRenderer.makePipelineState(
       device: device, library: library, maxViewCount: self.maxViewCount)
@@ -116,12 +116,12 @@ extension LaceTunnelRenderer {
     typealias V = MeshVertex
     let (x, y, z) = (e.x, e.y, e.z)
     let faces: [(positions: [SIMD3<Float>], normal: SIMD3<Float>)] = [
-      ([[-x, -y,  z], [ x, -y,  z], [ x,  y,  z], [-x,  y,  z]], [ 0,  0,  1]),  // +Z
-      ([[ x, -y, -z], [-x, -y, -z], [-x,  y, -z], [ x,  y, -z]], [ 0,  0, -1]),  // -Z
-      ([[ x, -y,  z], [ x, -y, -z], [ x,  y, -z], [ x,  y,  z]], [ 1,  0,  0]),  // +X
-      ([[-x, -y, -z], [-x, -y,  z], [-x,  y,  z], [-x,  y, -z]], [-1,  0,  0]),  // -X
-      ([[-x,  y,  z], [ x,  y,  z], [ x,  y, -z], [-x,  y, -z]], [ 0,  1,  0]),  // +Y
-      ([[-x, -y, -z], [ x, -y, -z], [ x, -y,  z], [-x, -y,  z]], [ 0, -1,  0]),  // -Y
+      ([[-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]], [0, 0, 1]),  // +Z
+      ([[x, -y, -z], [-x, -y, -z], [-x, y, -z], [x, y, -z]], [0, 0, -1]),  // -Z
+      ([[x, -y, z], [x, -y, -z], [x, y, -z], [x, y, z]], [1, 0, 0]),  // +X
+      ([[-x, -y, -z], [-x, -y, z], [-x, y, z], [-x, y, -z]], [-1, 0, 0]),  // -X
+      ([[-x, y, z], [x, y, z], [x, y, -z], [-x, y, -z]], [0, 1, 0]),  // +Y
+      ([[-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z]], [0, -1, 0]),  // -Y
     ]
     var vertices: [V] = []
     vertices.reserveCapacity(24)
@@ -145,17 +145,17 @@ extension LaceTunnelRenderer {
     device: MTLDevice, library: MTLLibrary, maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let desc = MTLRenderPipelineDescriptor()
-    desc.vertexFunction   = library.makeFunction(name: "laceTunnelVertex")
+    desc.vertexFunction = library.makeFunction(name: "laceTunnelVertex")
     desc.fragmentFunction = library.makeFunction(name: "laceTunnelFragment")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
-    desc.depthAttachmentPixelFormat      = .depth32Float
+    desc.depthAttachmentPixelFormat = .depth32Float
 
     let vd = MTLVertexDescriptor()
-    vd.attributes[0].format    = .float3
-    vd.attributes[0].offset    = 0
+    vd.attributes[0].format = .float3
+    vd.attributes[0].offset = 0
     vd.attributes[0].bufferIndex = 0
-    vd.attributes[1].format    = .float3
-    vd.attributes[1].offset    = MemoryLayout<SIMD3<Float>>.stride
+    vd.attributes[1].format = .float3
+    vd.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
     vd.attributes[1].bufferIndex = 0
     vd.layouts[0].stride = MemoryLayout<MeshVertex>.stride
     desc.vertexDescriptor = vd
@@ -167,7 +167,7 @@ extension LaceTunnelRenderer {
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let desc = MTLDepthStencilDescriptor()
     desc.depthCompareFunction = .greater  // reverse-Z: near=1, far=0
-    desc.isDepthWriteEnabled  = true
+    desc.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: desc)!
   }
 }

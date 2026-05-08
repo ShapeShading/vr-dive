@@ -62,6 +62,29 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case torusKnotInR4
   case threeDFire
   case bubbleRings
+  case ether
+  case fiberSpiral
+  case saturdayTorus
+  case tesseractCornerFractal
+  case hexwaves
+  case milosRose
+  case recursiveLotus
+  case blueFlower
+  case flowerTest
+  case floreus
+  case sineBud
+  case creationSGusandr
+  case saturdayWeirdness
+  case soulstone
+  case boxOfStars
+  case mirrorLooping
+  case greatDodecaheadroll
+  case playingMarble
+  case novaMarble
+  case dirtBall
+  case fractal49Gaz
+  case starryPlanes
+  case fractal77Gaz
 
   var id: String { rawValue }
 
@@ -198,6 +221,52 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "3D Fire"
     case .bubbleRings:
       return "Bubble rings"
+    case .ether:
+      return "Ether"
+    case .fiberSpiral:
+      return "Fiber Spiral"
+    case .saturdayTorus:
+      return "Saturday Torus"
+    case .tesseractCornerFractal:
+      return "Tesseract Corner Fractal"
+    case .hexwaves:
+      return "hexwaves"
+    case .milosRose:
+      return "Milo's Rose"
+    case .recursiveLotus:
+      return "Recursive Lotus"
+    case .blueFlower:
+      return "Blue Flower"
+    case .flowerTest:
+      return "Flower Test"
+    case .floreus:
+      return "Floreus"
+    case .sineBud:
+      return "Sine bud"
+    case .creationSGusandr:
+      return "Creation S gusandr"
+    case .saturdayWeirdness:
+      return "Saturday weirdness"
+    case .soulstone:
+      return "Soulstone"
+    case .boxOfStars:
+      return "Box of Stars"
+    case .mirrorLooping:
+      return "Mirror Looping"
+    case .greatDodecaheadroll:
+      return "Great Dodecaheadroll"
+    case .playingMarble:
+      return "Playing marble"
+    case .novaMarble:
+      return "Nova Marble"
+    case .dirtBall:
+      return "Dirt Ball"
+    case .fractal49Gaz:
+      return "Fractal 49_gaz"
+    case .starryPlanes:
+      return "Starry planes"
+    case .fractal77Gaz:
+      return "Fractal 77_gaz"
     }
   }
 }
@@ -240,7 +309,7 @@ final class PatternCoordinator {
   }
 
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .bubbleRings
+  private var _current: VisualPatternKind = .fractal77Gaz
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

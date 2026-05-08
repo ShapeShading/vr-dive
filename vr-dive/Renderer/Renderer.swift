@@ -1273,6 +1273,259 @@ class Renderer {
       print("[Renderer] Bubble rings pattern unavailable.")
     }
 
+    if let ether = try? EtherRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.ether] = ether
+      print("[Renderer] Ether pattern added.")
+    } else {
+      print("[Renderer] Ether pattern unavailable.")
+    }
+
+    if let fiberSpiral = try? FiberSpiralRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.fiberSpiral] = fiberSpiral
+      print("[Renderer] Fiber Spiral pattern added.")
+    } else {
+      print("[Renderer] Fiber Spiral pattern unavailable.")
+    }
+
+    if let saturdayTorus = try? SaturdayTorusRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.saturdayTorus] = saturdayTorus
+      print("[Renderer] Saturday Torus pattern added.")
+    } else {
+      print("[Renderer] Saturday Torus pattern unavailable.")
+    }
+
+    if let tesseractCornerFractal = try? TesseractCornerFractalRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.tesseractCornerFractal] = tesseractCornerFractal
+      print("[Renderer] Tesseract Corner Fractal pattern added.")
+    } else {
+      print("[Renderer] Tesseract Corner Fractal pattern unavailable.")
+    }
+
+    if let hexwaves = try? HexwavesRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.hexwaves] = hexwaves
+      print("[Renderer] hexwaves pattern added.")
+    } else {
+      print("[Renderer] hexwaves pattern unavailable.")
+    }
+
+    if let milosRose = try? MilosRoseRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.milosRose] = milosRose
+      print("[Renderer] Milo's Rose pattern added.")
+    } else {
+      print("[Renderer] Milo's Rose pattern unavailable.")
+    }
+
+    if let recursiveLotus = try? RecursiveLotusRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.recursiveLotus] = recursiveLotus
+      print("[Renderer] Recursive Lotus pattern added.")
+    } else {
+      print("[Renderer] Recursive Lotus pattern unavailable.")
+    }
+
+    if let blueFlower = try? BlueFlowerRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.blueFlower] = blueFlower
+      print("[Renderer] Blue Flower pattern added.")
+    } else {
+      print("[Renderer] Blue Flower pattern unavailable.")
+    }
+
+    if let flowerTest = try? FlowerTestRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.flowerTest] = flowerTest
+      print("[Renderer] Flower Test pattern added.")
+    } else {
+      print("[Renderer] Flower Test pattern unavailable.")
+    }
+
+    if let floreus = try? FloreusRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.floreus] = floreus
+      print("[Renderer] Floreus pattern added.")
+    } else {
+      print("[Renderer] Floreus pattern unavailable.")
+    }
+
+    if let sineBud = try? SineBudRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.sineBud] = sineBud
+      print("[Renderer] Sine bud pattern added.")
+    } else {
+      print("[Renderer] Sine bud pattern unavailable.")
+    }
+
+    if let creationSGusandr = try? CreationSGusandrRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.creationSGusandr] = creationSGusandr
+      print("[Renderer] Creation S gusandr pattern added.")
+    } else {
+      print("[Renderer] Creation S gusandr pattern unavailable.")
+    }
+
+    if let saturdayWeirdness = try? SaturdayWeirdnessRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.saturdayWeirdness] = saturdayWeirdness
+      print("[Renderer] Saturday weirdness pattern added.")
+    } else {
+      print("[Renderer] Saturday weirdness pattern unavailable.")
+    }
+
+    if let soulstone = try? SoulstoneRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.soulstone] = soulstone
+      print("[Renderer] Soulstone pattern added.")
+    } else {
+      print("[Renderer] Soulstone pattern unavailable.")
+    }
+
+    if let boxOfStars = try? BoxOfStarsRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.boxOfStars] = boxOfStars
+      print("[Renderer] Box of Stars pattern added.")
+    } else {
+      print("[Renderer] Box of Stars pattern unavailable.")
+    }
+
+    if let mirrorLooping = try? MirrorLoopingRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.mirrorLooping] = mirrorLooping
+      print("[Renderer] Mirror Looping pattern added.")
+    } else {
+      print("[Renderer] Mirror Looping pattern unavailable.")
+    }
+
+    if let greatDodecaheadroll = try? GreatDodecaheadrollRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.greatDodecaheadroll] = greatDodecaheadroll
+      print("[Renderer] Great Dodecaheadroll pattern added.")
+    } else {
+      print("[Renderer] Great Dodecaheadroll pattern unavailable.")
+    }
+
+    if let playingMarble = try? PlayingMarbleRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.playingMarble] = playingMarble
+      print("[Renderer] Playing marble pattern added.")
+    } else {
+      print("[Renderer] Playing marble pattern unavailable.")
+    }
+
+    if let novaMarble = try? NovaMarbleRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.novaMarble] = novaMarble
+      print("[Renderer] Nova Marble pattern added.")
+    } else {
+      print("[Renderer] Nova Marble pattern unavailable.")
+    }
+
+    if let dirtBall = try? DirtBallRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.dirtBall] = dirtBall
+      print("[Renderer] Dirt Ball pattern added.")
+    } else {
+      print("[Renderer] Dirt Ball pattern unavailable.")
+    }
+
+    if let fractal49Gaz = try? Fractal49GazRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.fractal49Gaz] = fractal49Gaz
+      print("[Renderer] Fractal 49_gaz pattern added.")
+    } else {
+      print("[Renderer] Fractal 49_gaz pattern unavailable.")
+    }
+
+    if let starryPlanes = try? StarryPlanesRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.starryPlanes] = starryPlanes
+      print("[Renderer] Starry planes pattern added.")
+    } else {
+      print("[Renderer] Starry planes pattern unavailable.")
+    }
+
+    if let fractal77Gaz = try? Fractal77GazRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.fractal77Gaz] = fractal77Gaz
+      print("[Renderer] Fractal 77_gaz pattern added.")
+    } else {
+      print("[Renderer] Fractal 77_gaz pattern unavailable.")
+    }
+
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(
       device: device,
       library: library,

@@ -1207,6 +1207,72 @@ class Renderer {
       print("[Renderer] Lanterns pattern unavailable.")
     }
 
+    if let laceTunnel = try? LaceTunnelRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.laceTunnel] = laceTunnel
+      print("[Renderer] Lace Tunnel pattern added.")
+    } else {
+      print("[Renderer] Lace Tunnel pattern unavailable.")
+    }
+
+    if let torusFan = try? TorusFanRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.torusFan] = torusFan
+      print("[Renderer] Torus fan pattern added.")
+    } else {
+      print("[Renderer] Torus fan pattern unavailable.")
+    }
+
+    if let apollonianElevator = try? ApollonianElevatorRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.apollonianElevator] = apollonianElevator
+      print("[Renderer] Apollonian Elevator pattern added.")
+    } else {
+      print("[Renderer] Apollonian Elevator pattern unavailable.")
+    }
+
+    if let torusKnotInR4 = try? TorusKnotInR4Renderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.torusKnotInR4] = torusKnotInR4
+      print("[Renderer] Torus Knot in R4 pattern added.")
+    } else {
+      print("[Renderer] Torus Knot in R4 pattern unavailable.")
+    }
+
+    if let threeDFire = try? ThreeDFireRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.threeDFire] = threeDFire
+      print("[Renderer] 3D Fire pattern added.")
+    } else {
+      print("[Renderer] 3D Fire pattern unavailable.")
+    }
+
+    if let bubbleRings = try? BubbleRingsRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.bubbleRings] = bubbleRings
+      print("[Renderer] Bubble rings pattern added.")
+    } else {
+      print("[Renderer] Bubble rings pattern unavailable.")
+    }
+
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(
       device: device,
       library: library,

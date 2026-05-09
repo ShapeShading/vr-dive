@@ -30,6 +30,7 @@ struct Fractal77GazVertexOut {
 struct Fractal77Accum {
     float3 color;
     float energy;
+    float feature;
 };
 
 static constant float3 F77_BOX_HALF = float3(1.0f);
@@ -81,6 +82,7 @@ static Fractal77Accum traceFractal77(float3 ro, float3 rd, float time) {
     Fractal77Accum accum;
     accum.color = float3(0.0f);
     accum.energy = 0.0f;
+    accum.feature = 0.0f;
 
     float g = 0.0f;
     for (int stepIndex = 0; stepIndex < 99; ++stepIndex) {
@@ -100,10 +102,13 @@ static Fractal77Accum traceFractal77(float3 ro, float3 rd, float time) {
         }
 
         e = length(p.xz) / max(s, 1.0e-4f);
-        float3 tint = mix(float3(0.09f, 0.12f, 0.18f), hue77(log(max(s, 1.0e-4f))), 0.7f);
-        float falloff = exp(-iteration * iteration * e);
-        accum.color += tint * 0.04f * falloff;
-        accum.energy += min(0.03f, 0.008f / (0.01f + e * e * 14.0f));
+        float3 tint = mix(float3(0.04f, 0.055f, 0.09f), hue77(log(max(s, 1.0e-4f))), 0.88f);
+        float ridge = exp(-34.0f * e);
+        float body = exp(-7.5f * e);
+        float depthFade = exp(-0.035f * iteration);
+        accum.color += tint * depthFade * (0.018f * body + 0.11f * ridge);
+        accum.energy += ridge * depthFade * 0.0022f;
+        accum.feature += ridge * depthFade * 0.09f;
 
         g += e;
         if (g > 18.0f) {
@@ -111,7 +116,8 @@ static Fractal77Accum traceFractal77(float3 ro, float3 rd, float time) {
         }
     }
 
-    accum.color = pow(f77Tonemap(clamp(accum.color, 0.0f, 4.0f)), float3(3.2f));
+    accum.color = pow(f77Tonemap(clamp(accum.color * 1.45f, 0.0f, 6.0f)), float3(1.2f));
+    accum.feature = clamp(accum.feature, 0.0f, 1.0f);
     return accum;
 }
 
@@ -169,14 +175,15 @@ fragment float4 fractal77GazFragment(
         float3(0.015f, 0.02f, 0.04f),
         float3(0.16f, 0.08f, 0.23f),
         horizon);
-    background += hue77(uniforms.time * 0.1f + axisFacing * 0.3f) * (0.025f + 0.08f * axisFacing);
-    background += float3(0.28f, 0.34f, 0.5f) * accum.energy * 0.012f;
+    background += hue77(uniforms.time * 0.1f + axisFacing * 0.3f) * (0.008f + 0.02f * axisFacing);
 
     float2 faceUV = f77FaceUV(surfacePos) * 2.0f - 1.0f;
     float vignette = 1.0f - 0.16f * dot(faceUV, faceUV);
+    float patternPresence = accum.feature;
 
-    float3 color = background * 0.35f + accum.color;
-    color += accum.energy * float3(0.55f, 0.78f, 1.05f) * 0.004f;
+    float3 pattern = accum.color * (1.08f + 0.45f * patternPresence);
+    float3 color = background * (0.06f + 0.04f * (1.0f - patternPresence)) + pattern;
+    color += accum.energy * float3(0.55f, 0.78f, 1.05f) * 0.001f;
     color *= vignette;
     color = f77Tonemap(max(color, 0.0f));
     return float4(color, 1.0f);

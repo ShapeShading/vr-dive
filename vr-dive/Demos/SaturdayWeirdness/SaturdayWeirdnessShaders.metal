@@ -37,7 +37,7 @@ struct SaturdayWeirdnessVertexOut {
 struct SWHit {
     float distance;
     float sdf;
-    float edge;
+    float feature;
     float3 albedo;
     bool hit;
 };
@@ -45,7 +45,8 @@ struct SWHit {
 static constant float3 SW_BOX_HALF = float3(1.0f);
 static constant float SW_MAX_DIST = 28.0f;
 static constant float SW_HIT_EPSILON = 0.0015f;
-static constant int SW_MAX_STEPS = 180;
+static constant int SW_MAX_STEPS = 128;
+static constant int SW_VOLUME_STEPS = 20;
 
 vertex SaturdayWeirdnessVertexOut saturdayWeirdnessVertex(
     ushort amplificationID [[amplification_id]],
@@ -76,12 +77,43 @@ static float swRoundBox(float3 p, float3 b, float r) {
     return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f) - r;
 }
 
+static float3 swWarp(float3 p, float time) {
+    p *= 1.45f;
+    p.xz = swRotate2D(p.xz, time * 0.17f);
+    p.yz = swRotate2D(p.yz, 0.52f + sin(time * 0.28f) * 0.16f);
+    p.xy = swRotate2D(p.xy, 0.22f * sin(time * 0.19f));
+    return p;
+}
+
 static float swGyroid(float3 p) {
     return dot(sin(p), cos(p.zxy));
 }
 
 static float3 swPalette(float t) {
-    return 0.45f + 0.4f * cos(6.2831853f * (float3(0.12f, 0.27f, 0.43f) + t * float3(1.0f, 0.8f, 0.6f)));
+    float u = 0.5f + 0.5f * sin(t);
+    float v = 0.5f + 0.5f * sin(t * 0.72f + 1.2f);
+    float w = 0.5f + 0.5f * cos(t * 1.1f - 0.4f);
+    float3 deep = float3(0.04f, 0.08f, 0.28f);
+    float3 blue = float3(0.14f, 0.42f, 0.92f);
+    float3 cyan = float3(0.64f, 0.92f, 1.0f);
+    float3 magenta = float3(0.86f, 0.2f, 0.96f);
+    return mix(mix(deep, blue, u), mix(magenta, cyan, w), v);
+}
+
+static float swGeometry(float3 p, float time) {
+    float3 q = swWarp(p, time);
+    return swRoundBox(q, float3(0.72f), 0.24f);
+}
+
+static float swFlow(float3 p, float time) {
+    float3 q = swWarp(p, time);
+    float gyroid = swGyroid(q * 2.55f + time * 0.45f);
+    float swirl = atan2(q.y, q.x);
+    float ribbons = sin(length(q.xy) * 8.6f - swirl * 4.2f + q.z * 3.3f - time * 0.8f);
+    float bands = sin(q.x * 3.1f - q.z * 4.0f + gyroid * 1.4f)
+      + 0.55f * sin(q.y * 4.9f + time * 0.55f)
+      + 0.35f * cos(q.z * 4.4f - q.x * 1.2f);
+    return ribbons + bands * 0.65f + gyroid * 0.45f;
 }
 
 static float2 swBoxIntersect(float3 ro, float3 rd, float3 halfExt) {
@@ -110,24 +142,14 @@ static float2 swFaceUV(float3 p) {
 
 static SWHit swMap(float3 p, float time) {
     SWHit hit;
-
-    float3 q = p * 1.55f;
-    q.xz = swRotate2D(q.xz, time * 0.2f);
-    q.yz = swRotate2D(q.yz, 0.65f + sin(time * 0.33f) * 0.25f);
-
-    float core = swRoundBox(q, float3(0.7f), 0.28f);
-    float gyroid = swGyroid(q * 3.1f + time * 0.7f);
-    float grooves = sin(q.x * 7.0f) + sin(q.y * 7.6f) + sin(q.z * 6.8f);
-    float detail = (abs(gyroid) - 0.24f) * 0.045f + grooves * 0.012f;
-    float sdf = core + detail;
-
-    float edgeSignal = abs(detail) + abs(gyroid) * 0.08f;
-    float colorPhase = 0.14f * q.y + 0.1f * q.z + sin(time * 0.45f) * 0.2f;
+    float sdf = swGeometry(p, time);
+    float flow = swFlow(p, time);
+    float feature = 0.5f + 0.5f * sin(flow * 1.8f);
 
     hit.distance = 0.0f;
     hit.sdf = sdf;
-    hit.edge = edgeSignal;
-    hit.albedo = swPalette(colorPhase);
+    hit.feature = feature;
+    hit.albedo = swPalette(flow);
     hit.hit = false;
     return hit;
 }
@@ -135,9 +157,9 @@ static SWHit swMap(float3 p, float time) {
 static float3 swNormal(float3 p, float time) {
     float2 e = float2(0.0025f, 0.0f);
     return normalize(float3(
-        swMap(p + e.xyy, time).sdf - swMap(p - e.xyy, time).sdf,
-        swMap(p + e.yxy, time).sdf - swMap(p - e.yxy, time).sdf,
-        swMap(p + e.yyx, time).sdf - swMap(p - e.yyx, time).sdf));
+        swGeometry(p + e.xyy, time) - swGeometry(p - e.xyy, time),
+        swGeometry(p + e.yxy, time) - swGeometry(p - e.yxy, time),
+        swGeometry(p + e.yyx, time) - swGeometry(p - e.yyx, time)));
 }
 
 static float3 swEnvironment(float3 dir) {
@@ -145,8 +167,34 @@ static float3 swEnvironment(float3 dir) {
     float skyMix = clamp(dir.y * 0.5f + 0.5f, 0.0f, 1.0f);
     float horizon = pow(max(1.0f - abs(dir.y), 0.0f), 5.0f);
     float sun = pow(max(dot(dir, normalize(float3(-0.45f, 0.4f, -0.8f))), 0.0f), 48.0f);
-    float3 sky = mix(float3(0.015f, 0.02f, 0.035f), float3(0.16f, 0.2f, 0.28f), skyMix);
-    return sky + float3(0.95f, 0.55f, 0.2f) * horizon * 0.35f + float3(1.0f, 0.92f, 0.74f) * sun;
+    float3 sky = mix(float3(0.01f, 0.025f, 0.06f), float3(0.08f, 0.18f, 0.34f), skyMix);
+    return sky + float3(0.16f, 0.34f, 0.62f) * horizon * 0.28f + float3(0.92f, 0.97f, 1.0f) * sun * 0.7f;
+}
+
+static float3 swInnerColor(float3 p, float3 n, float time) {
+    float3 upRef = abs(n.y) > 0.95f ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 1.0f, 0.0f);
+    float3 tangent = normalize(cross(upRef, n));
+    float3 bitangent = cross(n, tangent);
+
+    float3 col = float3(0.0f);
+    for (int i = 0; i < SW_VOLUME_STEPS; ++i) {
+        float depth = 0.03f + 0.05f * float(i);
+        float lateral = sin(time * 0.35f + depth * 11.0f + dot(p, tangent) * 4.0f) * 0.012f;
+        float swirl = cos(time * 0.28f + depth * 9.0f + dot(p, bitangent) * 4.5f) * 0.012f;
+        float3 pos = p - n * depth + tangent * lateral + bitangent * swirl;
+
+        float sdf = swGeometry(pos, time);
+        float shell = exp(-24.0f * abs(sdf));
+        float flow = swFlow(pos, time);
+        float field = 0.5f + 0.5f * sin(flow * 2.1f + depth * 8.0f);
+        float density = shell * (0.3f + 0.7f * field);
+        float fade = exp(-0.22f * float(i));
+        float3 tint = swPalette(flow + depth * 0.6f);
+
+        col += tint * density * fade * 0.16f;
+    }
+
+    return col;
 }
 
 fragment float4 saturdayWeirdnessFragment(
@@ -181,7 +229,7 @@ fragment float4 saturdayWeirdnessFragment(
         if (abs(state.sdf) < SW_HIT_EPSILON || travel > SW_MAX_DIST) {
             break;
         }
-        travel += clamp(abs(state.sdf), 0.008f, 0.14f);
+        travel += clamp(abs(state.sdf), 0.01f, 0.12f);
     }
 
     if (travel > SW_MAX_DIST || abs(state.sdf) >= 0.02f) {
@@ -195,18 +243,18 @@ fragment float4 saturdayWeirdnessFragment(
     float3 n = swNormal(p, uniforms.time);
     float3 reflected = reflect(rd, n);
 
-    float diffuse = clamp(dot(n, normalize(float3(-0.4f, 0.7f, -0.6f))), 0.0f, 1.0f);
+    float diffuse = clamp(dot(n, normalize(float3(-0.32f, 0.76f, -0.56f))), 0.0f, 1.0f);
     float fresnel = pow(max(1.0f - abs(dot(n, -rd)), 0.0f), 4.0f);
-    float edgeWidth = max(fwidth(state.edge), 0.01f);
-    float edgeMask = 1.0f - smoothstep(0.06f - edgeWidth, 0.06f + edgeWidth, state.edge);
+    float featureWidth = 0.06f;
+    float sheenMask = smoothstep(0.54f - featureWidth, 0.82f + featureWidth, state.feature);
 
     float3 env = swEnvironment(reflected);
-    float3 color = state.albedo * (0.2f + 0.8f * diffuse);
-    color = mix(color, state.albedo * 1.6f + env * 0.25f, edgeMask);
-    color += env * fresnel * 0.45f;
-
-    float glow = exp(-0.08f * travel) * (0.25f + 0.75f * edgeMask);
-    color += swPalette(0.18f * p.y - 0.1f * p.z + uniforms.time * 0.08f) * glow * 0.22f;
+    float3 inner = swInnerColor(p - n * 0.02f, n, uniforms.time);
+    float3 color = state.albedo * (0.3f + 0.7f * diffuse);
+    color += inner;
+    color = mix(color, state.albedo * 1.18f + inner * 0.7f, sheenMask * 0.55f);
+    color += env * (0.08f + 0.14f * fresnel);
+    color += float3(0.85f, 0.95f, 1.0f) * sheenMask * 0.08f;
 
     return float4(clamp(color, 0.0f, 1.0f), 1.0f);
 }

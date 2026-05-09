@@ -234,40 +234,49 @@ static float3 saturdayTorusColor(float3 ro, float3 rd, float2 q, float time) {
     }
 
     float3 tpos = ro + rd * td;
-    float3 tnor = -torusNormal(tpos, ST_TORUS);
-    float3 tref = reflect(rd, tnor);
+    float3 outwardNormal = torusNormal(tpos, ST_TORUS);
+    // Detect whether we hit the inner wall (camera is inside the tube).
+    bool hitFromInside = dot(outwardNormal, rd) > 0.0f;
+    // viewNormal always faces against the incoming ray direction.
+    float3 viewNormal = hitFromInside ? outwardNormal : -outwardNormal;
+    float3 tref = reflect(rd, viewNormal);
 
-    float3 lp1 = ro;
-    lp1.xy = stRotate(lp1.xy, 0.85f + 0.2f * sin(time * 0.5f));
-    lp1.xz = stRotate(lp1.xz, -0.5f + 0.15f * cos(time * 0.4f));
+    float3 lp1 = float3(0.0f, 0.75f, -0.2f);
+    lp1.xy = stRotate(lp1.xy, 0.85f);
+    lp1.xz = stRotate(lp1.xz, -0.5f);
 
     float3 ldif1 = lp1 - tpos;
     float ldd1 = max(dot(ldif1, ldif1), 1.0e-4f);
     float ldl1 = sqrt(ldd1);
     float3 ld1 = ldif1 / ldl1;
-    float3 sro = tpos + 0.05f * tnor;
+    float3 sro = tpos + 0.05f * viewNormal;
     float sd = rayTorus(sro, ld1, ST_TORUS);
 
-    float dif1 = max(dot(tnor, ld1), 0.0f);
+    float dif1 = max(dot(viewNormal, ld1), 0.0f);
     float spe1 = pow(max(dot(tref, ld1), 0.0f), 10.0f);
     float r = length(tpos.xy);
     float denom = max(r + 0.5f * abs(tpos.z), 1.0e-3f);
     float a = atan2(tpos.y, tpos.x) - ST_PI * tpos.z / denom - ST_TAU * time / 45.0f;
-    float s = mix(0.05f, 0.5f, tanhApprox(2.0f * abs(td - 0.75f)));
+    float phase = 9.0f * a;
+    float s = mix(0.08f, 0.32f, tanhApprox(2.0f * abs(td - 0.75f)));
+    float aa = max(fwidth(phase) * 0.75f, 0.035f);
+    float stripeWidth = max(s, aa);
     float3 bcol0 = float3(0.3f);
     float3 bcol1 = float3(0.025f);
-    float stripe = smoothstep(-s, s, sin(9.0f * a));
+    float stripe = smoothstep(-stripeWidth, stripeWidth, sin(phase));
     float3 tcol = mix(bcol0, bcol1, stripe);
 
-    float fresnel = sqrt(abs(dot(rd, tnor)));
+    float fresnel = sqrt(abs(dot(rd, viewNormal)));
     float3 col = background * 0.2f;
     col += tcol * mix(0.2f, 1.0f, dif1 / ldd1) + 0.25f * spe1;
     col *= fresnel;
 
-    if (sd > 0.0f && sd < ldl1) {
-        float3 spos = sro + ld1 * sd;
-        float3 snor = -torusNormal(spos, ST_TORUS);
-        col *= mix(1.0f, 0.0f, pow(abs(dot(ld1, snor)), 3.0f * tanhApprox(sd)));
+    // The original self-shadow path relies on a second torus hit and is stable
+    // for the fixed 2D camera, but in VR close-up views it produces moire-like
+    // speckle and interior cracks. Use a softer distance-only occlusion instead.
+    if (!hitFromInside && dif1 > 0.0f && sd > 0.08f && sd < ldl1) {
+        float occlusion = 1.0f - smoothstep(0.08f, 0.36f, sd);
+        col *= mix(1.0f, 0.58f, occlusion);
     }
 
     return max(col, 0.0f);

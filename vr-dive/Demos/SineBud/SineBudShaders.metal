@@ -38,9 +38,14 @@ static constant float SB_PI = 3.1416f;
 static constant float SB_PI_2 = 1.5708f;
 static constant float3 SB_BOX_HALF = float3(1.0f);
 static constant float SB_TRACE_EPSILON = 0.0015f;
-static constant int SB_STEPS = 200;
-static constant float SB_MAX_DIST = 100.0f;
-static constant float SB_SCENE_SCALE = 8.0f;
+static constant float SB_HIT_EPSILON = 0.0025f;
+static constant int SB_STEPS = 280;
+static constant float SB_MAX_DIST = 28.0f;
+static constant float SB_SCENE_SCALE = 2.8f;
+
+static float3 sbPalette(float t) {
+    return 0.55f + 0.45f * cos(6.2831853f * (float3(0.02f, 0.18f, 0.42f) + t * float3(0.9f, 0.7f, 0.55f)));
+}
 
 vertex SineBudVertexOut sineBudVertex(
     ushort amplificationID [[amplification_id]],
@@ -167,20 +172,30 @@ fragment float4 sineBudFragment(
         k.z = min(sbWave(p, 1u, 2u), sbWave(p, 2u, 1u));
 
         s = min(s, min(k.z, min(k.x, k.y)));
-        if (s < 0.001f || d > SB_MAX_DIST) {
-            hitBud = s < 0.001f;
+
+        float axisMin = min(axisSphereX, min(axisSphereY, axisSphereZ));
+        float lineGlow = exp(-24.0f * max(s, 0.0f));
+        float nodeGlow = exp(-30.0f * max(axisMin, 0.0f));
+        float3 tint = sbPalette(0.07f * d + 0.35f * (k.x + k.y + k.z));
+        c += tint * (0.014f * lineGlow + 0.011f * nodeGlow);
+
+        if (s < SB_HIT_EPSILON || d > SB_MAX_DIST) {
+            hitBud = s < SB_HIT_EPSILON;
             break;
         }
-        d += s * 0.3f;
+        d += clamp(s * 0.18f, 0.004f, 0.08f);
     }
 
     if (hitBud) {
-        c += max(cos(d * SB_PI * 2.0f) - s * sqrt(max(d, 0.0f)) - k, 0.0f);
+        float3 surface = max(cos(d * SB_PI * 2.0f) - s * sqrt(max(d, 0.0f)) - k, 0.0f);
+        c += surface;
+        c += surface.brg * 0.8f;
+        c += surface * surface * 0.6f;
     }
-    float3 color = hitBud ? (c + c.brg + c * c) : float3(0.0f);
+    float3 color = 1.0f - exp(-2.0f * c);
 
     float2 q = sbFaceUV(hit);
-    float vignette = 1.0f - 0.35f * dot(q * 2.0f - 1.0f, q * 2.0f - 1.0f);
+    float vignette = 1.0f - 0.18f * dot(q * 2.0f - 1.0f, q * 2.0f - 1.0f);
     color *= vignette;
     return float4(clamp(color, 0.0f, 1.0f), 1.0f);
 }

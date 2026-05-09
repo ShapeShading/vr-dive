@@ -151,6 +151,12 @@ static float2 outerBoxIntersect(float3 ro, float3 rd, float3 halfExt) {
         min(min(tMax.x, tMax.y), tMax.z));
 }
 
+static float3 bosToOriginalScene(float3 v) {
+    // The source shader is z-up. Rotate the reconstructed VR scene so the
+    // apparent floor sits below the viewer and the glass box stands upright.
+    return float3(v.x, -v.z, v.y);
+}
+
 static float3 bgcol(float3 rd) {
     return mix(float3(0.01f), float3(0.336f, 0.458f, 0.668f),
                1.0f - pow(abs(rd.z + 0.25f), 1.3f));
@@ -266,9 +272,9 @@ fragment float4 boxOfStarsFragment(
     }
 
     float tStart = insideOuter ? 0.0f : max(tOuter.x, 0.0f);
-    const float sceneScale = 4.0f;
-    float3 roScene = (eye + rdOuter * (tStart + 0.001f)) * sceneScale;
-    float3 rdScene = normalize(rdOuter);
+    const float sceneScale = 2.0f;
+    float3 roScene = bosToOriginalScene((eye + rdOuter * (tStart + 0.001f)) * sceneScale);
+    float3 rdScene = normalize(bosToOriginalScene(rdOuter));
 
     float3 l_dir = normalize(bosRotateZVec(float3(0.0f, 1.0f, 0.0f), 0.5f));
 

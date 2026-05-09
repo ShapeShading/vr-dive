@@ -36,11 +36,33 @@ struct FloreusVertexOut {
     uint   viewIndex [[flat]];
 };
 
+struct FlField {
+    float sdf;
+    float density;
+    float3 tint;
+};
+
 static constant float3 FL_BOX_HALF = float3(1.0f);
 static constant float FL_TRACE_EPSILON = 0.0015f;
-static constant int FL_STEPS = 140;
-static constant int FL_INNER_STEPS = 5;
-static constant float FL_SCENE_SCALE = 2.4f;
+static constant int FL_STEPS = 72;
+static constant int FL_DETAIL_STEPS = 3;
+static constant float FL_MAX_DIST = 4.8f;
+static constant float FL_MIN_STEP = 0.012f;
+static constant float FL_MAX_STEP = 0.085f;
+static constant float3 FL_SATELLITE_CENTERS[4] = {
+    float3(0.82f, 0.0f, 0.12f),
+    float3(-0.86f, 0.05f, -0.06f),
+    float3(0.1f, 0.84f, 0.18f),
+    float3(-0.14f, -0.88f, 0.16f)
+};
+static constant float3 FL_SATELLITE_AXES[4] = {
+    float3(1.0f, 0.0f, 0.14f),
+    float3(-1.0f, 0.06f, -0.1f),
+    float3(0.12f, 1.0f, 0.18f),
+    float3(-0.15f, -1.0f, 0.16f)
+};
+static constant float FL_SATELLITE_SIZES[4] = {0.24f, 0.25f, 0.22f, 0.22f};
+static constant float FL_SATELLITE_HUES[4] = {0.45f, 0.95f, 1.45f, 1.95f};
 
 vertex FloreusVertexOut floreusVertex(
     ushort amplificationID [[amplification_id]],
@@ -90,6 +112,124 @@ static float2 flBoxIntersect(float3 ro, float3 rd, float3 halfExt) {
         min(min(tMax.x, tMax.y), tMax.z));
 }
 
+static float flCapsule(float3 p, float3 a, float3 b, float r) {
+    float3 pa = p - a;
+    float3 ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0f, 1.0f);
+    return length(pa - ba * h) - r;
+}
+
+static float3 flToLocal(float3 p, float3 axis) {
+    float3 forward = normalize(axis);
+    float3 upRef = abs(forward.y) > 0.95f ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 1.0f, 0.0f);
+    float3 right = normalize(cross(upRef, forward));
+    float3 up = cross(forward, right);
+    return float3(dot(p, right), dot(p, up), dot(p, forward));
+}
+
+static float flPetalShell(float3 p, float petals, float radius, float thickness, float curl) {
+    float angle = atan2(p.y, p.x);
+    float radial = length(p.xy);
+    float lobe = radius * (0.56f + 0.44f * cos(petals * angle));
+    float bow = p.z + curl * smoothstep(0.0f, radius + 0.3f, radial) *
+        (0.4f + 0.6f * abs(cos(angle * petals * 0.5f)));
+    return length(float2(radial - lobe, bow * 1.75f)) - thickness;
+}
+
+static float flDetailField(float3 p, float time) {
+    p.xz = flRotate2D(p.xz, 0.18f * time);
+    float response = 0.0f;
+    float weight = 1.0f;
+    for (int inner = 0; inner < FL_DETAIL_STEPS; ++inner) {
+        float2 folded = min(abs(p.xz), abs(p.xy));
+        float l = length(float2(0.65f) - folded) / max(dot(p, p + p), 0.3f);
+        p = sin(p * 1.25f);
+        p *= l;
+        response += weight * exp(-2.2f * length(p));
+        weight *= 0.55f;
+    }
+    return response;
+}
+
+static void flAccumulate(thread FlField &field, float sdf, float density, float3 tint) {
+    if (sdf < field.sdf) {
+        field.sdf = sdf;
+        field.tint = tint;
+    }
+    field.density += density;
+}
+
+static void flAddBloom(
+    thread FlField &field,
+    float3 p,
+    float3 center,
+    float3 axis,
+    float size,
+    float time,
+    float hueShift
+) {
+    float3 local = flToLocal(p - center, axis) / size;
+
+    float3 petalA = local;
+    petalA.xy = flRotate2D(petalA.xy, hueShift + time * 0.08f);
+    float shellA = flPetalShell(petalA, 6.0f, 0.62f, 0.06f, 0.16f);
+
+    float3 petalB = local;
+    petalB.xy = flRotate2D(petalB.xy, 1.0472f + hueShift * 0.6f);
+    petalB.yz = flRotate2D(petalB.yz, 0.85f);
+    float shellB = flPetalShell(petalB, 4.0f, 0.34f, 0.038f, -0.1f);
+
+    float core = length(local) - 0.14f;
+    float sdf = min(min(shellA, shellB), core) * size;
+
+    float density =
+        0.82f * exp(-12.0f * abs(shellA)) +
+        0.46f * exp(-16.0f * abs(shellB)) +
+        0.34f * exp(-18.0f * abs(core));
+
+    float shimmer = 0.5f + 0.5f * sin(hueShift * 3.0f + time * 0.45f);
+    float3 tint = mix(float3(1.1f, 0.72f, 0.25f), float3(1.85f, 1.55f, 1.08f), shimmer);
+    flAccumulate(field, sdf, density, tint);
+}
+
+static void flAddBranch(
+    thread FlField &field,
+    float3 p,
+    float3 a,
+    float3 b,
+    float time,
+    float thickness,
+    float hueShift
+) {
+    float sdf = flCapsule(p, a, b, thickness * (0.9f + 0.1f * sin(time * 0.6f + hueShift)));
+    float wave = 0.5f + 0.5f * sin(dot(normalize(b - a), p) * 13.0f + time * 1.4f + hueShift);
+    float density = exp(-16.0f * abs(sdf)) * (0.22f + 0.28f * wave);
+    float3 tint = mix(float3(0.82f, 0.55f, 0.18f), float3(1.35f, 1.08f, 0.62f), wave);
+    flAccumulate(field, sdf, density, tint);
+}
+
+static FlField flMap(float3 p, float time) {
+    FlField field;
+    field.sdf = 1.0e9f;
+    field.density = 0.0f;
+    field.tint = float3(1.0f, 0.85f, 0.5f);
+
+    float3 q = p;
+    q.xz = flRotate2D(q.xz, time * 0.08f);
+    q.yz = flRotate2D(q.yz, -time * 0.05f);
+
+    flAddBloom(field, q, float3(0.0f, 0.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), 0.5f, time, 0.0f);
+
+    for (int i = 0; i < 4; ++i) {
+        flAddBloom(field, q, FL_SATELLITE_CENTERS[i], FL_SATELLITE_AXES[i], FL_SATELLITE_SIZES[i], time, FL_SATELLITE_HUES[i]);
+        flAddBranch(field, q, float3(0.0f), FL_SATELLITE_CENTERS[i] * 0.82f, time, 0.028f, FL_SATELLITE_HUES[i]);
+    }
+
+    field.density += flDetailField(q * 1.45f, time) * (0.08f + 0.14f * exp(-3.0f * abs(field.sdf)));
+    field.density = min(field.density, 1.8f);
+    return field;
+}
+
 fragment float4 floreusFragment(
     FloreusVertexOut in [[stage_in]],
     constant FloreusUniforms &uniforms [[buffer(0)]],
@@ -112,37 +252,36 @@ fragment float4 floreusFragment(
     }
 
     float tStart = insideBox ? 0.0f : max(tBox.x, 0.0f);
-    float3 ro = (eye + rd * (tStart + FL_TRACE_EPSILON)) * FL_SCENE_SCALE;
+    float3 entry = eye + rd * (tStart + FL_TRACE_EPSILON);
+    float3 ro = entry * 1.05f;
+    float3 marchDir = normalize(rd);
 
-    float4 accum = float4(0.0f);
-    float d = 0.0f;
+    float3 accum = float3(0.0f);
+    float transmittance = 1.0f;
+    float travel = 0.0f;
     float time = uniforms.time;
 
     for (int step = 0; step < FL_STEPS; ++step) {
-        float3 q = ro + rd * d;
-        float3 p = q;
-        p.z -= 0.3f;
-        p.xz = flRotate2D(p.xz, 0.2f * time);
+        float3 pos = ro + marchDir * travel;
+        FlField field = flMap(pos, time);
 
-        float w = 5.0f;
-        for (int inner = 0; inner < FL_INNER_STEPS; ++inner) {
-            float2 folded = min(abs(p.xz), abs(p.xy));
-            float numer = length(float2(0.7f) - folded);
-            p = sin(p);
-            float denom = max(dot(p, p + p), 1.0e-4f);
-            float l = numer / denom;
-            p *= l;
-            w *= l;
+        float density = field.density;
+        accum += transmittance * field.tint * density * 0.05f;
+
+        transmittance *= exp(-density * 0.09f);
+        if (transmittance < 0.02f || travel > FL_MAX_DIST) {
+            break;
         }
 
-        float s = max(length(q) - 0.2f, length(p) / max(w, 1.0e-4f));
-        d += s;
-        accum += float4(3.0f, 2.0f, 1.0f, 1.0f) * 20.0f * d / max(s, 1.0e-4f);
+        float stepMix = clamp(abs(field.sdf) * 1.6f, 0.0f, 1.0f);
+        travel += mix(FL_MIN_STEP, FL_MAX_STEP, stepMix);
     }
 
-    float4 color = tanh(accum / 3.5e6f);
+    float3 color = 1.0f - exp(-accum * 1.15f);
+    color = pow(color, float3(0.94f));
+
     float2 q = flFaceUV(hit);
-    float vignette = 1.0f - 0.35f * dot(q * 2.0f - 1.0f, q * 2.0f - 1.0f);
-    color.rgb *= vignette;
-    return float4(clamp(color.rgb, 0.0f, 1.0f), 1.0f);
+    float vignette = 1.0f - 0.18f * dot(q * 2.0f - 1.0f, q * 2.0f - 1.0f);
+    color *= vignette;
+    return float4(clamp(color, 0.0f, 1.0f), 1.0f);
 }

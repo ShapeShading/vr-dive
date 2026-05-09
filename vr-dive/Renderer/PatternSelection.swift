@@ -73,7 +73,6 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case flowerTest
   case floreus
   case sineBud
-  case creationSGusandr
   case saturdayWeirdness
   case soulstone
   case boxOfStars
@@ -243,8 +242,6 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Floreus"
     case .sineBud:
       return "Sine bud"
-    case .creationSGusandr:
-      return "Creation S gusandr"
     case .saturdayWeirdness:
       return "Saturday weirdness"
     case .soulstone:

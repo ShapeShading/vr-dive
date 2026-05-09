@@ -1394,17 +1394,6 @@ class Renderer {
       print("[Renderer] Sine bud pattern unavailable.")
     }
 
-    if let creationSGusandr = try? CreationSGusandrRenderer(
-      device: device,
-      library: library,
-      maxViewCount: maxViewCount
-    ) {
-      controllers[.creationSGusandr] = creationSGusandr
-      print("[Renderer] Creation S gusandr pattern added.")
-    } else {
-      print("[Renderer] Creation S gusandr pattern unavailable.")
-    }
-
     if let saturdayWeirdness = try? SaturdayWeirdnessRenderer(
       device: device,
       library: library,

@@ -38,9 +38,9 @@ struct FloreusVertexOut {
 
 static constant float3 FL_BOX_HALF = float3(1.0f);
 static constant float FL_TRACE_EPSILON = 0.0015f;
-static constant int FL_STEPS = 100;
+static constant int FL_STEPS = 140;
 static constant int FL_INNER_STEPS = 5;
-static constant float FL_SCENE_SCALE = 8.0f;
+static constant float FL_SCENE_SCALE = 2.4f;
 
 vertex FloreusVertexOut floreusVertex(
     ushort amplificationID [[amplification_id]],
@@ -140,7 +140,7 @@ fragment float4 floreusFragment(
         accum += float4(3.0f, 2.0f, 1.0f, 1.0f) * 20.0f * d / max(s, 1.0e-4f);
     }
 
-    float4 color = tanh(accum / 1.0e7f);
+    float4 color = tanh(accum / 3.5e6f);
     float2 q = flFaceUV(hit);
     float vignette = 1.0f - 0.35f * dot(q * 2.0f - 1.0f, q * 2.0f - 1.0f);
     color.rgb *= vignette;

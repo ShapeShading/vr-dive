@@ -39,6 +39,10 @@ static float3 hue77(float h) {
     return cos(h * 6.3f + float3(0.0f, 23.0f, 21.0f)) * 0.5f + 0.5f;
 }
 
+static float3 f77Tonemap(float3 color) {
+    return color / (1.0f + color);
+}
+
 static float3 rotateAroundAxis77(float3 p, float3 axis, float angle) {
     float c = cos(angle);
     float s = sin(angle);
@@ -98,8 +102,8 @@ static Fractal77Accum traceFractal77(float3 ro, float3 rd, float time) {
         e = length(p.xz) / max(s, 1.0e-4f);
         float3 tint = mix(float3(0.09f, 0.12f, 0.18f), hue77(log(max(s, 1.0e-4f))), 0.7f);
         float falloff = exp(-iteration * iteration * e);
-        accum.color += tint * 0.08f * falloff;
-        accum.energy += 0.018f / (0.002f + e * e * 12.0f);
+        accum.color += tint * 0.04f * falloff;
+        accum.energy += min(0.03f, 0.008f / (0.01f + e * e * 14.0f));
 
         g += e;
         if (g > 18.0f) {
@@ -107,7 +111,7 @@ static Fractal77Accum traceFractal77(float3 ro, float3 rd, float time) {
         }
     }
 
-    accum.color = pow(clamp(accum.color, 0.0f, 3.0f), float3(5.0f));
+    accum.color = pow(f77Tonemap(clamp(accum.color, 0.0f, 4.0f)), float3(3.2f));
     return accum;
 }
 
@@ -165,15 +169,15 @@ fragment float4 fractal77GazFragment(
         float3(0.015f, 0.02f, 0.04f),
         float3(0.16f, 0.08f, 0.23f),
         horizon);
-    background += hue77(uniforms.time * 0.1f + axisFacing * 0.3f) * (0.05f + 0.18f * axisFacing);
-    background += float3(0.28f, 0.34f, 0.5f) * accum.energy * 0.03f;
+    background += hue77(uniforms.time * 0.1f + axisFacing * 0.3f) * (0.025f + 0.08f * axisFacing);
+    background += float3(0.28f, 0.34f, 0.5f) * accum.energy * 0.012f;
 
     float2 faceUV = f77FaceUV(surfacePos) * 2.0f - 1.0f;
     float vignette = 1.0f - 0.16f * dot(faceUV, faceUV);
 
-    float3 color = background * 0.8f + accum.color;
-    color += accum.energy * float3(0.55f, 0.78f, 1.05f) * 0.01f;
+    float3 color = background * 0.35f + accum.color;
+    color += accum.energy * float3(0.55f, 0.78f, 1.05f) * 0.004f;
     color *= vignette;
-    color = clamp(color, 0.0f, 1.0f);
+    color = f77Tonemap(max(color, 0.0f));
     return float4(color, 1.0f);
 }

@@ -40,7 +40,7 @@ static constant float3 SB_BOX_HALF = float3(1.0f);
 static constant float SB_TRACE_EPSILON = 0.0015f;
 static constant int SB_STEPS = 200;
 static constant float SB_MAX_DIST = 100.0f;
-static constant float SB_SCENE_SCALE = 18.0f;
+static constant float SB_SCENE_SCALE = 8.0f;
 
 vertex SineBudVertexOut sineBudVertex(
     ushort amplificationID [[amplification_id]],
@@ -144,7 +144,8 @@ fragment float4 sineBudFragment(
     float d = 0.0f;
     float s = 1.0f;
     float3 k = float3(0.0f);
-    float3 c = float3(0.0f, 1.0f, 2.0f) * length(rd.xy);
+    float3 c = float3(0.0f);
+    bool hitBud = false;
 
     for (int step = 0; step < SB_STEPS; ++step) {
         float3 p = ro + rd * d;
@@ -167,13 +168,16 @@ fragment float4 sineBudFragment(
 
         s = min(s, min(k.z, min(k.x, k.y)));
         if (s < 0.001f || d > SB_MAX_DIST) {
+            hitBud = s < 0.001f;
             break;
         }
         d += s * 0.3f;
     }
 
-    c += max(cos(d * SB_PI * 2.0f) - s * sqrt(max(d, 0.0f)) - k, 0.0f);
-    float3 color = c + c.brg + c * c;
+    if (hitBud) {
+        c += max(cos(d * SB_PI * 2.0f) - s * sqrt(max(d, 0.0f)) - k, 0.0f);
+    }
+    float3 color = hitBud ? (c + c.brg + c * c) : float3(0.0f);
 
     float2 q = sbFaceUV(hit);
     float vignette = 1.0f - 0.35f * dot(q * 2.0f - 1.0f, q * 2.0f - 1.0f);

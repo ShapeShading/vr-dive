@@ -41,6 +41,10 @@ static float3 hue(float h) {
     return cos(h * 6.3f + float3(0.0f, 23.0f, 21.0f)) * 0.5f + 0.5f;
 }
 
+static float3 fgTonemap(float3 color) {
+    return color / (1.0f + color);
+}
+
 static float3 rotateAroundAxis(float3 p, float3 axis, float angle) {
     float c = cos(angle);
     float s = sin(angle);
@@ -107,8 +111,8 @@ static FractalAccum traceFractal(float3 ro, float3 rd, float time) {
         lastError = length(cross(p, FG_EQ)) / s - 5.0e-4f;
         float3 tint = mix(float3(1.0f), hue(log(max(s, 1.0e-4f)) * 0.3f), 0.8f);
         float falloff = exp(-12.0f * iteration * iteration * max(lastError, 0.0f));
-        accum.color += 0.1f * tint * falloff;
-        accum.glow += 0.015f / (0.0005f + lastError * lastError);
+        accum.color += 0.03f * tint * falloff;
+        accum.glow += min(0.04f, 0.0016f / (0.002f + lastError * lastError));
 
         g += lastError;
         if (g > 18.0f) {
@@ -176,18 +180,18 @@ fragment float4 fractal49GazFragment(
         float3(0.03f, 0.02f, 0.06f),
         float3(0.24f, 0.08f, 0.32f),
         horizon);
-    background += hue(uniforms.time * 0.08f + swirl * 0.25f) * (0.08f + 0.22f * facing);
-    background += float3(0.14f, 0.28f, 0.1f) * swirl * 0.3f;
+    background += hue(uniforms.time * 0.08f + swirl * 0.25f) * (0.025f + 0.08f * facing);
+    background += float3(0.14f, 0.28f, 0.1f) * swirl * 0.08f;
 
     float2 faceUV = fgFaceUV(surfacePos) * 2.0f - 1.0f;
     float vignette = 1.0f - 0.16f * dot(faceUV, faceUV);
 
-    float glow = accum.glow * 0.007f;
-    float3 color = background * 0.75f + accum.color;
+    float glow = min(accum.glow, 6.0f) * 0.02f;
+    float3 color = background * 0.22f + accum.color;
     color += glow * float3(0.45f, 0.82f, 0.52f);
     color *= vignette;
 
-    color = clamp(color, 0.0f, 1.0f);
-    color = pow(color, float3(0.92f));
+    color = fgTonemap(max(color, 0.0f));
+    color = pow(color, float3(0.96f));
     return float4(color, 1.0f);
 }

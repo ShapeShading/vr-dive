@@ -1515,6 +1515,105 @@ class Renderer {
       print("[Renderer] Fractal 77_gaz pattern unavailable.")
     }
 
+    if let poincareBallHoneycomb = try? PoincareBallHoneycombRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.poincareBallHoneycomb] = poincareBallHoneycomb
+      print("[Renderer] Poincare Ball Honeycomb pattern added.")
+    } else {
+      print("[Renderer] Poincare Ball Honeycomb pattern unavailable.")
+    }
+
+    if let goldenApollian = try? GoldenApollianRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.goldenApollian] = goldenApollian
+      print("[Renderer] Golden apollian pattern added.")
+    } else {
+      print("[Renderer] Golden apollian pattern unavailable.")
+    }
+
+    if let anotherMarble = try? AnotherMarbleRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.anotherMarble] = anotherMarble
+      print("[Renderer] Another Marble pattern added.")
+    } else {
+      print("[Renderer] Another Marble pattern unavailable.")
+    }
+
+    if let petalsFractal = try? PetalsFractalRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.petalsFractal] = petalsFractal
+      print("[Renderer] Petals Fractal pattern added.")
+    } else {
+      print("[Renderer] Petals Fractal pattern unavailable.")
+    }
+
+    if let marbleMovingRemix = try? MarbleMovingRemixRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.marbleMovingRemix] = marbleMovingRemix
+      print("[Renderer] marble moving remix pattern added.")
+    } else {
+      print("[Renderer] marble moving remix pattern unavailable.")
+    }
+
+    if let tunnelingThroughApollianFrac = try? TunnelingThroughApollianFracRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.tunnelingThroughApollianFrac] = tunnelingThroughApollianFrac
+      print("[Renderer] Tunneling through apollian frac pattern added.")
+    } else {
+      print("[Renderer] Tunneling through apollian frac pattern unavailable.")
+    }
+
+    if let slicesInMarbles = try? SlicesInMarblesRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.slicesInMarbles] = slicesInMarbles
+      print("[Renderer] slices in marbles pattern added.")
+    } else {
+      print("[Renderer] slices in marbles pattern unavailable.")
+    }
+
+    if let logSphericalKIFSZoomer = try? LogSphericalKIFSZoomerRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.logSphericalKIFSZoomer] = logSphericalKIFSZoomer
+      print("[Renderer] Log Spherical KIFS Zoomer pattern added.")
+    } else {
+      print("[Renderer] Log Spherical KIFS Zoomer pattern unavailable.")
+    }
+
+    if let fractalCity = try? FractalCityRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.fractalCity] = fractalCity
+      print("[Renderer] Fractal city pattern added.")
+    } else {
+      print("[Renderer] Fractal city pattern unavailable.")
+    }
+
     if let interferenceCascadeCube = try? InterferenceCascadeCubeRenderer(
       device: device,
       library: library,

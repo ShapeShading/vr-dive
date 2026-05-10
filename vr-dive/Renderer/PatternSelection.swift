@@ -84,6 +84,15 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case fractal49Gaz
   case starryPlanes
   case fractal77Gaz
+  case poincareBallHoneycomb
+  case anotherMarble
+  case marbleMovingRemix
+  case slicesInMarbles
+  case logSphericalKIFSZoomer
+  case petalsFractal
+  case goldenApollian
+  case tunnelingThroughApollianFrac
+  case fractalCity
 
   var id: String { rawValue }
 
@@ -264,6 +273,24 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Starry planes"
     case .fractal77Gaz:
       return "Fractal 77_gaz"
+    case .poincareBallHoneycomb:
+      return "Poincare Ball Honeycomb"
+    case .anotherMarble:
+      return "Another Marble"
+    case .marbleMovingRemix:
+      return "marble moving remix"
+    case .slicesInMarbles:
+      return "slices in marbles"
+    case .logSphericalKIFSZoomer:
+      return "Log Spherical KIFS Zoomer"
+    case .petalsFractal:
+      return "Petals Fractal"
+    case .goldenApollian:
+      return "Golden apollian"
+    case .tunnelingThroughApollianFrac:
+      return "Tunneling through apollian frac"
+    case .fractalCity:
+      return "Fractal city"
     }
   }
 }
@@ -306,7 +333,7 @@ final class PatternCoordinator {
   }
 
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .fractal77Gaz
+  private var _current: VisualPatternKind = .fractalCity
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

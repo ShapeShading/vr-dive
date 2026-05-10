@@ -39,6 +39,7 @@ struct DigitalLinesVertexOut {
 // ---------------------------------------------------------------------------
 static constant float DL_PHI  = 1.6180339887f;
 static constant float DL_INVP = 0.6180339887f;   // 1 / phi
+static constant float3 DL_BOX_HALF = float3(1.0f);
 
 static constant float3 DL_VERTS[20] = {
     {-1.0f,-1.0f,-1.0f}, { 1.0f,-1.0f,-1.0f}, { 1.0f, 1.0f,-1.0f}, {-1.0f, 1.0f,-1.0f},
@@ -71,13 +72,6 @@ static float3 dlLerp3(float3 a, float3 b, float3 c, float t) {
     else          return mix(b, c, (t - 0.5f) * 2.0f);
 }
 
-// Star / sparkle glyph centred at uv origin.
-static float dlStar(float2 uv, float size) {
-    float d    = length(uv);
-    float rays = max(0.0f, 1.0f - abs(uv.x * uv.y * 1000.0f));
-    return (0.005f * size / d + rays * 0.05f * size) * smoothstep(0.15f, 0.0f, d);
-}
-
 // Rotation matrices — Metal float3x3 is column-major, matching GLSL mat3().
 // GLSL mat3(1,0,0, 0,c,-s, 0,s,c): col0=(1,0,0), col1=(0,c,-s), col2=(0,s,c)
 static float3x3 dlRotX(float a) {
@@ -88,6 +82,48 @@ static float3x3 dlRotX(float a) {
 static float3x3 dlRotY(float a) {
     float s = sin(a), c = cos(a);
     return float3x3(float3(c,0,s), float3(0,1,0), float3(-s,0,c));
+}
+
+static float2 dlBoxIntersect(float3 ro, float3 rd, float3 halfExt) {
+    float3 inv = 1.0f / rd;
+    float3 t0 = (-halfExt - ro) * inv;
+    float3 t1 = (halfExt - ro) * inv;
+    float3 tMin = min(t0, t1);
+    float3 tMax = max(t0, t1);
+    return float2(
+        max(max(tMin.x, tMin.y), tMin.z),
+        min(min(tMax.x, tMax.y), tMax.z));
+}
+
+static float dlRaySegmentDistance(float3 ro, float3 rd, float3 a, float3 b, thread float &rayT) {
+    float3 seg = b - a;
+    float3 w0 = ro - a;
+    float segLen2 = max(dot(seg, seg), 1.0e-5f);
+    float bDot = dot(rd, seg);
+    float dDot = dot(rd, w0);
+    float eDot = dot(seg, w0);
+    float denom = segLen2 - bDot * bDot;
+
+    float sc = 0.0f;
+    float tc = 0.0f;
+    if (abs(denom) > 1.0e-5f) {
+        sc = clamp((bDot * eDot - segLen2 * dDot) / denom, 0.0f, 10.0f);
+        tc = clamp((eDot + bDot * sc) / segLen2, 0.0f, 1.0f);
+    } else {
+        tc = clamp(eDot / segLen2, 0.0f, 1.0f);
+    }
+
+    sc = max(dot(a + seg * tc - ro, rd), 0.0f);
+    float3 closestRay = ro + rd * sc;
+    float3 closestSeg = a + seg * tc;
+    rayT = sc;
+    return length(closestRay - closestSeg);
+}
+
+static float dlRayPointDistance(float3 ro, float3 rd, float3 p, thread float &rayT) {
+    rayT = max(dot(p - ro, rd), 0.0f);
+    float3 closestRay = ro + rd * rayT;
+    return length(closestRay - p);
 }
 
 // ---------------------------------------------------------------------------
@@ -112,15 +148,9 @@ vertex DigitalLinesVertexOut digitalLinesVertex(
 }
 
 // ---------------------------------------------------------------------------
-// Fragment shader — faithful 3D port of the original mainImage() loop.
-//
-// Instead of screen UV, we derive an equivalent 2D coordinate from the per-eye
-// ray direction using world-fixed axes (up = world Y).  This gives:
-//   • Correct stereo parallax: each eye's slightly different ray direction
-//     produces a slightly different UV → the dodecahedron is perceived in 3D.
-//   • Stable orientation: the wireframe rows/columns don't tilt with head pose.
-//   • Unbounded content: the dodecahedron exists in all UV directions; nothing
-//     is clipped at the cube boundary.
+// Fragment shader — rebuild the original layered dodecahedron as true 3D
+// wireframe geometry anchored to the cube center.  Each eye traces through the
+// same local-space structure, so stereo comes from real ray/segment distances.
 // ---------------------------------------------------------------------------
 fragment float4 digitalLinesFragment(
     DigitalLinesVertexOut in [[stage_in]],
@@ -131,83 +161,71 @@ fragment float4 digitalLinesFragment(
     float4x4 v2w = viewToWorld[vi];
 
     float3 center   = uniforms.objectCenter.xyz;
-    float  scale    = uniforms.cubeScale;
+    float  scale    = max(uniforms.cubeScale, 1.0e-4f);
     float3 camWorld = float3(v2w[3].x, v2w[3].y, v2w[3].z);
-    float3 ro = (camWorld - center) / scale;       // camera in scene/object space
-    float3 rd = normalize(in.worldPos - camWorld); // ray direction (world → fragment)
+    float3 eye = (camWorld - center) / scale;
+    float3 surfacePos = (in.worldPos - center) / scale;
+    float3 rd = normalize(surfacePos - eye);
 
-    // Camera forward = direction from camera toward cube centre.
-    float  roLen = length(ro);
-    float3 fwd   = roLen > 1e-4f ? normalize(-ro) : float3(0.0f, 0.0f, -1.0f);
-    float  fwdComp = dot(rd, fwd);
-    if (fwdComp <= 1e-5f) discard_fragment();
+    bool insideOuter = all(abs(eye) < DL_BOX_HALF - 1.0e-3f);
+    float2 tOuter = dlBoxIntersect(eye, rd, DL_BOX_HALF);
+    if (!insideOuter && tOuter.x > tOuter.y) {
+        discard_fragment();
+    }
 
-    // --- Perspective UV in world-fixed frame --------------------------------
-    // Project rd onto the plane perpendicular to fwd, divide by fwdComp to
-    // get a tangent-space coordinate (equivalent to the original's NDC UV).
-    // Using world Y keeps the pattern orientation stable across head poses.
-    float3 rdPerp     = rd - fwdComp * fwd;
-    float3 worldUp    = float3(0.0f, 1.0f, 0.0f);
-    float3 fixedUp    = normalize(worldUp - dot(worldUp, fwd) * fwd);  // Gram-Schmidt
-    float3 fixedRight = normalize(cross(fwd, fixedUp));
-    // Scale factor ≈ 1.0: the 1 m half-extent cube at 2.1 m subtends ±~0.47
-    // in tangent space, matching the original shader's y range of [-0.5, 0.5].
-    float2 uv = float2(dot(rdPerp, fixedRight), dot(rdPerp, fixedUp)) / fwdComp;
+    float tStart = insideOuter ? 0.0f : max(tOuter.x, 0.0f);
+    float3 ro = eye;
 
-    // --- Original mainImage logic (ported from GLSL) -----------------------
     float3 colorA = float3(1.1f, 0.2f, 0.0f);   // _ColorA
     float3 colorB = float3(1.0f, 1.2f, 0.5f);   // _ColorB
     float3 colorC = float3(0.0f, 0.8f, 1.2f);   // _ColorC
-    // _Speed = 0.3
     float  globalTime = -uniforms.time * 0.3f;
 
     float3 col = float3(0.0f);
 
-    // _Layers = 8
     for (int i = 0; i < 8; i++) {
         float fi = float(i);
         float layerProgress = fract((fi / 8.0f) - fract(globalTime));
-        float layerScale    = pow(2.55f, layerProgress * 3.0f) * 0.1f;
+        float layerScale    = pow(2.1f, layerProgress * 2.6f) * 0.14f;
         float mask          = sin(layerProgress * 3.14159265f);
 
         float3 layerCol = dlLerp3(colorA, colorB, colorC, layerProgress);
 
         float3x3 transform = dlRotX(uniforms.time * 0.3f + fi) * dlRotY(uniforms.time * 0.2f);
+        float lineWidth = mix(0.018f, 0.006f, layerProgress);
 
         for (int n = 0; n < 30; n++) {
             float3 p1 = transform * (DL_VERTS[DL_EDGES[n * 2    ]] * layerScale);
             float3 p2 = transform * (DL_VERTS[DL_EDGES[n * 2 + 1]] * layerScale);
 
-            // Simple perspective projection (camera at z = 5 in scene space).
-            float z1 = 1.0f / (5.0f - p1.z);
-            float z2 = 1.0f / (5.0f - p2.z);
-            float2 a = p1.xy * z1;
-            float2 b = p2.xy * z2;
+            float rayT = 0.0f;
+            float d = dlRaySegmentDistance(ro, rd, p1, p2, rayT);
+            if (rayT < tStart) {
+                continue;
+            }
+            float line = smoothstep(lineWidth, 0.0f, d);
+            float depthFade = exp(-0.28f * rayT);
+            col += layerCol * line * mask * depthFade;
 
-            // Closest point on segment a→b to uv; compute distance.
-            float2 pa = uv - a;
-            float2 ba = b - a;
-            float  h  = clamp(dot(pa, ba) / dot(ba, ba), 0.0f, 1.0f);
-            float  d  = length(pa - ba * h);
-
-            float line = smoothstep(0.003f, 0.0f, d);
-            col += layerCol * line * mask * (p1.z + 3.0f) * 0.5f;
-
-            // Stars at the first 20 vertices (same as original).
             if (n < 20) {
                 float3 pStar   = transform * (DL_VERTS[n] * layerScale);
-                float2 starPos = pStar.xy * (1.0f / (5.0f - pStar.z));
+                float starT = 0.0f;
+                float dStar = dlRayPointDistance(ro, rd, pStar, starT);
+                if (starT < tStart) {
+                    continue;
+                }
                 float  sparkle = sin(uniforms.time * 10.0f + fi) * 0.5f + 0.5f;
-                col += layerCol * dlStar(uv - starPos, 0.5f) * mask * sparkle;
+                float star = smoothstep(0.03f, 0.0f, dStar);
+                col += layerCol * star * mask * sparkle * exp(-0.22f * starT) * 0.55f;
             }
         }
     }
 
-    // Centre glow (_Glow = 1.5).
     float3 glowCol = mix(colorA, colorC, sin(uniforms.time) * 0.5f + 0.5f);
-    col += glowCol * (1.5f * 0.02f / (length(uv) + 0.1f));
+    float centerT = max(dot(-ro, rd), 0.0f);
+    float centerDist = length(ro + rd * centerT);
+    col += glowCol * (1.5f * 0.008f / (centerDist + 0.1f)) * exp(-0.35f * centerT);
 
-    // tanh tonemap (identical to original).
     col = tanh(col);
     return float4(col, 1.0f);
 }

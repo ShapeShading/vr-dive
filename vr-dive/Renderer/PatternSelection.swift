@@ -333,7 +333,7 @@ final class PatternCoordinator {
   }
 
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .fractalCity
+  private var _current: VisualPatternKind = .shield
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

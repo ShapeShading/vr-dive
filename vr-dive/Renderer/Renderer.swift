@@ -1634,6 +1634,28 @@ class Renderer {
       print("[Renderer] OrbitalSphereCube pattern unavailable.")
     }
 
+    if let starTrails = try? StarTrailsRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.starTrails] = starTrails
+      print("[Renderer] StarTrails pattern added.")
+    } else {
+      print("[Renderer] StarTrails pattern unavailable.")
+    }
+
+    if let particleRain = try? ParticleRainRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.particleRain] = particleRain
+      print("[Renderer] ParticleRain pattern added.")
+    } else {
+      print("[Renderer] ParticleRain pattern unavailable.")
+    }
+
     return (controllers: controllers, deferredBuilders: deferredBuilders)
   }
 

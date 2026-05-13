@@ -95,6 +95,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case fractalCity
   case starTrails
   case particleRain
+  case apollonianTwist
 
   var id: String { rawValue }
 
@@ -215,6 +216,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Reflective Wythoff polyhedra"
     case .apollonian:
       return "apollonian"
+    case .apollonianTwist:
+      return "Apollonian Twist"
     case .magneticLinesThatDrawInGold:
       return "Magnetic lines that draw in gold"
     case .lanterns:
@@ -339,7 +342,7 @@ final class PatternCoordinator {
   }
 
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .starTrails
+  private var _current: VisualPatternKind = .apollonianTwist
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

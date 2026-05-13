@@ -1185,6 +1185,17 @@ class Renderer {
       print("[Renderer] apollonian pattern unavailable.")
     }
 
+    if let apollonianTwist = try? ApollonianTwistRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.apollonianTwist] = apollonianTwist
+      print("[Renderer] Apollonian Twist pattern added.")
+    } else {
+      print("[Renderer] Apollonian Twist pattern unavailable.")
+    }
+
     if let magneticLinesThatDrawInGold = try? MagneticLinesThatDrawInGoldRenderer(
       device: device,
       library: library,

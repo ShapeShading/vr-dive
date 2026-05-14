@@ -1196,6 +1196,28 @@ class Renderer {
       print("[Renderer] Apollonian Twist pattern unavailable.")
     }
 
+    if let steampunkOrb = try? SteampunkOrbRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.steampunkOrb] = steampunkOrb
+      print("[Renderer] Steampunk Orb pattern added.")
+    } else {
+      print("[Renderer] Steampunk Orb pattern unavailable.")
+    }
+
+    if let apollonianWires = try? ApollonianWiresRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.apollonianWires] = apollonianWires
+      print("[Renderer] Apollonian Wires pattern added.")
+    } else {
+      print("[Renderer] Apollonian Wires pattern unavailable.")
+    }
+
     if let magneticLinesThatDrawInGold = try? MagneticLinesThatDrawInGoldRenderer(
       device: device,
       library: library,

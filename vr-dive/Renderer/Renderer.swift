@@ -1218,6 +1218,61 @@ class Renderer {
       print("[Renderer] Apollonian Wires pattern unavailable.")
     }
 
+    if let kuKo = try? KuKoRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.kuKo] = kuKo
+      print("[Renderer] KuKo pattern added.")
+    } else {
+      print("[Renderer] KuKo pattern unavailable.")
+    }
+
+    if let sonicAndTails = try? SonicAndTailsRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.sonicAndTails] = sonicAndTails
+      print("[Renderer] Sonic & Tails pattern added.")
+    } else {
+      print("[Renderer] Sonic & Tails pattern unavailable.")
+    }
+
+    if let followYourLight = try? FollowYourLightRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.followYourLight] = followYourLight
+      print("[Renderer] Follow Your Light pattern added.")
+    } else {
+      print("[Renderer] Follow Your Light pattern unavailable.")
+    }
+
+    if let weirdSurface = try? WeirdSurfaceRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.weirdSurface] = weirdSurface
+      print("[Renderer] Weird Surface pattern added.")
+    } else {
+      print("[Renderer] Weird Surface pattern unavailable.")
+    }
+
+    if let neonShells = try? NeonShellsRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.neonShells] = neonShells
+      print("[Renderer] Neon Shells pattern added.")
+    } else {
+      print("[Renderer] Neon Shells pattern unavailable.")
+    }
+
     if let magneticLinesThatDrawInGold = try? MagneticLinesThatDrawInGoldRenderer(
       device: device,
       library: library,

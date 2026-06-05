@@ -69,6 +69,8 @@ struct PatternMenuView: View {
 struct ControlButtonsView: View {
   @Bindable var model: PatternMenuModel
 
+  private let simonePresetColumns = [GridItem(.adaptive(minimum: 112), spacing: 10)]
+
   var body: some View {
     VStack(spacing: 18) {
       HStack(spacing: 18) {
@@ -131,6 +133,42 @@ struct ControlButtonsView: View {
             }
             .buttonStyle(.bordered)
           }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+
+      if model.selectedPattern == .simoneOrbit3D {
+        VStack(alignment: .leading, spacing: 10) {
+          Text("3D Simone Orbit")
+            .font(.headline)
+
+          Text(model.simoneOrbit3DPrincipleText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          let params = model.simoneOrbit3DPreset.parameters
+          Text(
+            "当前参数: a=\(params.x, specifier: "%.2f")  b=\(params.y, specifier: "%.2f")  c=\(params.z, specifier: "%.2f")"
+          )
+          .font(.system(.caption, design: .monospaced))
+          .foregroundStyle(.secondary)
+
+          ScrollView {
+            LazyVGrid(columns: simonePresetColumns, alignment: .leading, spacing: 10) {
+              ForEach(SimoneOrbit3DPreset.allCases) { preset in
+                Button(action: {
+                  model.simoneOrbit3DPreset = preset
+                }) {
+                  Text(preset.buttonTitle)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(model.simoneOrbit3DPreset == preset ? .accentColor : .gray.opacity(0.6))
+              }
+            }
+          }
+          .frame(maxHeight: 180)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }

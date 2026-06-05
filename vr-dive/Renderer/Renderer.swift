@@ -295,7 +295,8 @@ class Renderer {
           isPaused: isPaused,
           originCellInspectionEnabled: patternCoordinator.originCellInspectionEnabled(),
           rayMarchingProbeDimTarget: patternCoordinator.rayMarchingProbeDimTarget(),
-          huashanSampleRatio: patternCoordinator.huashanSampleRatio()
+          huashanSampleRatio: patternCoordinator.huashanSampleRatio(),
+          simoneOrbit3DPreset: patternCoordinator.simoneOrbit3DPreset()
         )
         pattern?.synchronizeState(simulationContext)
 
@@ -586,6 +587,12 @@ class Renderer {
     var renderTargetLayers: [UInt32] = []
     var viewToWorldTransforms: [simd_float4x4] = []
     let desiredViewCount = max(min(viewCount, maxViewCount), 1)
+    // Safety-first gate: some single-view fallback layouts on visionOS simulator
+    // still assert if setVertexAmplificationCount(1, nil) is called, even though
+    // Metal exposes the capability query. For now only enable amplification on
+    // actual multi-view draws where the device explicitly supports the count.
+    let supportsVertexAmplification = desiredViewCount > 1
+      && device.supportsVertexAmplificationCount(desiredViewCount)
     let availableViews = drawable.views
     let sampledViewCount = min(desiredViewCount, availableViews.count)
 
@@ -652,7 +659,8 @@ class Renderer {
       viewports: Array(viewports.prefix(desiredViewCount)),
       renderTargetLayers: Array(renderTargetLayers.prefix(desiredViewCount)),
       viewToWorldTransforms: Array(viewToWorldTransforms.prefix(desiredViewCount)),
-      viewCount: desiredViewCount
+      viewCount: desiredViewCount,
+      supportsVertexAmplification: supportsVertexAmplification
     )
   }
 
@@ -1194,6 +1202,17 @@ class Renderer {
       print("[Renderer] Apollonian Twist pattern added.")
     } else {
       print("[Renderer] Apollonian Twist pattern unavailable.")
+    }
+
+    if let simoneOrbit3D = try? SimoneOrbit3DRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.simoneOrbit3D] = simoneOrbit3D
+      print("[Renderer] Simone Orbit 3D pattern added.")
+    } else {
+      print("[Renderer] Simone Orbit 3D pattern unavailable.")
     }
 
     if let steampunkOrb = try? SteampunkOrbRenderer(

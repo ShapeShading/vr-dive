@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import simd
 
 enum VisualPatternKind: String, CaseIterable, Identifiable {
   case pongWar
@@ -95,6 +96,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case fractalCity
   case starTrails
   case particleRain
+  case simoneOrbit3D
   case apollonianTwist
   case steampunkOrb
   case apollonianWires
@@ -321,6 +323,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "星轨延时"
     case .particleRain:
       return "流光雨"
+    case .simoneOrbit3D:
+      return "Simone Orbit 3D"
     }
   }
 }
@@ -353,6 +357,71 @@ enum RayMarchingProbeDimTarget: Int, CaseIterable {
   }
 }
 
+enum SimoneOrbit3DPreset: String, CaseIterable, Identifiable {
+  case p369_451
+  case p551_484
+  case p364_171
+  case p546_455
+  case p047_225
+  case p029_095
+  case p259_249
+  case p054_123
+  case p040_511
+  case p231_164
+  case p029_400
+  case p590_564
+  case p361_424
+  case p270_232
+  case p255_093
+
+  var id: String { rawValue }
+
+  var ab: SIMD2<Float> {
+    switch self {
+    case .p369_451:
+      return SIMD2<Float>(3.69, 4.51)
+    case .p551_484:
+      return SIMD2<Float>(5.51, 4.84)
+    case .p364_171:
+      return SIMD2<Float>(3.64, 1.71)
+    case .p546_455:
+      return SIMD2<Float>(5.46, 4.55)
+    case .p047_225:
+      return SIMD2<Float>(0.47, 2.25)
+    case .p029_095:
+      return SIMD2<Float>(0.29, 0.95)
+    case .p259_249:
+      return SIMD2<Float>(2.59, 2.49)
+    case .p054_123:
+      return SIMD2<Float>(0.54, 1.23)
+    case .p040_511:
+      return SIMD2<Float>(0.40, 5.11)
+    case .p231_164:
+      return SIMD2<Float>(2.31, 1.64)
+    case .p029_400:
+      return SIMD2<Float>(0.29, 4.00)
+    case .p590_564:
+      return SIMD2<Float>(5.90, 5.64)
+    case .p361_424:
+      return SIMD2<Float>(3.61, 4.24)
+    case .p270_232:
+      return SIMD2<Float>(2.70, 2.32)
+    case .p255_093:
+      return SIMD2<Float>(2.55, 0.93)
+    }
+  }
+
+  var parameters: SIMD3<Float> {
+    let values = ab
+    return SIMD3<Float>(values.x, values.y, 0.5 * (values.x - values.y))
+  }
+
+  var buttonTitle: String {
+    let values = ab
+    return String(format: "a%.2f b%.2f", values.x, values.y)
+  }
+}
+
 final class PatternCoordinator {
   static let minHuashanSampleRatio: Float = 0.05
   static let maxHuashanSampleRatio: Float = 1.0
@@ -370,6 +439,7 @@ final class PatternCoordinator {
   private var _originCellInspectionEnabled: Bool = false
   private var _rayMarchingProbeDimTarget: RayMarchingProbeDimTarget = .none
   private var _huashanSampleRatio: Float = PatternCoordinator.defaultHuashanSampleRatio
+  private var _simoneOrbit3DPreset: SimoneOrbit3DPreset = .p369_451
 
   func currentPattern() -> VisualPatternKind {
     queue.sync { _current }
@@ -431,6 +501,14 @@ final class PatternCoordinator {
     let clamped = Self.clampedHuashanSampleRatio(ratio)
     queue.async(flags: .barrier) { self._huashanSampleRatio = clamped }
   }
+
+  func simoneOrbit3DPreset() -> SimoneOrbit3DPreset {
+    queue.sync { _simoneOrbit3DPreset }
+  }
+
+  func setSimoneOrbit3DPreset(_ preset: SimoneOrbit3DPreset) {
+    queue.async(flags: .barrier) { self._simoneOrbit3DPreset = preset }
+  }
 }
 
 @MainActor
@@ -478,6 +556,12 @@ final class PatternMenuModel {
     }
   }
 
+  var simoneOrbit3DPreset: SimoneOrbit3DPreset = .p369_451 {
+    didSet {
+      coordinator.setSimoneOrbit3DPreset(simoneOrbit3DPreset)
+    }
+  }
+
   private let coordinator: PatternCoordinator
 
   init(coordinator: PatternCoordinator) {
@@ -487,6 +571,7 @@ final class PatternMenuModel {
     self.originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
     self.rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
     self.huashanSampleRatio = coordinator.huashanSampleRatio()
+    self.simoneOrbit3DPreset = coordinator.simoneOrbit3DPreset()
   }
 
   func refreshFromCoordinator() {
@@ -495,6 +580,7 @@ final class PatternMenuModel {
     originCellInspectionEnabled = coordinator.originCellInspectionEnabled()
     rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
     huashanSampleRatio = coordinator.huashanSampleRatio()
+    simoneOrbit3DPreset = coordinator.simoneOrbit3DPreset()
   }
 
   func reset() {
@@ -515,5 +601,9 @@ final class PatternMenuModel {
 
   var huashanSampleRatioPercentText: String {
     "\(Int((huashanSampleRatio * 100).rounded()))%"
+  }
+
+  var simoneOrbit3DPrincipleText: String {
+    "二维 Simone 递推提升到三维: x'=sin(x²-y²-z²+a), y'=cos(2xy+b), z'=sin(2xz+c)。画面不是挤出 2D 图，而是在 3D 体积里累积多条轨道的密度。"
   }
 }

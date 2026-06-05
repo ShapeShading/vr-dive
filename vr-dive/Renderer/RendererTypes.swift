@@ -19,6 +19,7 @@ struct ViewRenderingData {
   var renderTargetLayers: [UInt32]
   var viewToWorldTransforms: [simd_float4x4]
   var viewCount: Int
+  var supportsVertexAmplification: Bool
 }
 
 struct PatternSimulationContext {
@@ -29,6 +30,7 @@ struct PatternSimulationContext {
   let originCellInspectionEnabled: Bool
   let rayMarchingProbeDimTarget: RayMarchingProbeDimTarget
   let huashanSampleRatio: Float
+  let simoneOrbit3DPreset: SimoneOrbit3DPreset
 }
 
 struct PatternRenderContext {
@@ -40,6 +42,10 @@ struct PatternRenderContext {
   func applyViewConfiguration(on encoder: MTLRenderCommandEncoder) {
     if !viewData.viewports.isEmpty {
       encoder.setViewports(viewData.viewports)
+    }
+
+    guard viewData.supportsVertexAmplification else {
+      return
     }
 
     if viewData.viewCount > 1 {

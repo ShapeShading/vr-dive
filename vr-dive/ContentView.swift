@@ -13,7 +13,7 @@ struct ContentView: View {
   @Environment(AppModel.self) private var appModel
 
   var body: some View {
-    VStack(spacing: 28) {
+    VStack(spacing: 24) {
       HStack(alignment: .bottom, spacing: 20) {
         PatternMenuView(model: appModel.patternMenuModel)
         ToggleImmersiveSpaceButton()
@@ -22,7 +22,7 @@ struct ContentView: View {
     }
     .padding(.horizontal, 28)
     .padding(.vertical, 32)
-    .frame(maxWidth: 760, minHeight: 280)
+    .frame(maxWidth: 980, minHeight: 440)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
 }
@@ -136,31 +136,54 @@ struct ControlButtonsView: View {
       }
 
       if model.selectedPattern == .simoneOrbit3D {
-        VStack(alignment: .leading, spacing: 10) {
-          Text("3D Simone Orbit")
-            .font(.headline)
+        HStack(alignment: .top, spacing: 24) {
+          VStack(alignment: .leading, spacing: 10) {
+            Text("3D Simone Orbit")
+              .font(.headline)
 
-          Text(model.simoneOrbit3DPrincipleText)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            Text(model.simoneOrbit3DPrincipleText)
+              .font(.caption)
+              .foregroundStyle(.secondary)
 
-          Picker("参数预设", selection: $model.simoneOrbit3DPreset) {
-            ForEach(SimoneOrbit3DPreset.allCases) { preset in
-              Text(preset.pickerTitle).tag(preset)
+            Picker("参数预设", selection: $model.simoneOrbit3DPreset) {
+              ForEach(SimoneOrbit3DPreset.allCases) { preset in
+                Text(preset.pickerTitle).tag(preset)
+              }
+            }
+            .pickerStyle(.menu)
+
+            HStack(spacing: 10) {
+              Button {
+                model.simoneOrbit3DPreset = model.simoneOrbit3DPreset.previous()
+              } label: {
+                Label("上一个", systemImage: "chevron.left")
+              }
+              .buttonStyle(.bordered)
+
+              Button {
+                model.simoneOrbit3DPreset = model.simoneOrbit3DPreset.next()
+              } label: {
+                Label("下一个", systemImage: "chevron.right")
+              }
+              .buttonStyle(.bordered)
             }
           }
-          .pickerStyle(.menu)
+          .frame(maxWidth: .infinity, alignment: .leading)
 
-          let params = model.simoneOrbit3DPreset.parameters
-          Text(
-            "当前参数: a=\(params.x, specifier: "%.2f")  b=\(params.y, specifier: "%.2f")  c=\(params.z, specifier: "%.2f")"
-          )
-          .font(.system(.caption, design: .monospaced))
-          .foregroundStyle(.secondary)
-
-          Text("搜索摘要: \(model.simoneOrbit3DPreset.metricsSummary)")
+          VStack(alignment: .leading, spacing: 10) {
+            let params = model.simoneOrbit3DPreset.parameters
+            Text(
+              "当前参数: a=\(params.x, specifier: "%.2f")  b=\(params.y, specifier: "%.2f")  c=\(params.z, specifier: "%.2f")"
+            )
             .font(.system(.caption, design: .monospaced))
             .foregroundStyle(.secondary)
+
+            Text("搜索摘要: \(model.simoneOrbit3DPreset.metricsSummary)")
+              .font(.system(.caption, design: .monospaced))
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }

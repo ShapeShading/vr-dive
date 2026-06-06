@@ -370,123 +370,118 @@ enum SimoneOrbit3DPreset: String, CaseIterable, Identifiable {
   case preset10
   case preset11
   case preset12
+  case preset13
+  case preset14
+  case preset15
+  case preset16
+  case preset17
+  case preset18
+  case preset19
+  case preset20
+  case preset21
+  case preset22
+  case preset23
+  case preset24
 
   var id: String { rawValue }
 
-  var ab: SIMD2<Float> {
-    switch self {
-    case .preset01:
-      return SIMD2<Float>(5.086388, 2.692794)
-    case .preset02:
-      return SIMD2<Float>(2.692794, 0.598399)
-    case .preset03:
-      return SIMD2<Float>(0.299199, 5.684787)
-    case .preset04:
-      return SIMD2<Float>(5.086388, 2.991993)
-    case .preset05:
-      return SIMD2<Float>(6.283185, 2.692794)
-    case .preset06:
-      return SIMD2<Float>(0.000000, 5.684787)
-    case .preset07:
-      return SIMD2<Float>(2.692794, 5.983986)
-    case .preset08:
-      return SIMD2<Float>(2.550000, 0.930000)
-    case .preset09:
-      return SIMD2<Float>(2.393594, 6.283185)
-    case .preset10:
-      return SIMD2<Float>(6.175432, 1.310495)
-    case .preset11:
-      return SIMD2<Float>(2.991993, 5.684787)
-    case .preset12:
-      return SIMD2<Float>(0.000000, 2.094395)
-    }
-  }
-
   var parameters: SIMD3<Float> {
     switch self {
-    case .preset01:
-      return SIMD3<Float>(5.086388, 2.692794, 1.196797)
-    case .preset02:
-      return SIMD3<Float>(2.692794, 0.598399, 1.047198)
-    case .preset03:
-      return SIMD3<Float>(0.299199, 5.684787, 3.590392)
-    case .preset04:
-      return SIMD3<Float>(5.086388, 2.991993, 1.047198)
-    case .preset05:
-      return SIMD3<Float>(6.283185, 2.692794, 1.795196)
-    case .preset06:
-      return SIMD3<Float>(0.000000, 5.684787, 3.440792)
-    case .preset07:
-      return SIMD3<Float>(2.692794, 5.983986, 4.637589)
-    case .preset08:
-      return SIMD3<Float>(2.550000, 0.930000, -1.740000)
-    case .preset09:
-      return SIMD3<Float>(2.393594, 6.283185, 4.338390)
-    case .preset10:
-      return SIMD3<Float>(6.175432, 1.310495, 5.114121)
-    case .preset11:
-      return SIMD3<Float>(2.991993, 5.684787, 4.936788)
-    case .preset12:
-      return SIMD3<Float>(0.000000, 2.094395, 5.235988)
+    case .preset01: return SIMD3<Float>(2.203284, 3.682889, 2.468944)
+    case .preset02: return SIMD3<Float>(1.628974, 0.930842, 0.349066)
+    case .preset03: return SIMD3<Float>(2.327106, 5.817764, 4.537856)
+    case .preset04: return SIMD3<Float>(1.369087, 4.212377, 2.810484)
+    case .preset05: return SIMD3<Float>(4.654211, 3.723369, 0.465421)
+    case .preset06: return SIMD3<Float>(1.548957, 1.995704, 2.219864)
+    case .preset07: return SIMD3<Float>(3.331636, 3.911041, 4.126978)
+    case .preset08: return SIMD3<Float>(2.095198, 5.750775, 4.322093)
+    case .preset09: return SIMD3<Float>(1.237973, 0.912589, 1.669799)
+    case .preset10: return SIMD3<Float>(2.660594, 3.259471, 3.987449)
+    case .preset11: return SIMD3<Float>(5.119632, 2.559816, 1.279908)
+    case .preset12: return SIMD3<Float>(3.142631, 4.374982, 3.507344)
+    case .preset13: return SIMD3<Float>(2.625194, 0.433779, 2.202473)
+    case .preset14: return SIMD3<Float>(5.872473, 5.984790, 5.495428)
+    case .preset15: return SIMD3<Float>(1.073784, 2.655868, 4.320235)
+    case .preset16: return SIMD3<Float>(2.700000, 2.320000, -2.510000)
+    case .preset17: return SIMD3<Float>(2.700000, 2.320000, 2.510000)
+    case .preset18: return SIMD3<Float>(5.817764, 3.956080, 0.930842)
+    case .preset19: return SIMD3<Float>(2.792527, 0.465421, 1.163553)
+    case .preset20: return SIMD3<Float>(2.222355, 5.498354, 1.969796)
+    case .preset21: return SIMD3<Float>(1.419006, 2.241834, 4.075525)
+    case .preset22: return SIMD3<Float>(1.636273, 1.173366, 5.913431)
+    case .preset23: return SIMD3<Float>(3.257948, 6.050475, 4.886922)
+    case .preset24: return SIMD3<Float>(3.025237, 5.585054, 5.003277)
     }
   }
 
   var pickerTitle: String {
     switch self {
-    case .preset01:
-      return "Filament Z 01"
-    case .preset02:
-      return "Filament Y 02"
-    case .preset03:
-      return "Filament Y 03"
-    case .preset04:
-      return "Filament Z 04"
-    case .preset05:
-      return "Filament X 05"
-    case .preset06:
-      return "Filament Y 06"
-    case .preset07:
-      return "Filament X 07"
-    case .preset08:
-      return "Filament Y 08"
-    case .preset09:
-      return "Filament Z 09"
-    case .preset10:
-      return "Filament Z 10"
-    case .preset11:
-      return "Filament X 11"
-    case .preset12:
-      return "Filament Z 12"
+    case .preset01: return "Filament 01"
+    case .preset02: return "Sparse 02"
+    case .preset03: return "Filament 03"
+    case .preset04: return "Filament 04"
+    case .preset05: return "Filament 05"
+    case .preset06: return "Filament 06"
+    case .preset07: return "Orbital 07"
+    case .preset08: return "Sparse 08"
+    case .preset09: return "Sparse 09"
+    case .preset10: return "Sparse 10"
+    case .preset11: return "Sparse 11"
+    case .preset12: return "Filament 12"
+    case .preset13: return "Sparse 13"
+    case .preset14: return "Sparse 14"
+    case .preset15: return "Sparse 15"
+    case .preset16: return "Filament 16"
+    case .preset17: return "Filament 17"
+    case .preset18: return "Sparse 18"
+    case .preset19: return "Sparse 19"
+    case .preset20: return "Sparse 20"
+    case .preset21: return "Filament 21"
+    case .preset22: return "Sparse 22"
+    case .preset23: return "Sparse 23"
+    case .preset24: return "Sparse 24"
     }
   }
 
   var metricsSummary: String {
     switch self {
-    case .preset01:
-      return "vox 697 depth 0.031"
-    case .preset02:
-      return "vox 983 depth 0.043"
-    case .preset03:
-      return "vox 847 depth 0.033"
-    case .preset04:
-      return "vox 754 depth 0.021"
-    case .preset05:
-      return "vox 1012 depth 0.035"
-    case .preset06:
-      return "vox 1026 depth 0.053"
-    case .preset07:
-      return "vox 763 depth 0.039"
-    case .preset08:
-      return "vox 1235 depth 0.047"
-    case .preset09:
-      return "vox 1049 depth 0.014"
-    case .preset10:
-      return "vox 617 depth 0.063"
-    case .preset11:
-      return "vox 587 depth 0.044"
-    case .preset12:
-      return "vox 460 depth 0.021"
+    case .preset01: return "vox 883 depth 0.068"
+    case .preset02: return "vox 707 depth 0.086"
+    case .preset03: return "vox 846 depth 0.058"
+    case .preset04: return "vox 848 depth 0.087"
+    case .preset05: return "vox 887 depth 0.038"
+    case .preset06: return "vox 858 depth 0.036"
+    case .preset07: return "vox 751 depth 0.089"
+    case .preset08: return "vox 764 depth 0.056"
+    case .preset09: return "vox 768 depth 0.044"
+    case .preset10: return "vox 569 depth 0.075"
+    case .preset11: return "vox 594 depth 0.074"
+    case .preset12: return "vox 875 depth 0.023"
+    case .preset13: return "vox 884 depth 0.004"
+    case .preset14: return "vox 881 depth 0.018"
+    case .preset15: return "vox 886 depth 0.002"
+    case .preset16: return "vox 871 depth 0.002"
+    case .preset17: return "vox 866 depth 0.002"
+    case .preset18: return "vox 872 depth 0.003"
+    case .preset19: return "vox 867 depth 0.111"
+    case .preset20: return "vox 578 depth 0.079"
+    case .preset21: return "vox 812 depth 0.012"
+    case .preset22: return "vox 826 depth 0.102"
+    case .preset23: return "vox 807 depth 0.005"
+    case .preset24: return "vox 801 depth 0.122"
     }
+  }
+
+  func next() -> SimoneOrbit3DPreset {
+    let all = Self.allCases
+    guard let index = all.firstIndex(of: self) else { return self }
+    return all[(index + 1) % all.count]
+  }
+
+  func previous() -> SimoneOrbit3DPreset {
+    let all = Self.allCases
+    guard let index = all.firstIndex(of: self) else { return self }
+    return all[(index + all.count - 1) % all.count]
   }
 }
 
@@ -500,7 +495,7 @@ final class PatternCoordinator {
   }
 
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .neonShells
+  private var _current: VisualPatternKind = .simoneOrbit3D
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0

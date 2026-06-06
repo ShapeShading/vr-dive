@@ -382,93 +382,189 @@ enum SimoneOrbit3DPreset: String, CaseIterable, Identifiable {
   case preset22
   case preset23
   case preset24
+  case preset25
+  case preset26
+  case preset27
+  case preset28
+  case preset29
+  case preset30
+  case preset31
+  case preset32
+  case preset33
+  case preset34
+  case preset35
+  case preset36
+  case preset37
+  case preset38
+  case preset39
+  case preset40
+  case preset41
+  case preset42
+  case preset43
+  case preset44
+  case preset45
+  case preset46
+  case preset47
+  case preset48
 
   var id: String { rawValue }
 
   var parameters: SIMD3<Float> {
     switch self {
-    case .preset01: return SIMD3<Float>(2.203284, 3.682889, 2.468944)
-    case .preset02: return SIMD3<Float>(1.628974, 0.930842, 0.349066)
-    case .preset03: return SIMD3<Float>(2.327106, 5.817764, 4.537856)
-    case .preset04: return SIMD3<Float>(1.369087, 4.212377, 2.810484)
-    case .preset05: return SIMD3<Float>(4.654211, 3.723369, 0.465421)
-    case .preset06: return SIMD3<Float>(1.548957, 1.995704, 2.219864)
-    case .preset07: return SIMD3<Float>(3.331636, 3.911041, 4.126978)
-    case .preset08: return SIMD3<Float>(2.095198, 5.750775, 4.322093)
-    case .preset09: return SIMD3<Float>(1.237973, 0.912589, 1.669799)
-    case .preset10: return SIMD3<Float>(2.660594, 3.259471, 3.987449)
-    case .preset11: return SIMD3<Float>(5.119632, 2.559816, 1.279908)
-    case .preset12: return SIMD3<Float>(3.142631, 4.374982, 3.507344)
-    case .preset13: return SIMD3<Float>(2.625194, 0.433779, 2.202473)
-    case .preset14: return SIMD3<Float>(5.872473, 5.984790, 5.495428)
-    case .preset15: return SIMD3<Float>(1.073784, 2.655868, 4.320235)
-    case .preset16: return SIMD3<Float>(2.700000, 2.320000, -2.510000)
-    case .preset17: return SIMD3<Float>(2.700000, 2.320000, 2.510000)
-    case .preset18: return SIMD3<Float>(5.817764, 3.956080, 0.930842)
-    case .preset19: return SIMD3<Float>(2.792527, 0.465421, 1.163553)
-    case .preset20: return SIMD3<Float>(2.222355, 5.498354, 1.969796)
-    case .preset21: return SIMD3<Float>(1.419006, 2.241834, 4.075525)
-    case .preset22: return SIMD3<Float>(1.636273, 1.173366, 5.913431)
-    case .preset23: return SIMD3<Float>(3.257948, 6.050475, 4.886922)
-    case .preset24: return SIMD3<Float>(3.025237, 5.585054, 5.003277)
+    case .preset01: return SIMD3<Float>(1.462086, 1.582345, 4.446544)
+    case .preset02: return SIMD3<Float>(1.683307, 4.972426, 3.582771)
+    case .preset03: return SIMD3<Float>(5.871389, 5.575985, 4.540637)
+    case .preset04: return SIMD3<Float>(5.729566, 3.817284, 4.553311)
+    case .preset05: return SIMD3<Float>(1.649747, 5.027885, 2.701418)
+    case .preset06: return SIMD3<Float>(3.043993, 5.618190, 5.022583)
+    case .preset07: return SIMD3<Float>(2.268079, 2.239146, 0.972088)
+    case .preset08: return SIMD3<Float>(2.219517, 3.718163, 2.364348)
+    case .preset09: return SIMD3<Float>(1.694355, 1.152851, 0.253725)
+    case .preset10: return SIMD3<Float>(2.884511, 3.356605, 3.901848)
+    case .preset11: return SIMD3<Float>(6.031906, 2.902234, 0.751461)
+    case .preset12: return SIMD3<Float>(2.886869, 0.679263, 1.103803)
+    case .preset13: return SIMD3<Float>(1.539831, 4.250501, 2.498236)
+    case .preset14: return SIMD3<Float>(2.446127, 2.632377, 5.380263)
+    case .preset15: return SIMD3<Float>(5.405390, 2.501911, 0.979672)
+    case .preset16: return SIMD3<Float>(6.052144, 0.824742, 2.061010)
+    case .preset17: return SIMD3<Float>(2.867907, 5.795400, 4.079892)
+    case .preset18: return SIMD3<Float>(5.974421, 0.540345, 1.046620)
+    case .preset19: return SIMD3<Float>(6.027619, 0.351632, 5.311029)
+    case .preset20: return SIMD3<Float>(2.887478, 5.906425, 2.155681)
+    case .preset21: return SIMD3<Float>(5.891320, 0.170534, 5.447242)
+    case .preset22: return SIMD3<Float>(1.686444, 2.189827, 6.093671)
+    case .preset23: return SIMD3<Float>(3.121399, 3.344856, 5.179220)
+    case .preset24: return SIMD3<Float>(5.094475, 2.717053, 1.188711)
+    case .preset25: return SIMD3<Float>(2.518217, 0.373488, 1.103066)
+    case .preset26: return SIMD3<Float>(2.291239, 0.706262, 0.910705)
+    case .preset27: return SIMD3<Float>(0.169816, 5.603922, 3.566132)
+    case .preset28: return SIMD3<Float>(6.274131, 2.554442, 1.865317)
+    case .preset29: return SIMD3<Float>(1.553157, 1.992974, 0.508493)
+    case .preset30: return SIMD3<Float>(4.769333, 1.977667, 0.440707)
+    case .preset31: return SIMD3<Float>(6.188916, 2.833792, 2.160711)
+    case .preset32: return SIMD3<Float>(5.469113, 2.699814, 1.400029)
+    case .preset33: return SIMD3<Float>(2.558385, 3.678280, 4.381503)
+    case .preset34: return SIMD3<Float>(1.533633, 4.114744, 2.849692)
+    case .preset35: return SIMD3<Float>(1.528342, 2.377421, 5.858646)
+    case .preset36: return SIMD3<Float>(2.296071, 0.215828, 1.012999)
+    case .preset37: return SIMD3<Float>(6.080375, 0.335794, 0.774542)
+    case .preset38: return SIMD3<Float>(5.082344, 5.744661, 4.525501)
+    case .preset39: return SIMD3<Float>(1.511192, 5.328898, 2.576730)
+    case .preset40: return SIMD3<Float>(1.574113, 1.611801, 1.126520)
+    case .preset41: return SIMD3<Float>(4.554356, 4.590237, 4.561001)
+    case .preset42: return SIMD3<Float>(5.462157, 2.635644, 0.589428)
+    case .preset43: return SIMD3<Float>(5.085448, 3.114017, 5.354014)
+    case .preset44: return SIMD3<Float>(5.658926, 0.728864, 1.045564)
+    case .preset45: return SIMD3<Float>(1.554969, 5.916431, 3.247268)
+    case .preset46: return SIMD3<Float>(2.173314, 5.838365, 2.480228)
+    case .preset47: return SIMD3<Float>(2.157378, 3.550493, 3.812191)
+    case .preset48: return SIMD3<Float>(5.313185, 0.365443, 5.689588)
     }
   }
 
   var pickerTitle: String {
     switch self {
-    case .preset01: return "Filament 01"
-    case .preset02: return "Sparse 02"
-    case .preset03: return "Filament 03"
-    case .preset04: return "Filament 04"
-    case .preset05: return "Filament 05"
-    case .preset06: return "Filament 06"
+    case .preset01: return "Orbital 01"
+    case .preset02: return "Orbital 02"
+    case .preset03: return "Orbital 03"
+    case .preset04: return "Orbital 04"
+    case .preset05: return "Orbital 05"
+    case .preset06: return "Orbital 06"
     case .preset07: return "Orbital 07"
-    case .preset08: return "Sparse 08"
-    case .preset09: return "Sparse 09"
-    case .preset10: return "Sparse 10"
-    case .preset11: return "Sparse 11"
-    case .preset12: return "Filament 12"
-    case .preset13: return "Sparse 13"
-    case .preset14: return "Sparse 14"
-    case .preset15: return "Sparse 15"
-    case .preset16: return "Filament 16"
-    case .preset17: return "Filament 17"
-    case .preset18: return "Sparse 18"
-    case .preset19: return "Sparse 19"
-    case .preset20: return "Sparse 20"
-    case .preset21: return "Filament 21"
-    case .preset22: return "Sparse 22"
-    case .preset23: return "Sparse 23"
-    case .preset24: return "Sparse 24"
+    case .preset08: return "Orbital 08"
+    case .preset09: return "Orbital 09"
+    case .preset10: return "Orbital 10"
+    case .preset11: return "Orbital 11"
+    case .preset12: return "Orbital 12"
+    case .preset13: return "Orbital 13"
+    case .preset14: return "Orbital 14"
+    case .preset15: return "Orbital 15"
+    case .preset16: return "Orbital 16"
+    case .preset17: return "Orbital 17"
+    case .preset18: return "Orbital 18"
+    case .preset19: return "Orbital 19"
+    case .preset20: return "Orbital 20"
+    case .preset21: return "Orbital 21"
+    case .preset22: return "Orbital 22"
+    case .preset23: return "Orbital 23"
+    case .preset24: return "Orbital 24"
+    case .preset25: return "Orbital 25"
+    case .preset26: return "Orbital 26"
+    case .preset27: return "Orbital 27"
+    case .preset28: return "Orbital 28"
+    case .preset29: return "Sparse 29"
+    case .preset30: return "Sparse 30"
+    case .preset31: return "Sparse 31"
+    case .preset32: return "Sparse 32"
+    case .preset33: return "Sparse 33"
+    case .preset34: return "Sparse 34"
+    case .preset35: return "Sparse 35"
+    case .preset36: return "Sparse 36"
+    case .preset37: return "Sparse 37"
+    case .preset38: return "Sparse 38"
+    case .preset39: return "Sparse 39"
+    case .preset40: return "Filament 40"
+    case .preset41: return "Filament 41"
+    case .preset42: return "Filament 42"
+    case .preset43: return "Filament 43"
+    case .preset44: return "Filament 44"
+    case .preset45: return "Filament 45"
+    case .preset46: return "Filament 46"
+    case .preset47: return "Dense 47"
+    case .preset48: return "Dense 48"
     }
   }
 
   var metricsSummary: String {
     switch self {
-    case .preset01: return "vox 883 depth 0.068"
-    case .preset02: return "vox 707 depth 0.086"
-    case .preset03: return "vox 846 depth 0.058"
-    case .preset04: return "vox 848 depth 0.087"
-    case .preset05: return "vox 887 depth 0.038"
-    case .preset06: return "vox 858 depth 0.036"
-    case .preset07: return "vox 751 depth 0.089"
-    case .preset08: return "vox 764 depth 0.056"
-    case .preset09: return "vox 768 depth 0.044"
-    case .preset10: return "vox 569 depth 0.075"
-    case .preset11: return "vox 594 depth 0.074"
-    case .preset12: return "vox 875 depth 0.023"
-    case .preset13: return "vox 884 depth 0.004"
-    case .preset14: return "vox 881 depth 0.018"
-    case .preset15: return "vox 886 depth 0.002"
-    case .preset16: return "vox 871 depth 0.002"
-    case .preset17: return "vox 866 depth 0.002"
-    case .preset18: return "vox 872 depth 0.003"
-    case .preset19: return "vox 867 depth 0.111"
-    case .preset20: return "vox 578 depth 0.079"
-    case .preset21: return "vox 812 depth 0.012"
-    case .preset22: return "vox 826 depth 0.102"
-    case .preset23: return "vox 807 depth 0.005"
-    case .preset24: return "vox 801 depth 0.122"
+    case .preset01: return "vox 947 depth 0.086 orb 0.830"
+    case .preset02: return "vox 869 depth 0.107 orb 0.905"
+    case .preset03: return "vox 892 depth 0.101 orb 0.909"
+    case .preset04: return "vox 883 depth 0.102 orb 0.900"
+    case .preset05: return "vox 889 depth 0.112 orb 0.928"
+    case .preset06: return "vox 862 depth 0.102 orb 0.892"
+    case .preset07: return "vox 920 depth 0.083 orb 0.805"
+    case .preset08: return "vox 919 depth 0.089 orb 0.847"
+    case .preset09: return "vox 844 depth 0.107 orb 0.900"
+    case .preset10: return "vox 890 depth 0.088 orb 0.860"
+    case .preset11: return "vox 920 depth 0.091 orb 0.881"
+    case .preset12: return "vox 928 depth 0.086 orb 0.854"
+    case .preset13: return "vox 904 depth 0.103 orb 0.921"
+    case .preset14: return "vox 900 depth 0.110 orb 0.928"
+    case .preset15: return "vox 902 depth 0.097 orb 0.876"
+    case .preset16: return "vox 896 depth 0.089 orb 0.866"
+    case .preset17: return "vox 963 depth 0.089 orb 0.875"
+    case .preset18: return "vox 892 depth 0.110 orb 0.953"
+    case .preset19: return "vox 854 depth 0.111 orb 0.938"
+    case .preset20: return "vox 915 depth 0.121 orb 0.930"
+    case .preset21: return "vox 1026 depth 0.092 orb 0.873"
+    case .preset22: return "vox 810 depth 0.113 orb 0.891"
+    case .preset23: return "vox 1043 depth 0.084 orb 0.826"
+    case .preset24: return "vox 858 depth 0.086 orb 0.828"
+    case .preset25: return "vox 966 depth 0.110 orb 0.967"
+    case .preset26: return "vox 901 depth 0.111 orb 0.924"
+    case .preset27: return "vox 906 depth 0.100 orb 0.879"
+    case .preset28: return "vox 985 depth 0.104 orb 0.955"
+    case .preset29: return "vox 973 depth 0.079 orb 0.826"
+    case .preset30: return "vox 850 depth 0.077 orb 0.774"
+    case .preset31: return "vox 775 depth 0.080 orb 0.767"
+    case .preset32: return "vox 954 depth 0.071 orb 0.776"
+    case .preset33: return "vox 775 depth 0.088 orb 0.788"
+    case .preset34: return "vox 965 depth 0.071 orb 0.802"
+    case .preset35: return "vox 745 depth 0.087 orb 0.786"
+    case .preset36: return "vox 796 depth 0.075 orb 0.746"
+    case .preset37: return "vox 726 depth 0.081 orb 0.775"
+    case .preset38: return "vox 892 depth 0.058 orb 0.717"
+    case .preset39: return "vox 958 depth 0.064 orb 0.750"
+    case .preset40: return "vox 913 depth 0.075 orb 0.742"
+    case .preset41: return "vox 890 depth 0.072 orb 0.723"
+    case .preset42: return "vox 1087 depth 0.084 orb 0.797"
+    case .preset43: return "vox 762 depth 0.076 orb 0.724"
+    case .preset44: return "vox 842 depth 0.080 orb 0.736"
+    case .preset45: return "vox 858 depth 0.064 orb 0.687"
+    case .preset46: return "vox 990 depth 0.063 orb 0.720"
+    case .preset47: return "vox 1032 depth 0.066 orb 0.732"
+    case .preset48: return "vox 1108 depth 0.071 orb 0.741"
     }
   }
 

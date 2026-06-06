@@ -7,27 +7,33 @@ final class SimoneOrbit3DRenderer: VisualPatternController {
 
   private let pipelineState: MTLRenderPipelineState
   private let depthStencilState: MTLDepthStencilState
-  private let vertexBuffer: MTLBuffer
-  private let indexBuffer: MTLBuffer
-  private let indexCount: Int
+  private let orbitBuffer: MTLBuffer
   private let maxViewCount: Int
 
-  private let cubeScale: Float = 0.28
+  // Orbit simulation config
+  private static let pointsPerSeed = 4000
+  private static let warmupSteps   = 500
+  private static let seedVectors: [SIMD3<Float>] = [
+    SIMD3<Float>( 0.12, -0.09,  0.04),
+    SIMD3<Float>(-0.18,  0.06,  0.11),
+    SIMD3<Float>( 0.07,  0.15, -0.13),
+  ]
+  private static let totalPoints = pointsPerSeed * seedVectors.count
+
+  private let orbitScale: Float = 0.72   // maps sin/cos [-1,1] to local space
+  private let cubeScale:  Float = 0.46   // world-space object size
   private let objectCenter = SIMD3<Float>(0.0, 0.0, -2.0)
 
   private var animationTime: Float = 0
   private var lastSimulationTime: Float?
-  private var currentPreset: SimoneOrbit3DPreset = .p369_451
+  private var currentPreset: SimoneOrbit3DPreset = .preset01
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
 
-    let geometry = SimoneOrbit3DRenderer.makeBox(
-      device: device,
-      localHalfExtents: SIMD3<Float>(repeating: 1.0))
-    vertexBuffer = geometry.vertexBuffer
-    indexBuffer = geometry.indexBuffer
-    indexCount = geometry.indexCount
+    orbitBuffer = device.makeBuffer(
+      length: MemoryLayout<OrbitPointVertex>.stride * Self.totalPoints,
+      options: .storageModeShared)!
 
     pipelineState = try SimoneOrbit3DRenderer.makePipelineState(
       device: device,
@@ -52,13 +58,47 @@ final class SimoneOrbit3DRenderer: VisualPatternController {
     lastSimulationTime = nil
   }
 
+  // MARK: - CPU orbit simulation
+
+  private func simoneMap(_ p: SIMD3<Float>, _ params: SIMD3<Float>) -> SIMD3<Float> {
+    SIMD3<Float>(
+      sin(p.x * p.x - p.y * p.y - p.z * p.z + params.x),
+      cos(2 * p.x * p.y + params.y),
+      sin(2 * p.x * p.z + params.z))
+  }
+
+  private func rebuildOrbit() {
+    let params = currentPreset.parameters
+    let ptr = orbitBuffer.contents().bindMemory(
+      to: OrbitPointVertex.self, capacity: Self.totalPoints)
+    var writeIndex = 0
+    let inv = 1.0 / Float(Self.pointsPerSeed)
+    for seed in Self.seedVectors {
+      var s = seed
+      for _ in 0..<Self.warmupSteps { s = simoneMap(s, params) }
+      for i in 0..<Self.pointsPerSeed {
+        s = simoneMap(s, params)
+        ptr[writeIndex] = OrbitPointVertex(
+          x: s.x * orbitScale,
+          y: s.y * orbitScale,
+          z: s.z * orbitScale,
+          brightness: 0.35 + 0.65 * Float(i) * inv)
+        writeIndex += 1
+      }
+    }
+  }
+
+  // MARK: - Render
+
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
+    rebuildOrbit()
+
     encoder.setRenderPipelineState(pipelineState)
     encoder.setDepthStencilState(depthStencilState)
     encoder.setCullMode(.none)
     context.applyViewConfiguration(on: encoder)
 
-    encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+    encoder.setVertexBuffer(orbitBuffer, offset: 0, index: 0)
 
     var uniforms = SimoneOrbit3DUniforms(
       time: animationTime,
@@ -86,87 +126,33 @@ final class SimoneOrbit3DRenderer: VisualPatternController {
     }
 
     encoder.setFragmentBytes(
-      &uniforms,
-      length: MemoryLayout<SimoneOrbit3DUniforms>.stride,
-      index: 0)
+      &uniforms, length: MemoryLayout<SimoneOrbit3DUniforms>.stride, index: 0)
 
-    var viewToWorld = context.viewData.viewToWorldTransforms
-    if viewToWorld.isEmpty { viewToWorld = [matrix_identity_float4x4] }
-    viewToWorld.withUnsafeBytes {
-      if let base = $0.baseAddress, $0.count > 0 {
-        encoder.setFragmentBytes(base, length: $0.count, index: 1)
-      }
-    }
-
-    encoder.drawIndexedPrimitives(
-      type: .triangle,
-      indexCount: indexCount,
-      indexType: .uint16,
-      indexBuffer: indexBuffer,
-      indexBufferOffset: 0)
+    encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: Self.totalPoints)
   }
 }
 
 extension SimoneOrbit3DRenderer {
-  fileprivate static func makeBox(
-    device: MTLDevice,
-    localHalfExtents e: SIMD3<Float>
-  ) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
-    typealias V = MeshVertex
-    let (x, y, z) = (e.x, e.y, e.z)
-    let faces: [(positions: [SIMD3<Float>], normal: SIMD3<Float>)] = [
-      ([[-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]], [0, 0, 1]),
-      ([[x, -y, -z], [-x, -y, -z], [-x, y, -z], [x, y, -z]], [0, 0, -1]),
-      ([[x, -y, z], [x, -y, -z], [x, y, -z], [x, y, z]], [1, 0, 0]),
-      ([[-x, -y, -z], [-x, -y, z], [-x, y, z], [-x, y, -z]], [-1, 0, 0]),
-      ([[-x, y, z], [x, y, z], [x, y, -z], [-x, y, -z]], [0, 1, 0]),
-      ([[-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z]], [0, -1, 0]),
-    ]
-
-    var vertices: [V] = []
-    vertices.reserveCapacity(24)
-    var indices: [UInt16] = []
-    indices.reserveCapacity(36)
-
-    for face in faces {
-      let base = UInt16(vertices.count)
-      for position in face.positions {
-        vertices.append(V(position: position, normal: face.normal))
-      }
-      indices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
-    }
-
-    let vertexBuffer = device.makeBuffer(
-      bytes: vertices,
-      length: MemoryLayout<V>.stride * vertices.count,
-      options: .storageModeShared)!
-    let indexBuffer = device.makeBuffer(
-      bytes: indices,
-      length: MemoryLayout<UInt16>.stride * indices.count,
-      options: .storageModeShared)!
-    return (vertexBuffer, indexBuffer, indices.count)
-  }
-
   fileprivate static func makePipelineState(
     device: MTLDevice,
     library: MTLLibrary,
     maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let desc = MTLRenderPipelineDescriptor()
-    desc.vertexFunction = library.makeFunction(name: "simoneOrbit3DVertex")
-    desc.fragmentFunction = library.makeFunction(name: "simoneOrbit3DFragment")
+    desc.vertexFunction  = library.makeFunction(name: "simoneOrbitPointVertex")
+    desc.fragmentFunction = library.makeFunction(name: "simoneOrbitPointFragment")
     desc.colorAttachments[0].pixelFormat = .rgba16Float
-    desc.depthAttachmentPixelFormat = .depth32Float
+    desc.depthAttachmentPixelFormat      = .depth32Float
 
-    let vertexDescriptor = MTLVertexDescriptor()
-    vertexDescriptor.attributes[0].format = .float3
-    vertexDescriptor.attributes[0].offset = 0
-    vertexDescriptor.attributes[0].bufferIndex = 0
-    vertexDescriptor.attributes[1].format = .float3
-    vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
-    vertexDescriptor.attributes[1].bufferIndex = 0
-    vertexDescriptor.layouts[0].stride = MemoryLayout<MeshVertex>.stride
-    desc.vertexDescriptor = vertexDescriptor
+    // Additive blending: overlapping points accumulate brightness
+    let ca = desc.colorAttachments[0]!
+    ca.isBlendingEnabled          = true
+    ca.rgbBlendOperation          = .add
+    ca.alphaBlendOperation        = .add
+    ca.sourceRGBBlendFactor       = .one
+    ca.sourceAlphaBlendFactor     = .one
+    ca.destinationRGBBlendFactor  = .one
+    ca.destinationAlphaBlendFactor = .one
 
     desc.maxVertexAmplificationCount = max(maxViewCount, 1)
     return try device.makeRenderPipelineState(descriptor: desc)
@@ -174,8 +160,8 @@ extension SimoneOrbit3DRenderer {
 
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let desc = MTLDepthStencilDescriptor()
-    desc.depthCompareFunction = .greater
-    desc.isDepthWriteEnabled = true
+    desc.depthCompareFunction = .greater  // reversed-Z convention
+    desc.isDepthWriteEnabled  = false     // points don't occlude each other
     return device.makeDepthStencilState(descriptor: desc)!
   }
 }

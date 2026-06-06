@@ -69,8 +69,6 @@ struct PatternMenuView: View {
 struct ControlButtonsView: View {
   @Bindable var model: PatternMenuModel
 
-  private let simonePresetColumns = [GridItem(.adaptive(minimum: 112), spacing: 10)]
-
   var body: some View {
     VStack(spacing: 18) {
       HStack(spacing: 18) {
@@ -146,6 +144,13 @@ struct ControlButtonsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
+          Picker("参数预设", selection: $model.simoneOrbit3DPreset) {
+            ForEach(SimoneOrbit3DPreset.allCases) { preset in
+              Text(preset.pickerTitle).tag(preset)
+            }
+          }
+          .pickerStyle(.menu)
+
           let params = model.simoneOrbit3DPreset.parameters
           Text(
             "当前参数: a=\(params.x, specifier: "%.2f")  b=\(params.y, specifier: "%.2f")  c=\(params.z, specifier: "%.2f")"
@@ -153,22 +158,9 @@ struct ControlButtonsView: View {
           .font(.system(.caption, design: .monospaced))
           .foregroundStyle(.secondary)
 
-          ScrollView {
-            LazyVGrid(columns: simonePresetColumns, alignment: .leading, spacing: 10) {
-              ForEach(SimoneOrbit3DPreset.allCases) { preset in
-                Button(action: {
-                  model.simoneOrbit3DPreset = preset
-                }) {
-                  Text(preset.buttonTitle)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(model.simoneOrbit3DPreset == preset ? .accentColor : .gray.opacity(0.6))
-              }
-            }
-          }
-          .frame(maxHeight: 180)
+          Text("搜索摘要: \(model.simoneOrbit3DPreset.metricsSummary)")
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }

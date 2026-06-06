@@ -10,3 +10,11 @@ struct SimoneOrbit3DUniforms {
   var simoneParameters: SIMD4<Float>
   var objectCenter: SIMD4<Float>
 }
+
+/// Must match Metal's `packed_float3 position; float brightness;` (16 bytes total).
+struct OrbitPointVertex {
+  var x: Float
+  var y: Float
+  var z: Float
+  var brightness: Float
+}

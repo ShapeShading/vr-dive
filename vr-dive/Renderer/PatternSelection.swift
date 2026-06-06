@@ -358,67 +358,135 @@ enum RayMarchingProbeDimTarget: Int, CaseIterable {
 }
 
 enum SimoneOrbit3DPreset: String, CaseIterable, Identifiable {
-  case p369_451
-  case p551_484
-  case p364_171
-  case p546_455
-  case p047_225
-  case p029_095
-  case p259_249
-  case p054_123
-  case p040_511
-  case p231_164
-  case p029_400
-  case p590_564
-  case p361_424
-  case p270_232
-  case p255_093
+  case preset01
+  case preset02
+  case preset03
+  case preset04
+  case preset05
+  case preset06
+  case preset07
+  case preset08
+  case preset09
+  case preset10
+  case preset11
+  case preset12
 
   var id: String { rawValue }
 
   var ab: SIMD2<Float> {
     switch self {
-    case .p369_451:
-      return SIMD2<Float>(3.69, 4.51)
-    case .p551_484:
-      return SIMD2<Float>(5.51, 4.84)
-    case .p364_171:
-      return SIMD2<Float>(3.64, 1.71)
-    case .p546_455:
-      return SIMD2<Float>(5.46, 4.55)
-    case .p047_225:
-      return SIMD2<Float>(0.47, 2.25)
-    case .p029_095:
-      return SIMD2<Float>(0.29, 0.95)
-    case .p259_249:
-      return SIMD2<Float>(2.59, 2.49)
-    case .p054_123:
-      return SIMD2<Float>(0.54, 1.23)
-    case .p040_511:
-      return SIMD2<Float>(0.40, 5.11)
-    case .p231_164:
-      return SIMD2<Float>(2.31, 1.64)
-    case .p029_400:
-      return SIMD2<Float>(0.29, 4.00)
-    case .p590_564:
-      return SIMD2<Float>(5.90, 5.64)
-    case .p361_424:
-      return SIMD2<Float>(3.61, 4.24)
-    case .p270_232:
-      return SIMD2<Float>(2.70, 2.32)
-    case .p255_093:
-      return SIMD2<Float>(2.55, 0.93)
+    case .preset01:
+      return SIMD2<Float>(5.086388, 2.692794)
+    case .preset02:
+      return SIMD2<Float>(2.692794, 0.598399)
+    case .preset03:
+      return SIMD2<Float>(0.299199, 5.684787)
+    case .preset04:
+      return SIMD2<Float>(5.086388, 2.991993)
+    case .preset05:
+      return SIMD2<Float>(6.283185, 2.692794)
+    case .preset06:
+      return SIMD2<Float>(0.000000, 5.684787)
+    case .preset07:
+      return SIMD2<Float>(2.692794, 5.983986)
+    case .preset08:
+      return SIMD2<Float>(2.550000, 0.930000)
+    case .preset09:
+      return SIMD2<Float>(2.393594, 6.283185)
+    case .preset10:
+      return SIMD2<Float>(6.175432, 1.310495)
+    case .preset11:
+      return SIMD2<Float>(2.991993, 5.684787)
+    case .preset12:
+      return SIMD2<Float>(0.000000, 2.094395)
     }
   }
 
   var parameters: SIMD3<Float> {
-    let values = ab
-    return SIMD3<Float>(values.x, values.y, 0.5 * (values.x - values.y))
+    switch self {
+    case .preset01:
+      return SIMD3<Float>(5.086388, 2.692794, 1.196797)
+    case .preset02:
+      return SIMD3<Float>(2.692794, 0.598399, 1.047198)
+    case .preset03:
+      return SIMD3<Float>(0.299199, 5.684787, 3.590392)
+    case .preset04:
+      return SIMD3<Float>(5.086388, 2.991993, 1.047198)
+    case .preset05:
+      return SIMD3<Float>(6.283185, 2.692794, 1.795196)
+    case .preset06:
+      return SIMD3<Float>(0.000000, 5.684787, 3.440792)
+    case .preset07:
+      return SIMD3<Float>(2.692794, 5.983986, 4.637589)
+    case .preset08:
+      return SIMD3<Float>(2.550000, 0.930000, -1.740000)
+    case .preset09:
+      return SIMD3<Float>(2.393594, 6.283185, 4.338390)
+    case .preset10:
+      return SIMD3<Float>(6.175432, 1.310495, 5.114121)
+    case .preset11:
+      return SIMD3<Float>(2.991993, 5.684787, 4.936788)
+    case .preset12:
+      return SIMD3<Float>(0.000000, 2.094395, 5.235988)
+    }
   }
 
-  var buttonTitle: String {
-    let values = ab
-    return String(format: "a%.2f b%.2f", values.x, values.y)
+  var pickerTitle: String {
+    switch self {
+    case .preset01:
+      return "Filament Z 01"
+    case .preset02:
+      return "Filament Y 02"
+    case .preset03:
+      return "Filament Y 03"
+    case .preset04:
+      return "Filament Z 04"
+    case .preset05:
+      return "Filament X 05"
+    case .preset06:
+      return "Filament Y 06"
+    case .preset07:
+      return "Filament X 07"
+    case .preset08:
+      return "Filament Y 08"
+    case .preset09:
+      return "Filament Z 09"
+    case .preset10:
+      return "Filament Z 10"
+    case .preset11:
+      return "Filament X 11"
+    case .preset12:
+      return "Filament Z 12"
+    }
+  }
+
+  var metricsSummary: String {
+    switch self {
+    case .preset01:
+      return "vox 697 depth 0.031"
+    case .preset02:
+      return "vox 983 depth 0.043"
+    case .preset03:
+      return "vox 847 depth 0.033"
+    case .preset04:
+      return "vox 754 depth 0.021"
+    case .preset05:
+      return "vox 1012 depth 0.035"
+    case .preset06:
+      return "vox 1026 depth 0.053"
+    case .preset07:
+      return "vox 763 depth 0.039"
+    case .preset08:
+      return "vox 1235 depth 0.047"
+    case .preset09:
+      return "vox 1049 depth 0.014"
+    case .preset10:
+      return "vox 617 depth 0.063"
+    case .preset11:
+      return "vox 587 depth 0.044"
+    case .preset12:
+      return "vox 460 depth 0.021"
+    }
   }
 }
 
@@ -439,7 +507,7 @@ final class PatternCoordinator {
   private var _originCellInspectionEnabled: Bool = false
   private var _rayMarchingProbeDimTarget: RayMarchingProbeDimTarget = .none
   private var _huashanSampleRatio: Float = PatternCoordinator.defaultHuashanSampleRatio
-  private var _simoneOrbit3DPreset: SimoneOrbit3DPreset = .p369_451
+  private var _simoneOrbit3DPreset: SimoneOrbit3DPreset = .preset01
 
   func currentPattern() -> VisualPatternKind {
     queue.sync { _current }
@@ -556,7 +624,7 @@ final class PatternMenuModel {
     }
   }
 
-  var simoneOrbit3DPreset: SimoneOrbit3DPreset = .p369_451 {
+  var simoneOrbit3DPreset: SimoneOrbit3DPreset = .preset01 {
     didSet {
       coordinator.setSimoneOrbit3DPreset(simoneOrbit3DPreset)
     }
@@ -604,6 +672,6 @@ final class PatternMenuModel {
   }
 
   var simoneOrbit3DPrincipleText: String {
-    "二维 Simone 递推提升到三维: x'=sin(x²-y²-z²+a), y'=cos(2xy+b), z'=sin(2xz+c)。画面不是挤出 2D 图，而是在 3D 体积里累积多条轨道的密度。"
+    "离线脚本现在优先筛选 filament 型 3D 轨道: x'=sin(x²-y²-z²+a), y'=cos(2xy+b), z'=sin(2xz+c)。面板里的预设更偏向可见曲线骨架，而不是高密度云团。"
   }
 }

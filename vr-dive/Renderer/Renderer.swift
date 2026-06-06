@@ -591,7 +591,8 @@ class Renderer {
     // still assert if setVertexAmplificationCount(1, nil) is called, even though
     // Metal exposes the capability query. For now only enable amplification on
     // actual multi-view draws where the device explicitly supports the count.
-    let supportsVertexAmplification = desiredViewCount > 1
+    let supportsVertexAmplification =
+      desiredViewCount > 1
       && device.supportsVertexAmplificationCount(desiredViewCount)
     let availableViews = drawable.views
     let sampledViewCount = min(desiredViewCount, availableViews.count)

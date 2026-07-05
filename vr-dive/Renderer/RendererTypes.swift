@@ -38,6 +38,9 @@ struct PatternRenderContext {
   let time: Float
   let renderTargetWidth: Int  // actual color texture width (not display viewport)
   let renderTargetHeight: Int  // actual color texture height
+  /// Virtual-viewpoint transform for pattern-space navigation (identity in normal mode).
+  /// Applied in box/scene-local space by renderers that support it (e.g. GlassBox).
+  let patternNavigationTransform: simd_float4x4
 
   func applyViewConfiguration(on encoder: MTLRenderCommandEncoder) {
     if !viewData.viewports.isEmpty {

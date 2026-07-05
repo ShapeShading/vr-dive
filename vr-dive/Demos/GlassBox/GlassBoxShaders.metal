@@ -19,6 +19,9 @@ struct GlassBoxUniforms {
     float  boxScale;
     float  _pad;
     float4 objectCenter;  // xyz = world-space box centre
+    /// Pattern-space navigation transform (identity in normal mode).
+    /// Applied to box-local eye/rd to move the virtual viewpoint inside the pattern.
+    float4x4 patternTransform;
 };
 
 struct MeshVertex {
@@ -391,34 +394,47 @@ fragment float4 glassBoxFragment(
     // Ray in world space → convert to box-local space
     float3 center    = uniforms.objectCenter.xyz;
     float  sc        = uniforms.boxScale;
-    float3 eye       = (camWorld   - center) / sc;
-    float3 rd        = normalize(in.worldPos - camWorld); // dir unchanged under uniform scale
+    float3 boxEye    = (camWorld   - center) / sc;
+    float3 boxRd     = normalize(in.worldPos - camWorld); // dir unchanged under uniform scale
 
     // Light direction (world-agnostic, same as original ShaderToy)
     float3 l_dir = normalize(float3(0, 1, 0)) * gb_rotz(0.5f);
 
-    bool insideBox = all(abs(eye) < (GB_BOXDIMS - 1e-3f));
+    // Box boundary test uses the REAL camera so the box mesh stays fixed in world space.
+    bool insideBox = all(abs(boxEye) < (GB_BOXDIMS - 1e-3f));
 
-    float3 marchOrigin = eye;
+    float3 realMarchOrigin;
     float3 surfacePoint;
     float3 surfaceNormal;
     if (!insideBox) {
         float3 entryNormal;
-        float  tEnter = gb_boxHit(eye, rd, GB_BOXDIMS, entryNormal, true);
+        float  tEnter = gb_boxHit(boxEye, boxRd, GB_BOXDIMS, entryNormal, true);
         if (tEnter < 0.0f) discard_fragment();
-        surfacePoint = eye + rd * tEnter;
+        surfacePoint = boxEye + boxRd * tEnter;
         surfaceNormal = entryNormal;
-        marchOrigin = surfacePoint + rd * 1e-3f;
+        realMarchOrigin = surfacePoint + boxRd * 1e-3f;
+    } else {
+        realMarchOrigin = boxEye;
     }
 
     float3 exitNormal;
-    float  tExit = gb_boxHit(marchOrigin, rd, GB_BOXDIMS, exitNormal, false);
+    float  tExit = gb_boxHit(insideBox ? boxEye : realMarchOrigin, boxRd, GB_BOXDIMS, exitNormal, false);
     if (tExit <= 0.0f) discard_fragment();
 
     if (insideBox) {
-        surfacePoint = eye + rd * tExit;
+        surfacePoint = boxEye + boxRd * tExit;
         surfaceNormal = -exitNormal;
     }
+
+    // Apply pattern navigation to the march origin and ray direction ONLY.
+    // The box boundary test (above) used the real camera, so the box stays fixed.
+    float3 eye = (uniforms.patternTransform * float4(realMarchOrigin, 1.0f)).xyz;
+    float3 rd  = normalize(float3(uniforms.patternTransform * float4(boxRd, 0.0f)));
+
+    // Re-compute tExit from the virtual viewpoint so the ray march is bounded correctly.
+    float3 vExitNormal;
+    float  vExit = gb_boxHit(eye, rd, GB_BOXDIMS, vExitNormal, false);
+    if (vExit <= 0.0f) vExit = tExit;  // fallback to real exit if virtual misses
 
     float  R0 = (GB_IOR - 1.0f) / (GB_IOR + 1.0f);
     R0 *= R0;
@@ -426,11 +442,11 @@ fragment float4 glassBoxFragment(
     float  fresnel = R0 + (1.0f - R0) * pow(1.0f - cosTheta, 5.0f);
 
     float  hitT;
-    float4 internalcol = gb_insides(marchOrigin, rd, l_dir, uniforms.time, tExit, hitT);
+    float4 internalcol = gb_insides(eye, rd, l_dir, uniforms.time, vExit, hitT);
     float3 motifCol = ((hitT > 0.0f) && (internalcol.a > 0.0f)) ? internalcol.rgb : float3(0.0f);
 
-    float3 bouncePoint = marchOrigin + rd * tExit;
-    float3 bounceDir = reflect(rd, -exitNormal);
+    float3 bouncePoint = eye + rd * vExit;
+    float3 bounceDir = reflect(rd, -vExitNormal);
     float3 bounceOrigin = bouncePoint + bounceDir * 1e-3f;
     float3 bounceExitNormal;
     float  bounceMaxDist = gb_boxHit(bounceOrigin, bounceDir, GB_BOXDIMS, bounceExitNormal, false);

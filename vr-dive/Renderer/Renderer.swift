@@ -58,7 +58,7 @@ class Renderer {
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
 
-  init(_ layerRenderer: LayerRenderer, patternCoordinator: PatternCoordinator) {
+  init(_ layerRenderer: LayerRenderer, patternCoordinator: PatternCoordinator, gameManager: GameManager) {
     self.layerRenderer = layerRenderer
     self.device = layerRenderer.device
     self.library = device.makeDefaultLibrary()!
@@ -81,7 +81,7 @@ class Renderer {
 
     self.arSession = ARKitSession()
     self.worldTracking = WorldTrackingProvider()
-    self.gameManager = GameManager()
+    self.gameManager = gameManager
 
     // Add Tetris3D after gameManager is initialized
     Renderer.addTetris3D(
@@ -507,7 +507,8 @@ class Renderer {
         viewData: viewData,
         time: time,
         renderTargetWidth: colorTexture.width,
-        renderTargetHeight: colorTexture.height
+        renderTargetHeight: colorTexture.height,
+        patternNavigationTransform: gameManager.patternNavTransform
       )
       activePattern.encodeComputePrepass(commandBuffer: commandBuffer, context: prepassContext)
     }
@@ -532,7 +533,8 @@ class Renderer {
         viewData: viewData,
         time: time,
         renderTargetWidth: colorTexture.width,
-        renderTargetHeight: colorTexture.height
+        renderTargetHeight: colorTexture.height,
+        patternNavigationTransform: gameManager.patternNavTransform
       )
       activePattern.encodeFrame(encoder: sceneEncoder, context: sceneContext)
     }

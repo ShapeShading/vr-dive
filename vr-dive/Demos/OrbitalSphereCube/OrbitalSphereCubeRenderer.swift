@@ -66,7 +66,8 @@ final class OrbitalSphereCubeRenderer: VisualPatternController {
       viewCount: UInt32(context.viewData.viewCount),
       cubeScale: cubeScale,
       travelSpeed: travelSpeed,
-      objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0))
+      objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0),
+      patternTransform: context.patternNavigationTransform)
 
     encoder.setVertexBytes(
       &uniforms, length: MemoryLayout<OrbitalSphereCubeUniforms>.stride, index: 1)

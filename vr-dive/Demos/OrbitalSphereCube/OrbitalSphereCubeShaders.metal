@@ -20,6 +20,8 @@ struct OrbitalSphereCubeUniforms {
   float cubeScale;
   float travelSpeed;
   float4 objectCenter;
+  /// Pattern-space navigation transform (identity in normal mode).
+  float4x4 patternTransform;
 };
 
 struct MeshVertex {
@@ -183,17 +185,27 @@ fragment float4 orbitalSphereCubeFragment(
   float3 camWorld = float3(v2w[3].x, v2w[3].y, v2w[3].z);
 
   float3 center = uniforms.objectCenter.xyz;
-  float3 roLocal = (camWorld - center) / uniforms.cubeScale;
-  float3 rdLocal = normalize(in.worldPos - camWorld);
+  // Real camera in cube-local space (used for box boundary hit — keeps the cube fixed)
+  float3 boxRoLocal = (camWorld - center) / uniforms.cubeScale;
+  float3 boxRdLocal = normalize(in.worldPos - camWorld);
 
+  // Box boundary test uses the REAL camera so the cube mesh boundary stays fixed.
   float tEntry;
   float tExit;
-  if (!osc_boxHit(roLocal, rdLocal, float3(-1.0f), float3(1.0f), tEntry, tExit)) {
+  if (!osc_boxHit(boxRoLocal, boxRdLocal, float3(-1.0f), float3(1.0f), tEntry, tExit)) {
     discard_fragment();
   }
 
+  // Entry point on the box surface in cube-local space (real camera perspective).
+  float3 realEntry = boxRoLocal + boxRdLocal * max(tEntry, 0.0f);
+
+  // Apply pattern navigation ONLY to the scene entry point and ray direction.
+  // This shifts what's rendered inside the box without moving the box boundary.
+  float3 roLocal = (uniforms.patternTransform * float4(realEntry, 1.0f)).xyz;
+  float3 rdLocal = normalize(float3(uniforms.patternTransform * float4(boxRdLocal, 0.0f)));
+
   float time = uniforms.time * uniforms.travelSpeed;
-  float3 ro = (roLocal + rdLocal * max(tEntry, 0.0f)) * OSC_SCENE_SCALE;
+  float3 ro = roLocal * OSC_SCENE_SCALE;
   float3 rd = rdLocal;
   float3 lightDir = normalize(float3(0.85f, 0.35f, 0.65f));
   float4 sphere = float4(0.0f, 0.0f, 0.0f, OSC_SPHERE_RAD);
@@ -207,7 +219,7 @@ fragment float4 orbitalSphereCubeFragment(
     float3 nor = osc_sphereNormal(pos, sphere);
     (void)pos;
     (void)nor;
-    color = float3(0.028f, 0.105f, 0.185f);
+    color = float3(0.06f, 0.20f, 0.38f);
   }
 
   float planeHit = osc_rayMarchPlane(ro, rd, tmax, time);
@@ -217,16 +229,16 @@ fragment float4 orbitalSphereCubeFragment(
     float3 wire = float3(0.0f);
     wire += exp(-24.0f * abs(scp.x));
     wire += exp(-24.0f * abs(scp.y));
-    color += wire * float3(0.40f, 0.95f, 0.72f) * 0.26f * exp(-0.03f * planeHit * planeHit);
+    color += wire * float3(0.40f, 0.95f, 0.72f) * 0.75f * exp(-0.03f * planeHit * planeHit);
   }
 
   if (dot(rd, sphere.xyz - ro) > 0.0f) {
     float d = osc_sphereDistance(ro, rd, sphere);
     float3 glow = float3(0.0f);
-    glow += float3(0.40f, 0.75f, 1.00f) * 0.24f * exp(-3.8f * abs(d)) * step(0.0f, d);
-    glow += float3(0.45f, 0.80f, 1.00f) * 0.07f * exp(-13.0f * abs(d));
-    glow += float3(0.82f, 0.90f, 1.00f) * 0.08f * exp(-150.0f * abs(d));
-    color += glow * 0.7f;
+    glow += float3(0.40f, 0.75f, 1.00f) * 0.55f * exp(-3.8f * abs(d)) * step(0.0f, d);
+    glow += float3(0.45f, 0.80f, 1.00f) * 0.18f * exp(-13.0f * abs(d));
+    glow += float3(0.82f, 0.90f, 1.00f) * 0.22f * exp(-150.0f * abs(d));
+    color += glow * 1.8f;
   }
 
   color *= smoothstep(0.0f, 2.5f, time + 0.3f);

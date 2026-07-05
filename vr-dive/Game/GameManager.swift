@@ -19,11 +19,14 @@ class GameManager {
     var dpadLeft: Bool = false
     var dpadRight: Bool = false
     var rightShoulder: Bool = false
+    // Rising-edge latch for square (□) button — set in handleInput, consumed in updateRigState
+    var squareJustPressed: Bool = false
   }
 
   private let controllerQueue = DispatchQueue(label: "vr-dive.controller.state")
   private var controllerState = ControllerState()
   private var lastInputLogTime: TimeInterval = 0
+  private var lastPatternNavLogTime: TimeInterval = 0
 
   private let movementSpeed: Float = 1.2
   private let yawSpeed: Float = .pi / 2.0
@@ -35,6 +38,12 @@ class GameManager {
   private(set) var playerOffset: SIMD3<Float> = .zero
   private(set) var yawAngle: Float = 0
   private(set) var rigTransform: simd_float4x4 = matrix_identity_float4x4
+
+  // Pattern navigation state (square / □ button activates)
+  private var patternNavOffset: SIMD3<Float> = .zero
+  private var patternNavYaw: Float = 0
+  private(set) var isPatternNavigationActive: Bool = false
+  private(set) var patternNavTransform: simd_float4x4 = matrix_identity_float4x4
 
   init() {
     setupControllerObserver()
@@ -128,6 +137,7 @@ class GameManager {
     let dpadRight = gamepad.dpad.right.isPressed
 
     controllerQueue.sync {
+      let prevButtonX = controllerState.buttonX  // capture before update for edge detection
       controllerState.leftStick = leftStick
       controllerState.rightStick = rightStick
       controllerState.buttonA = buttonA
@@ -140,6 +150,11 @@ class GameManager {
       controllerState.dpadLeft = dpadLeft
       controllerState.dpadRight = dpadRight
       controllerState.rightShoulder = rightShoulder
+      // Rising edge: square button just pressed this event
+      if buttonX && !prevButtonX {
+        controllerState.squareJustPressed = true
+        print("[GameManager] Square (□) rising edge detected")
+      }
     }
 
     logInputEvent(
@@ -163,6 +178,15 @@ class GameManager {
     )
   }
 
+  /// Call from any thread (e.g. UI button) to toggle pattern navigation mode.
+  /// Uses the same latch mechanism as the gamepad square button so the change
+  /// is applied atomically on the next render-loop tick.
+  func togglePatternNavigation() {
+    controllerQueue.sync {
+      controllerState.squareJustPressed = true
+    }
+  }
+
   func updateRigState(deltaTime: Float, headTransform: simd_float4x4) -> simd_float4x4 {
     controllerQueue.sync {
       let primaryStickInput = applyDeadZone(controllerState.leftStick)
@@ -175,42 +199,100 @@ class GameManager {
       let strafeInput = secondaryStickInput.x
       let verticalInput = secondaryStickInput.y
 
-      // Reduce turning speed by half when actively turning
+      // Square button (□) — consume the rising-edge latch set by handleInput
+      if controllerState.squareJustPressed {
+        controllerState.squareJustPressed = false
+        isPatternNavigationActive.toggle()
+        print("[GameManager] Pattern nav mode: \(isPatternNavigationActive ? "ON" : "OFF")")
+      }
+
       let turnSpeedReduction = 1.0 - abs(yawInput) * 0.5
-      yawAngle -= yawInput * yawSpeed * yawMultiplier * turnSpeedReduction * deltaTime
-      yawAngle = wrapAngle(yawAngle)
 
-      // Calculate Rig Rotation (Tracking -> World rotation)
-      let cosYaw = cos(-yawAngle)
-      let sinYaw = sin(-yawAngle)
-      let rigRotation = simd_float3x3(
-        SIMD3<Float>(cosYaw, 0, sinYaw),
-        SIMD3<Float>(0, 1, 0),
-        SIMD3<Float>(-sinYaw, 0, cosYaw)
-      )
+      if isPatternNavigationActive {
+        // ── Pattern navigation mode ──────────────────────────────────────────
+        // LEFT X  = rotate virtual scene view (patternNavYaw)
+        // LEFT Y / RIGHT X / RIGHT Y = translate, using the REAL head direction
+        //   (same world-space vectors as normal mode) so "forward = scene goes
+        //   backward" feels identical in both modes regardless of patternNavYaw.
+        // Camera rig stays frozen.
+        patternNavYaw -= yawInput * yawSpeed * yawMultiplier * turnSpeedReduction * deltaTime
+        patternNavYaw = wrapAngle(patternNavYaw)
 
-      // Extract Head vectors in Tracking Space
-      // Column 0: Right, 1: Up, 2: Backward (-Forward)
-      let headRight = SIMD3<Float>(
-        headTransform.columns.0.x, headTransform.columns.0.y, headTransform.columns.0.z)
-      let headUp = SIMD3<Float>(
-        headTransform.columns.1.x, headTransform.columns.1.y, headTransform.columns.1.z)
-      let headForward = -SIMD3<Float>(
-        headTransform.columns.2.x, headTransform.columns.2.y, headTransform.columns.2.z)
+        // Build world-space direction vectors from the real head transform,
+        // exactly as normal mode does — this is what makes the direction intuitive.
+        let cosYaw = cos(-yawAngle)
+        let sinYaw = sin(-yawAngle)
+        let rigRot = simd_float3x3(
+          SIMD3<Float>(cosYaw, 0, sinYaw),
+          SIMD3<Float>(0, 1, 0),
+          SIMD3<Float>(-sinYaw, 0, cosYaw)
+        )
+        let headRight = SIMD3<Float>(
+          headTransform.columns.0.x, headTransform.columns.0.y, headTransform.columns.0.z)
+        let headUp = SIMD3<Float>(
+          headTransform.columns.1.x, headTransform.columns.1.y, headTransform.columns.1.z)
+        let headForward = -SIMD3<Float>(
+          headTransform.columns.2.x, headTransform.columns.2.y, headTransform.columns.2.z)
+        let worldForward = rigRot * headForward
+        let worldRight = rigRot * headRight
+        let worldUp = rigRot * headUp
 
-      // Transform to World Space
-      let worldForward = rigRotation * headForward
-      let worldRight = rigRotation * headRight
-      let worldUp = rigRotation * headUp
+        patternNavOffset -=
+          worldForward * forwardInput * movementSpeed * movementMultiplier * deltaTime
+        patternNavOffset -=
+          worldRight * strafeInput * movementSpeed * movementMultiplier * deltaTime
+        patternNavOffset -= worldUp * verticalInput * movementSpeed * movementMultiplier * deltaTime
 
-      var displacement = SIMD3<Float>.zero
-      displacement -= worldForward * forwardInput
-      displacement -= worldRight * strafeInput
-      displacement -= worldUp * verticalInput
+        patternNavTransform = buildPatternNavTransform()
 
-      playerOffset += displacement * movementSpeed * movementMultiplier * deltaTime
+        // Throttled log — shows both sticks so right-stick capture is verifiable
+        let anyInput = abs(forwardInput) + abs(yawInput) + abs(strafeInput) + abs(verticalInput)
+        let nowNav = Date().timeIntervalSince1970
+        if anyInput > 0 && nowNav - lastPatternNavLogTime > 2.0 {
+          lastPatternNavLogTime = nowNav
+          let o = patternNavOffset
+          print(
+            String(
+              format:
+                "[GameManager] patNav L=(%.2f,%.2f) R=(%.2f,%.2f) offset=(%.2f,%.2f,%.2f) yaw=%.2f",
+              yawInput, forwardInput, strafeInput, verticalInput,
+              o.x, o.y, o.z, patternNavYaw))
+        }
+        // rigTransform unchanged
+      } else {
+        // ── Normal mode: camera rig update (original behaviour) ──────────────
+        yawAngle -= yawInput * yawSpeed * yawMultiplier * turnSpeedReduction * deltaTime
+        yawAngle = wrapAngle(yawAngle)
 
-      rigTransform = buildRigTransform()
+        let cosYaw = cos(-yawAngle)
+        let sinYaw = sin(-yawAngle)
+        let rigRotation = simd_float3x3(
+          SIMD3<Float>(cosYaw, 0, sinYaw),
+          SIMD3<Float>(0, 1, 0),
+          SIMD3<Float>(-sinYaw, 0, cosYaw)
+        )
+
+        let headRight = SIMD3<Float>(
+          headTransform.columns.0.x, headTransform.columns.0.y, headTransform.columns.0.z)
+        let headUp = SIMD3<Float>(
+          headTransform.columns.1.x, headTransform.columns.1.y, headTransform.columns.1.z)
+        let headForward = -SIMD3<Float>(
+          headTransform.columns.2.x, headTransform.columns.2.y, headTransform.columns.2.z)
+
+        let worldForward = rigRotation * headForward
+        let worldRight = rigRotation * headRight
+        let worldUp = rigRotation * headUp
+
+        var displacement = SIMD3<Float>.zero
+        displacement -= worldForward * forwardInput
+        displacement -= worldRight * strafeInput
+        displacement -= worldUp * verticalInput
+
+        playerOffset += displacement * movementSpeed * movementMultiplier * deltaTime
+
+        rigTransform = buildRigTransform()
+      }
+
       return rigTransform
     }
   }
@@ -243,6 +325,27 @@ class GameManager {
       value += twoPi
     }
     return value
+  }
+
+  private func buildPatternNavTransform() -> simd_float4x4 {
+    let cosYaw = cos(-patternNavYaw)
+    let sinYaw = sin(-patternNavYaw)
+    // Correct view-style transform: R(-yaw) * T(-offset)
+    // Equivalent to: first subtract offset (translate), then rotate.
+    // Applied to box-local eye: navEye = R * (boxEye - offset)
+    let rotation = simd_float4x4(
+      SIMD4<Float>(cosYaw, 0, sinYaw, 0),
+      SIMD4<Float>(0, 1, 0, 0),
+      SIMD4<Float>(-sinYaw, 0, cosYaw, 0),
+      SIMD4<Float>(0, 0, 0, 1)
+    )
+    let translation = simd_float4x4(
+      SIMD4<Float>(1, 0, 0, 0),
+      SIMD4<Float>(0, 1, 0, 0),
+      SIMD4<Float>(0, 0, 1, 0),
+      SIMD4<Float>(-patternNavOffset.x, -patternNavOffset.y, -patternNavOffset.z, 1)
+    )
+    return rotation * translation
   }
 
   private func buildRigTransform() -> simd_float4x4 {

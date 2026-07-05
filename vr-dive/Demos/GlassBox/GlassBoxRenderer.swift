@@ -69,7 +69,8 @@ final class GlassBoxRenderer: VisualPatternController {
       viewCount: UInt32(context.viewData.viewCount),
       boxScale: boxScale,
       _pad: 0,
-      objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0))
+      objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0),
+      patternTransform: context.patternNavigationTransform)
 
     encoder.setVertexBytes(&uniforms, length: MemoryLayout<GlassBoxUniforms>.stride, index: 1)
 

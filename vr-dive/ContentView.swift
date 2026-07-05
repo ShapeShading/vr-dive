@@ -18,7 +18,7 @@ struct ContentView: View {
         PatternMenuView(model: appModel.patternMenuModel)
         ToggleImmersiveSpaceButton()
       }
-      ControlButtonsView(model: appModel.patternMenuModel)
+      ControlButtonsView(model: appModel.patternMenuModel, gameManager: appModel.gameManager)
     }
     .padding(.horizontal, 28)
     .padding(.vertical, 32)
@@ -68,6 +68,7 @@ struct PatternMenuView: View {
 
 struct ControlButtonsView: View {
   @Bindable var model: PatternMenuModel
+  var gameManager: GameManager
 
   var body: some View {
     VStack(spacing: 18) {
@@ -96,6 +97,17 @@ struct ControlButtonsView: View {
             systemImage: model.speedMultiplier > 1.0 ? "hare.fill" : "tortoise.fill")
         }
         .buttonStyle(.bordered)
+
+        Button(action: {
+          gameManager.togglePatternNavigation()
+        }) {
+          Label(
+            gameManager.isPatternNavigationActive ? "箱内移动 ON" : "箱内移动 OFF",
+            systemImage: gameManager.isPatternNavigationActive
+              ? "scope" : "scope")
+        }
+        .buttonStyle(.bordered)
+        .tint(gameManager.isPatternNavigationActive ? .blue : nil)
       }
 
       if model.selectedPattern == .rayMarchingDemo {

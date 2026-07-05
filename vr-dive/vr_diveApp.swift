@@ -27,7 +27,7 @@ struct vr_diveApp: App {
 
     ImmersiveSpace(id: appModel.immersiveSpaceID) {
       CompositorLayer(configuration: VRConfiguration()) { layerRenderer in
-        let renderer = Renderer(layerRenderer, patternCoordinator: appModel.patternCoordinator)
+        let renderer = Renderer(layerRenderer, patternCoordinator: appModel.patternCoordinator, gameManager: appModel.gameManager)
         renderer.startRenderLoop()
       }
       .onAppear {

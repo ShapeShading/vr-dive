@@ -18,12 +18,30 @@ class GameManager {
     var dpadDown: Bool = false
     var dpadLeft: Bool = false
     var dpadRight: Bool = false
+    var leftShoulder: Bool = false
     var rightShoulder: Bool = false
-    // Rising-edge latch for square (□) button — set in handleInput, consumed in updateRigState
-    var squareJustPressed: Bool = false
+    // Rising-edge counter for square (□) button — incremented in handleInput,
+    // drained in updateRigState. Using a counter (rather than a single bool)
+    // means every physical/UI press is honored even if several presses land
+    // between two updateRigState ticks (e.g. during a frame-rate stall) —
+    // a bool latch would silently collapse multiple presses into at most one
+    // toggle, making the switch feel like it "doesn't work" under lag.
+    var squareJustPressedCount: Int = 0
   }
 
   private let controllerQueue = DispatchQueue(label: "vr-dive.controller.state")
+  // GCController's `valueChangedHandler` defaults to firing on the MAIN
+  // queue/run loop. During a heavy render stall (this app can stall for
+  // hundreds of ms on some patterns), or while SwiftUI/visionOS is running
+  // the main run loop in a restricted "tracking" mode (e.g. mid-gesture),
+  // queued main-queue blocks — including a stick's release-to-center event —
+  // can sit undelivered indefinitely. That's what caused input to appear
+  // "stuck" (still moving after releasing the stick) until an unrelated pinch
+  // forced the main run loop back to a common mode and flushed the queue.
+  // Routing the handler to its own dedicated background queue makes every
+  // value-changed event (press AND release) get delivered promptly,
+  // independent of main-thread/run-loop state.
+  private let controllerHandlerQueue = DispatchQueue(label: "vr-dive.controller.handler")
   private var controllerState = ControllerState()
   private var lastInputLogTime: TimeInterval = 0
   private var lastPatternNavLogTime: TimeInterval = 0
@@ -34,6 +52,10 @@ class GameManager {
   private let residualStickClamp: Float = 0.025
   private let boostMovementMultiplier: Float = 5.0
   private let boostYawMultiplier: Float = 2.0
+  // L1 + R1 held together — an extra multiplier stacked on top of the
+  // regular single-shoulder boost, for covering huge distances quickly
+  // (e.g. the space elevator's ~25km shaft).
+  private let superBoostMovementMultiplier: Float = 32.0
 
   private(set) var playerOffset: SIMD3<Float> = .zero
   private(set) var yawAngle: Float = 0
@@ -113,6 +135,11 @@ class GameManager {
       return
     }
 
+    // See `controllerHandlerQueue` doc comment above: without this, input
+    // change events (including releases) are delivered on the main queue and
+    // can get stuck behind a stalled render loop or an in-progress gesture.
+    controller.handlerQueue = controllerHandlerQueue
+
     gamepad.valueChangedHandler = { [weak self] gamepad, element in
       self?.handleInput(gamepad: gamepad, element: element)
     }
@@ -128,6 +155,7 @@ class GameManager {
     let buttonX = gamepad.buttonX.isPressed
     let buttonY = gamepad.buttonY.isPressed
     let boostActive = gamepad.leftShoulder.isPressed || gamepad.rightShoulder.isPressed
+    let leftShoulder = gamepad.leftShoulder.isPressed
     let rightShoulder = gamepad.rightShoulder.isPressed
 
     // D-pad
@@ -149,10 +177,11 @@ class GameManager {
       controllerState.dpadDown = dpadDown
       controllerState.dpadLeft = dpadLeft
       controllerState.dpadRight = dpadRight
+      controllerState.leftShoulder = leftShoulder
       controllerState.rightShoulder = rightShoulder
       // Rising edge: square button just pressed this event
       if buttonX && !prevButtonX {
-        controllerState.squareJustPressed = true
+        controllerState.squareJustPressedCount += 1
         print("[GameManager] Square (□) rising edge detected")
       }
     }
@@ -183,7 +212,7 @@ class GameManager {
   /// is applied atomically on the next render-loop tick.
   func togglePatternNavigation() {
     controllerQueue.sync {
-      controllerState.squareJustPressed = true
+      controllerState.squareJustPressedCount += 1
     }
   }
 
@@ -191,7 +220,12 @@ class GameManager {
     controllerQueue.sync {
       let primaryStickInput = applyDeadZone(controllerState.leftStick)
       let secondaryStickInput = applyDeadZone(controllerState.rightStick)
-      let movementMultiplier = controllerState.boostActive ? boostMovementMultiplier : 1.0
+      // L1 + R1 held together stacks an extra 10x on top of the normal boost
+      // (useful for quickly traversing the space elevator's huge shaft).
+      let superBoostActive = controllerState.leftShoulder && controllerState.rightShoulder
+      let movementMultiplier =
+        (controllerState.boostActive ? boostMovementMultiplier : 1.0)
+        * (superBoostActive ? superBoostMovementMultiplier : 1.0)
       let yawMultiplier = controllerState.boostActive ? boostYawMultiplier : 1.0
 
       let forwardInput = primaryStickInput.y
@@ -199,11 +233,20 @@ class GameManager {
       let strafeInput = secondaryStickInput.x
       let verticalInput = secondaryStickInput.y
 
-      // Square button (□) — consume the rising-edge latch set by handleInput
-      if controllerState.squareJustPressed {
-        controllerState.squareJustPressed = false
-        isPatternNavigationActive.toggle()
-        print("[GameManager] Pattern nav mode: \(isPatternNavigationActive ? "ON" : "OFF")")
+      // Square button (□) — drain the rising-edge counter. Each press toggles
+      // the mode once; draining all pending presses (instead of a single
+      // bool flag) means a burst of presses that lands between two ticks
+      // (e.g. during a lag spike) still nets out to the correct final state
+      // instead of silently losing all but one press.
+      if controllerState.squareJustPressedCount > 0 {
+        let presses = controllerState.squareJustPressedCount
+        controllerState.squareJustPressedCount = 0
+        if presses % 2 == 1 {
+          isPatternNavigationActive.toggle()
+        }
+        print(
+          "[GameManager] Pattern nav mode: \(isPatternNavigationActive ? "ON" : "OFF") (drained \(presses) press(es))"
+        )
       }
 
       let turnSpeedReduction = 1.0 - abs(yawInput) * 0.5
@@ -211,17 +254,30 @@ class GameManager {
       if isPatternNavigationActive {
         // ── Pattern navigation mode ──────────────────────────────────────────
         // LEFT X  = rotate virtual scene view (patternNavYaw)
-        // LEFT Y / RIGHT X / RIGHT Y = translate, using the REAL head direction
-        //   (same world-space vectors as normal mode) so "forward = scene goes
-        //   backward" feels identical in both modes regardless of patternNavYaw.
+        // LEFT Y / RIGHT X / RIGHT Y = translate, following the direction the
+        //   player is CURRENTLY virtually facing (real head direction plus the
+        //   patternNavYaw twist from the left stick), so pushing forward always
+        //   walks toward what's rendered in front of you instead of a fixed
+        //   box-relative direction.
         // Camera rig stays frozen.
         patternNavYaw -= yawInput * yawSpeed * yawMultiplier * turnSpeedReduction * deltaTime
         patternNavYaw = wrapAngle(patternNavYaw)
 
         // Build world-space direction vectors from the real head transform,
-        // exactly as normal mode does — this is what makes the direction intuitive.
-        let cosYaw = cos(-yawAngle)
-        let sinYaw = sin(-yawAngle)
+        // additionally rotated by patternNavYaw so "forward" always tracks the
+        // CURRENT virtual look direction the player sees (frozen rig yaw +
+        // live head rotation + the virtual patternNavYaw twist applied on top
+        // in the shader via patternTransform). Without adding patternNavYaw
+        // here, movement direction stayed pinned to a fixed box-relative
+        // direction even after turning with the left stick, since yawAngle
+        // alone never changes while pattern nav is active — only patternNavYaw
+        // does. Y-axis rotations compose additively, so `yawAngle +
+        // patternNavYaw` is exactly the combined rotation applied to `rd` in
+        // the shader (R(-patternNavYaw) * R(-yawAngle) == R(-(yawAngle +
+        // patternNavYaw))).
+        let effectiveYaw = yawAngle + patternNavYaw
+        let cosYaw = cos(-effectiveYaw)
+        let sinYaw = sin(-effectiveYaw)
         let rigRot = simd_float3x3(
           SIMD3<Float>(cosYaw, 0, sinYaw),
           SIMD3<Float>(0, 1, 0),
@@ -330,9 +386,14 @@ class GameManager {
   private func buildPatternNavTransform() -> simd_float4x4 {
     let cosYaw = cos(-patternNavYaw)
     let sinYaw = sin(-patternNavYaw)
-    // Correct view-style transform: R(-yaw) * T(-offset)
-    // Equivalent to: first subtract offset (translate), then rotate.
-    // Applied to box-local eye: navEye = R * (boxEye - offset)
+    // Same convention as buildRigTransform: T(-offset) * R(-yaw), i.e. rotate
+    // first, then subtract the (unrotated) world-space offset. This keeps
+    // patternNavOffset in an absolute reference frame so that turning
+    // (patternNavYaw changing) never re-rotates the already-accumulated
+    // offset — it only changes look direction, exactly like normal-mode view
+    // rotation. The previous `rotation * translation` order instead rotated
+    // the offset itself every time the yaw changed, which made turning after
+    // having moved feel like an unwanted orbit/strafe around the origin.
     let rotation = simd_float4x4(
       SIMD4<Float>(cosYaw, 0, sinYaw, 0),
       SIMD4<Float>(0, 1, 0, 0),
@@ -345,7 +406,7 @@ class GameManager {
       SIMD4<Float>(0, 0, 1, 0),
       SIMD4<Float>(-patternNavOffset.x, -patternNavOffset.y, -patternNavOffset.z, 1)
     )
-    return rotation * translation
+    return translation * rotation
   }
 
   private func buildRigTransform() -> simd_float4x4 {

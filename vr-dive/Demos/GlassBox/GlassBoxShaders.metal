@@ -432,7 +432,7 @@ fragment float4 glassBoxFragment(
     float3 rd  = normalize(float3(uniforms.patternTransform * float4(boxRd, 0.0f)));
 
     // Re-compute tExit from the virtual viewpoint so the ray march is bounded correctly.
-    float3 vExitNormal;
+    float3 vExitNormal = exitNormal;  // default: real camera's exit normal (valid fallback)
     float  vExit = gb_boxHit(eye, rd, GB_BOXDIMS, vExitNormal, false);
     if (vExit <= 0.0f) vExit = tExit;  // fallback to real exit if virtual misses
 

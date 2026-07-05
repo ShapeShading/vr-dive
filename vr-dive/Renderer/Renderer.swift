@@ -58,7 +58,9 @@ class Renderer {
   var startTime: Date = Date()
   private static let attosecondsPerSecond = 1_000_000_000_000_000_000.0
 
-  init(_ layerRenderer: LayerRenderer, patternCoordinator: PatternCoordinator, gameManager: GameManager) {
+  init(
+    _ layerRenderer: LayerRenderer, patternCoordinator: PatternCoordinator, gameManager: GameManager
+  ) {
     self.layerRenderer = layerRenderer
     self.device = layerRenderer.device
     self.library = device.makeDefaultLibrary()!
@@ -708,7 +710,11 @@ class Renderer {
 
   private func updateRigTransformIfNeeded(deviceAnchorTransform: simd_float4x4, currentTime: Float)
   {
-    let delta = max(0, currentTime - lastRigUpdateTime)
+    // Clamp to avoid huge single-frame movement/rotation jumps after a frame
+    // stall (e.g. a slow pattern taking several hundred ms) — otherwise a
+    // held stick input gets multiplied by an oversized deltaTime and produces
+    // a jarring lurch that looks like uncontrolled "auto movement".
+    let delta = min(max(0, currentTime - lastRigUpdateTime), 1.0 / 20.0)
     guard delta > 0 else { return }
     rigTransform = gameManager.updateRigState(
       deltaTime: delta, headTransform: deviceAnchorTransform)
@@ -900,6 +906,16 @@ class Renderer {
       controllers[.synthwaveSunset] = synthwaveSunset
     } else {
       print("[Renderer] SynthwaveSunset pattern unavailable.")
+    }
+
+    if let lunarSurface = try? LunarSurfaceRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.lunarSurface] = lunarSurface
+    } else {
+      print("[Renderer] LunarSurface pattern unavailable (missing textures?).")
     }
 
     if let tunnel = try? TunnelRenderer(

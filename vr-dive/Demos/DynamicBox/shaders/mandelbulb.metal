@@ -20,13 +20,14 @@ static float mandelbulbDE(float3 p, float t) {
     float3 w = p;
     float  m = dot(w, w);
     float  dz = 1.0f;
+    float  r  = 1.0f;
     float  power = 8.0f + 0.5f * sin(t * 0.15f);
 
     for (int i = 0; i < 10; i++) {
         if (m > 256.0f) break;
 
         // Convert to spherical coordinates
-        float r   = length(w);
+        r   = length(w);
         float th  = acos(w.y / r);
         float ph  = atan2(w.z, w.x);
 

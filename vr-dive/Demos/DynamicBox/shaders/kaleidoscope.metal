@@ -1,11 +1,8 @@
 // kaleidoscope.metal – Kaleidoscopic IFS Fractal
 //
-// A colorful iterated function system fractal that creates intricate
-// kaleidoscopic patterns. Rendered with ray marching.
-//
-// Based on the "Kaleidoscopic IFS" family of fractals popularized by
-// Knighty and Syntopia. Each iteration applies a rotation and a
-// folding operation, creating infinitely detailed symmetric patterns.
+// A colorful kaleidoscopic fractal rendered with ray marching.
+// Uses iterated fold-and-scale transformations with a sphere inversion,
+// creating intricate self-symmetric 3D patterns.
 
 // ─── Rotation matrix ──────────────────────────────────────────────────────────
 static float3x3 rot(float a, float3 ax) {
@@ -18,38 +15,49 @@ static float3x3 rot(float a, float3 ax) {
     );
 }
 
-// ─── Kaleidoscopic IFS DE ─────────────────────────────────────────────────────
+// ─── Color palette ────────────────────────────────────────────────────────────
+static float3 palette(float t) {
+    float3 a = float3(0.5f, 0.5f, 0.5f);
+    float3 b = float3(0.5f, 0.5f, 0.5f);
+    float3 c = float3(1.0f, 0.7f, 0.4f);
+    float3 d = float3(0.00f, 0.15f, 0.20f);
+    return a + b * cos(6.28318f * (c * t + d));
+}
+
+// ─── Kaleidoscopic IFS DE (KaliSet variant) ──────────────────────────────────
 static float kifsDE(float3 p, float t) {
     float3 q = p;
-    float  scale = 2.5f;
-    float  fold  = 1.0f;
+    float  scale = 2.0f;
     float  dr    = 1.0f;
+    float  foldR = 1.0f;
 
-    // Animated rotation axis
-    float3 axis = normalize(float3(sin(t * 0.1f), cos(t * 0.13f), sin(t * 0.07f)));
-    float3x3 r = rot(t * 0.2f, axis);
+    // Slow rotation of the whole fractal
+    float3 axis = normalize(float3(1.0f, 0.7f, 0.3f));
+    float3x3 rotM = rot(t * 0.12f, axis);
 
-    for (int i = 0; i < 12; i++) {
-        // Tetrahedral symmetry fold
+    for (int i = 0; i < 14; i++) {
+        // Box fold: reflect across +/- 1 planes
         q = abs(q);
-        float t0 = 2.0f * min(min(q.x, q.y), q.z);
-        if (q.x < q.y && q.x < q.z) q.x = t0 - q.x;
-        else if (q.y < q.z)          q.y = t0 - q.y;
-        else                         q.z = t0 - q.z;
+        if (q.x > q.y) { float tmp = q.x; q.x = q.y; q.y = tmp; }
+        if (q.x > q.z) { float tmp = q.x; q.x = q.z; q.z = tmp; }
+        if (q.y > q.z) { float tmp = q.y; q.y = q.z; q.z = tmp; }
 
-        // Sphere fold
+        // Sphere fold: invert points inside radius foldR
         float m = dot(q, q);
-        if (m < fold) q *= fold / m;
+        if (m < foldR) {
+            q *= foldR / max(m, 1e-8f);
+            dr *= foldR / max(m, 1e-8f);
+        }
 
-        // Scale and offset
-        q = q * scale + float3(-0.5f, -0.5f, -0.5f);
-        dr = dr * abs(scale) + 1.0f;
+        // Scale and shift
+        q = q * scale + float3(-0.8f, -0.8f, -0.8f);
+        dr = dr * scale + 1.0f;
 
-        // Rotation
-        q = r * q;
+        // Apply global rotation
+        q = rotM * q;
     }
 
-    return length(q) / dr - 0.05f;
+    return (length(q) - 0.05f) / dr;
 }
 
 // ─── Normal ───────────────────────────────────────────────────────────────────
@@ -102,30 +110,24 @@ fragment float4 dynamicBoxFragment(
     // ─── Ray march ─────────────────────────────────────────────────────────
     float t     = uniforms.time;
     float march = 0.0f;
-    float maxD  = min(tExit, 3.0f);
+    float maxD  = min(tExit, 2.5f);
 
-    for (int i = 0; i < 120; i++) {
+    for (int i = 0; i < 100; i++) {
         float3 p = ro + rd * march;
         float d = kifsDE(p, t);
         if (d < 0.003f) {
             float3 n = calcNormal(p, t);
-            float3 light = normalize(float3(0.6f, 0.8f, 0.4f));
+            float3 light = normalize(float3(0.5f, 1.0f, 0.3f));
 
             float dif = max(dot(n, light), 0.0f);
-            float amb = 0.2f + 0.8f * max(dot(n, normalize(float3(0,1,1))), 0.0f);
+            float amb = 0.3f + 0.7f * max(dot(n, float3(0,1,0)), 0.0f);
             float rim = 1.0f - max(dot(-rd, n), 0.0f);
-            rim = pow(rim, 3.0f) * 0.8f;
+            rim = pow(rim, 3.0f) * 0.6f;
 
-            // Iridescent color based on position + normal
-            float hue = fract(length(p) * 0.6f + t * 0.03f + n.x * 0.2f);
-            float3 col;
-            {
-                float4 K = float4(1.0f, 2.0f/3.0f, 1.0f/3.0f, 3.0f);
-                float3 pp = abs(fract(hue + K.xyz) * 6.0f - K.www);
-                col = clamp(pp - K.xxx, 0.0f, 1.0f);
-            }
-            col = col * (dif * 1.0f + amb * 0.5f) + float3(0.3f, 0.5f, 1.0f) * rim;
-            col *= exp(-march * 0.35f);
+            // Iridescent coloring
+            float colT = length(p) * 0.5f + t * 0.04f + n.x * 0.15f;
+            float3 col = palette(colT) * (dif * 1.2f + amb * 0.4f) + float3(0.3f, 0.5f, 1.0f) * rim;
+            col *= exp(-march * 0.3f);
 
             return float4(col, 1.0f);
         }

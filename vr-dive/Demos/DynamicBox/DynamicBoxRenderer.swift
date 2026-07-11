@@ -8,12 +8,12 @@ import simd
 //
 // Architecture:
 //   - Embedded default shader ("3D grid of light points") ships in DynamicBoxShaders.metal
-//   - A companion Node.js server (scripts/shader-server.js) serves .metal files from
-//     scripts/shaders/ on port 8888
+//   - A companion Node.js server (vr-dive/Demos/DynamicBox/shader-server.js) serves .metal
+//     files from its shaders/ subdirectory on port 8888
 //   - The "Load Shader" button fetches a named shader, compiles it with Metal, and
 //     swaps the fragment function in the render pipeline
 //   - Compilation errors are POSTed back to the server and written to
-//     scripts/shader-compiling-error.log
+//     shader-compiling-error.log in the DynamicBox directory
 
 final class DynamicBoxRenderer: VisualPatternController {
   let identifier: VisualPatternKind = .dynamicBox
@@ -37,8 +37,8 @@ final class DynamicBoxRenderer: VisualPatternController {
   private var animationTime: Float = 0
   private var lastSimulationTime: Float?
 
-  /// Base URL of the shader server.
-  private let serverBaseURL = "http://localhost:8888"
+  /// Base URL of the shader server. Keep in sync with PatternMenuModel.shaderServerBaseURL.
+  private let serverBaseURL = "http://192.168.31.49:8888"
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.device = device
@@ -88,6 +88,28 @@ final class DynamicBoxRenderer: VisualPatternController {
   /// - Parameter name: shader file name (without `.metal` extension), e.g. `"waves"`
   /// - Returns: `nil` on success, or an error description string on failure.
   func reloadShader(named name: String) async -> String? {
+    // "default" uses the embedded shader compiled into the app – no server fetch.
+    if name == "default" {
+      guard let vertFn = library.makeFunction(name: "dynamicBoxVertex"),
+        let fragFn = library.makeFunction(name: "dynamicBoxFragment")
+      else {
+        let msg = "Embedded default shader functions not found."
+        await reportErrorToServer(msg)
+        return msg
+      }
+      do {
+        pipelineState = try DynamicBoxRenderer.makePipeline(
+          device: device, vertexFn: vertFn, fragmentFn: fragFn,
+          maxViewCount: maxViewCount)
+        currentShaderName = "default"
+        return nil
+      } catch {
+        let msg = "Pipeline creation error: \(error.localizedDescription)"
+        await reportErrorToServer(msg)
+        return msg
+      }
+    }
+
     let rawSource: String
     do {
       rawSource = try await fetchShaderSource(named: name)

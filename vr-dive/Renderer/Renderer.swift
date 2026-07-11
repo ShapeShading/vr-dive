@@ -106,7 +106,7 @@ class Renderer {
     self.patternControllers = controllers
 
     // Wire up DynamicBox shader loading from the UI.
-    if let dynamicBox = controllers[.dynamicBox] {
+    if let dynamicBox = controllers[.dynamicBox] as? DynamicBoxRenderer {
       patternCoordinator.setDynamicBoxLoadAction { [weak dynamicBox] name in
         guard let dynamicBox else { return }
         let error = await dynamicBox.reloadShader(named: name)

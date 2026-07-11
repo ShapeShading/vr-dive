@@ -10,5 +10,5 @@ buildServer.json
 
 resources/
 
-# DynamicBox shader compilation error log
-scripts/shader-compiling-error.log
+# DynamicBox shader logs
+vr-dive/Demos/DynamicBox/*.log

@@ -19,6 +19,9 @@
 		9A9B19DC2ECF8286003DA309 /* Exceptions for "vr-dive" folder in "vr-dive" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Demos/DynamicBox/shaders/default.metal,
+				"Demos/DynamicBox/shaders/sdf-shapes.metal",
+				Demos/DynamicBox/shaders/waves.metal,
 				Info.plist,
 			);
 			target = 9A9B19C32ECF8284003DA309 /* vr-dive */;

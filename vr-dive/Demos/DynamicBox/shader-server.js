@@ -13,7 +13,7 @@
  *   POST /report-error          – log a compilation error to shader-compiling-error.log
  *
  * Usage:
- *   cd scripts && node shader-server.js
+ *   cd vr-dive/Demos/DynamicBox && node shader-server.js
  */
 
 const http = require("http");
@@ -23,6 +23,14 @@ const path = require("path");
 const PORT       = 8888;
 const SHADERS_DIR = path.join(__dirname, "shaders");
 const ERROR_LOG   = path.join(__dirname, "shader-compiling-error.log");
+const SERVER_LOG  = path.join(__dirname, "server.log");
+
+// ─── Log helper (console + file) ──────────────────────────────────────────────
+function log(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  console.log(line);
+  try { fs.appendFileSync(SERVER_LOG, line + "\n", "utf-8"); } catch {}
+}
 
 // ─── Ensure directories exist ─────────────────────────────────────────────────
 if (!fs.existsSync(SHADERS_DIR)) {
@@ -96,7 +104,7 @@ const server = http.createServer((req, res) => {
       const timestamp = new Date().toISOString();
       const entry     = `\n=== ${timestamp} ===\n${body}\n`;
       fs.appendFileSync(ERROR_LOG, entry, "utf-8");
-      console.log(`[shader-server] Error logged: ${body.split("\n")[0]}`);
+      log(`Error logged: ${body.split("\n")[0]}`);
       res.writeHead(200);
       res.end("OK");
     });
@@ -109,17 +117,19 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[shader-server] Serving shaders from: ${SHADERS_DIR}`);
-  console.log(`[shader-server] Listening on http://localhost:${PORT}`);
-  console.log(`[shader-server] Available shaders:`);
+  log(`Serving shaders from: ${SHADERS_DIR}`);
+  log(`Listening on http://localhost:${PORT}`);
+  log(`All logs → ${SERVER_LOG}`);
+  log(`Errors     → ${ERROR_LOG}`);
+  log(`Available shaders:`);
   try {
     const files = fs.readdirSync(SHADERS_DIR).filter(f => f.endsWith(".metal"));
     if (files.length === 0) {
-      console.log("  (none – add .metal files to the shaders/ directory)");
+      log("  (none – add .metal files to the shaders/ directory)");
     } else {
-      files.forEach(f => console.log(`  - ${f}`));
+      files.forEach(f => log(`  - ${f}`));
     }
   } catch {
-    console.log("  (could not read shaders directory)");
+    log("  (could not read shaders directory)");
   }
 });

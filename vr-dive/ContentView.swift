@@ -206,14 +206,18 @@ struct ControlButtonsView: View {
             .font(.headline)
 
           HStack(spacing: 10) {
-            TextField("着色器名称", text: $model.dynamicBoxShaderInput)
-              .textFieldStyle(.roundedBorder)
-              .frame(width: 160)
+            Picker("着色器", selection: $model.dynamicBoxSelectedShader) {
+              ForEach(model.dynamicBoxAvailableShaders, id: \.self) { name in
+                Text(name).tag(name)
+              }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 180)
 
             Button(action: {
-              model.loadDynamicBoxShader()
+              model.refreshShaderList()
             }) {
-              Label("加载", systemImage: "arrow.down.doc")
+              Label("刷新", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
           }
@@ -224,9 +228,15 @@ struct ControlButtonsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task {
-          // Poll status from coordinator while this view is visible
+          model.refreshShaderList()
+          var listRefreshCount = 0
           while !Task.isCancelled {
             model.refreshDynamicBoxStatus()
+            // Refresh shader list every 5 seconds until we get results
+            if listRefreshCount % 25 == 0 {
+              model.refreshShaderList()
+            }
+            listRefreshCount += 1
             try? await Task.sleep(for: .milliseconds(200))
           }
         }

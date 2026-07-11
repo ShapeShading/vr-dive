@@ -22,6 +22,8 @@
 				Demos/DynamicBox/shaders/default.metal,
 				"Demos/DynamicBox/shaders/sdf-shapes.metal",
 				Demos/DynamicBox/shaders/waves.metal,
+				Demos/DynamicBox/shaders/mandelbulb.metal,
+				Demos/DynamicBox/shaders/kaleidoscope.metal,
 				Info.plist,
 			);
 			target = 9A9B19C32ECF8284003DA309 /* vr-dive */;

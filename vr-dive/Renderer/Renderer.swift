@@ -322,6 +322,7 @@ class Renderer {
 
         if patternCoordinator.shouldReset() {
           pattern?.resetToInitialState()
+          gameManager.resetPatternNavigation()
           patternCoordinator.clearResetFlag()
         }
 

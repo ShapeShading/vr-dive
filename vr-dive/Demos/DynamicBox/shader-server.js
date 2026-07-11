@@ -102,9 +102,11 @@ const server = http.createServer((req, res) => {
     req.on("data", chunk => { body += chunk; });
     req.on("end", () => {
       const timestamp = new Date().toISOString();
-      const entry     = `\n=== ${timestamp} ===\n${body}\n`;
+      const isError = body.includes("error") || body.includes("Error") || body.includes("fail");
+      const tag = isError ? "ERR" : "OK";
+      const entry = `\n=== ${timestamp} [${tag}] ===\n${body}\n`;
       fs.appendFileSync(ERROR_LOG, entry, "utf-8");
-      log(`Error logged: ${body.split("\n")[0]}`);
+      log(`[${tag}] ${body.split("\n")[0]}`);
       res.writeHead(200);
       res.end("OK");
     });

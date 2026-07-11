@@ -19,11 +19,22 @@
 		9A9B19DC2ECF8286003DA309 /* Exceptions for "vr-dive" folder in "vr-dive" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Demos/DynamicBox/shaders/apollonian.metal,
 				Demos/DynamicBox/shaders/default.metal,
+				Demos/DynamicBox/shaders/fractree.metal,
+				Demos/DynamicBox/shaders/gyroid.metal,
+				Demos/DynamicBox/shaders/hyper4d.metal,
+				Demos/DynamicBox/shaders/infinity.metal,
+				Demos/DynamicBox/shaders/kaleidoscope.metal,
+				Demos/DynamicBox/shaders/knots.metal,
+				Demos/DynamicBox/shaders/liquids.metal,
+				Demos/DynamicBox/shaders/mandelbulb.metal,
+				Demos/DynamicBox/shaders/maze3d.metal,
+				Demos/DynamicBox/shaders/menger.metal,
+				Demos/DynamicBox/shaders/metaballs.metal,
+				Demos/DynamicBox/shaders/nebula.metal,
 				"Demos/DynamicBox/shaders/sdf-shapes.metal",
 				Demos/DynamicBox/shaders/waves.metal,
-				Demos/DynamicBox/shaders/mandelbulb.metal,
-				Demos/DynamicBox/shaders/kaleidoscope.metal,
 				Info.plist,
 			);
 			target = 9A9B19C32ECF8284003DA309 /* vr-dive */;

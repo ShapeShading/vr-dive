@@ -117,7 +117,7 @@ fragment float4 dynamicBoxFragment(
 
     // ─── Ray march ─────────────────────────────────────────────────────────
     float t = 0.0f;
-    float tmax = min(tExit, 2.5f);
+    float tmax = 25.0f;
     int   i;
 
     for (i = 0; i < 80; i++) {

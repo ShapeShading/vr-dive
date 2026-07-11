@@ -110,7 +110,7 @@ fragment float4 dynamicBoxFragment(
     // ─── Ray march ─────────────────────────────────────────────────────────
     float t     = uniforms.time;
     float march = 0.0f;
-    float maxD  = min(tExit, 2.5f);
+    float maxD  = 25.0f;
 
     for (int i = 0; i < 100; i++) {
         float3 p = ro + rd * march;

@@ -94,7 +94,7 @@ final class DynamicBoxRenderer: VisualPatternController {
         let fragFn = library.makeFunction(name: "dynamicBoxFragment")
       else {
         let msg = "Embedded default shader functions not found."
-        await reportErrorToServer(msg)
+        await reportToServer(msg)
         return msg
       }
       do {
@@ -105,7 +105,7 @@ final class DynamicBoxRenderer: VisualPatternController {
         return nil
       } catch {
         let msg = "Pipeline creation error: \(error.localizedDescription)"
-        await reportErrorToServer(msg)
+        await reportToServer(msg)
         return msg
       }
     }
@@ -115,7 +115,7 @@ final class DynamicBoxRenderer: VisualPatternController {
       rawSource = try await fetchShaderSource(named: name)
     } catch {
       let msg = "Failed to fetch shader \"\(name)\": \(error.localizedDescription)"
-      await reportErrorToServer(msg)
+      await reportToServer(msg)
       return msg
     }
 
@@ -128,13 +128,13 @@ final class DynamicBoxRenderer: VisualPatternController {
       newLibrary = try await device.makeLibrary(source: wrappedSource, options: nil)
     } catch {
       let msg = "Metal compilation error: \(error.localizedDescription)"
-      await reportErrorToServer("[\(name)] \(msg)")
+      await reportToServer("[\(name)] \(msg)")
       return msg
     }
 
     guard let newFragFn = newLibrary.makeFunction(name: "dynamicBoxFragment") else {
       let msg = "Compiled library is missing \"dynamicBoxFragment\" function."
-      await reportErrorToServer("[\(name)] \(msg)")
+      await reportToServer("[\(name)] \(msg)")
       return msg
     }
 
@@ -147,13 +147,14 @@ final class DynamicBoxRenderer: VisualPatternController {
         maxViewCount: maxViewCount)
     } catch {
       let msg = "Pipeline creation error: \(error.localizedDescription)"
-      await reportErrorToServer("[\(name)] \(msg)")
+      await reportToServer("[\(name)] \(msg)")
       return msg
     }
 
     // Swap
     pipelineState = newPS
     currentShaderName = name
+    await reportToServer("[\(name)] Shader compiled and loaded successfully.")
     return nil  // success
   }
 
@@ -223,7 +224,7 @@ final class DynamicBoxRenderer: VisualPatternController {
     return source
   }
 
-  private func reportErrorToServer(_ message: String) async {
+  private func reportToServer(_ message: String) async {
     let url = URL(string: "\(serverBaseURL)/report-error")!
     var req = URLRequest(url: url)
     req.httpMethod = "POST"

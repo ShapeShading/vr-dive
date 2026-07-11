@@ -50,7 +50,7 @@ fragment float4 dynamicBoxFragment(
 
     // ─── Wave Interference ─────────────────────────────────────────────────
     float t = uniforms.time;
-    float maxMarch = tExit;
+    float maxMarch = 25.0f;
 
     float3 pos = eye;
     float  accumA = 0.0f;

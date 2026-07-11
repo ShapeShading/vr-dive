@@ -216,6 +216,14 @@ class GameManager {
     }
   }
 
+  /// Reset the pattern navigation position and yaw to origin.
+  func resetPatternNavigation() {
+    controllerQueue.sync(flags: .barrier) {
+      patternNavYaw = 0
+      patternNavOffset = .zero
+    }
+  }
+
   func updateRigState(deltaTime: Float, headTransform: simd_float4x4) -> simd_float4x4 {
     controllerQueue.sync {
       let primaryStickInput = applyDeadZone(controllerState.leftStick)

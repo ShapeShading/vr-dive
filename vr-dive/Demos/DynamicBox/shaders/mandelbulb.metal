@@ -111,7 +111,7 @@ fragment float4 dynamicBoxFragment(
 
     // ─── Ray march ─────────────────────────────────────────────────────────
     float marchDist = 0.0f;
-    float maxDist = min(tExit, 3.5f);
+    float maxDist = 25.0f;
 
     for (int i = 0; i < 100; i++) {
         float3 p = ro + rd * marchDist;

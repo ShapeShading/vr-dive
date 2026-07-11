@@ -9,3 +9,6 @@ Packages/RealityKitContent/.build/
 buildServer.json
 
 resources/
+
+# DynamicBox shader compilation error log
+scripts/shader-compiling-error.log

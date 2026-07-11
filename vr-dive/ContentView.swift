@@ -200,6 +200,38 @@ struct ControlButtonsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       }
 
+      if model.selectedPattern == .dynamicBox {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("动态着色器加载")
+            .font(.headline)
+
+          HStack(spacing: 10) {
+            TextField("着色器名称", text: $model.dynamicBoxShaderInput)
+              .textFieldStyle(.roundedBorder)
+              .frame(width: 160)
+
+            Button(action: {
+              model.loadDynamicBoxShader()
+            }) {
+              Label("加载", systemImage: "arrow.down.doc")
+            }
+            .buttonStyle(.bordered)
+          }
+
+          Text("状态: \(model.dynamicBoxStatus)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task {
+          // Poll status from coordinator while this view is visible
+          while !Task.isCancelled {
+            model.refreshDynamicBoxStatus()
+            try? await Task.sleep(for: .milliseconds(200))
+          }
+        }
+      }
+
       if model.selectedPattern.supportsOriginCellInspection {
         Toggle(isOn: $model.originCellInspectionEnabled) {
           VStack(alignment: .leading, spacing: 2) {

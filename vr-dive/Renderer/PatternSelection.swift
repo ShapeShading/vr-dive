@@ -106,6 +106,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case weirdSurface
   case neonShells
   case lunarSurface
+  case dynamicBox
 
   var id: String { rawValue }
 
@@ -244,6 +245,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Neon Shells"
     case .lunarSurface:
       return "月面日出"
+    case .dynamicBox:
+      return "动态着色器"
     case .magneticLinesThatDrawInGold:
       return "Magnetic lines that draw in gold"
     case .lanterns:
@@ -671,6 +674,32 @@ final class PatternCoordinator {
   func setSimoneOrbit3DPreset(_ preset: SimoneOrbit3DPreset) {
     queue.async(flags: .barrier) { self._simoneOrbit3DPreset = preset }
   }
+
+  // ─── DynamicBox shader loading ────────────────────────────────────────────
+  /// Called by Renderer after DynamicBoxRenderer is created.
+  func setDynamicBoxLoadAction(_ action: @escaping @MainActor (String) async -> Void) {
+    queue.async(flags: .barrier) { self._dynamicBoxLoadAction = action }
+  }
+
+  func loadDynamicBoxShader(named name: String) {
+    let action = queue.sync { self._dynamicBoxLoadAction }
+    guard let action else { return }
+    Task { @MainActor in
+      await action(name)
+    }
+  }
+
+  private var _dynamicBoxLoadAction: (@MainActor (String) async -> Void)?
+  private var _dynamicBoxStatus: String = "default"
+
+  /// Called by the Renderer's load action to report status back to the UI.
+  func setDynamicBoxStatus(_ status: String) {
+    queue.async(flags: .barrier) { self._dynamicBoxStatus = status }
+  }
+
+  func dynamicBoxStatus() -> String {
+    queue.sync { _dynamicBoxStatus }
+  }
 }
 
 @MainActor
@@ -721,6 +750,28 @@ final class PatternMenuModel {
   var simoneOrbit3DPreset: SimoneOrbit3DPreset = .preset01 {
     didSet {
       coordinator.setSimoneOrbit3DPreset(simoneOrbit3DPreset)
+    }
+  }
+
+  // ─── DynamicBox ──────────────────────────────────────────────────────────
+  /// Name of the shader currently shown in the text field (user-editable).
+  var dynamicBoxShaderInput: String = ""
+  /// Displayed status: current shader name, "Loading…", or error text.
+  var dynamicBoxStatus: String = "default"
+
+  func loadDynamicBoxShader() {
+    let name = dynamicBoxShaderInput.trimmingCharacters(in: .whitespaces)
+    guard !name.isEmpty else { return }
+    dynamicBoxStatus = "Loading…"
+    coordinator.setDynamicBoxStatus("Loading…")
+    coordinator.loadDynamicBoxShader(named: name)
+  }
+
+  /// Call periodically from the UI to refresh DynamicBox status from the coordinator.
+  func refreshDynamicBoxStatus() {
+    let s = coordinator.dynamicBoxStatus()
+    if s != dynamicBoxStatus {
+      dynamicBoxStatus = s
     }
   }
 

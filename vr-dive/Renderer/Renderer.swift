@@ -104,6 +104,24 @@ class Renderer {
     )
 
     self.patternControllers = controllers
+
+    // Wire up DynamicBox shader loading from the UI.
+    if let dynamicBox = controllers[.dynamicBox] {
+      patternCoordinator.setDynamicBoxLoadAction { [weak dynamicBox] name in
+        guard let dynamicBox else { return }
+        let error = await dynamicBox.reloadShader(named: name)
+        if let error {
+          print("[DynamicBox] Shader load failed: \(error)")
+          // Show first line of error as status
+          let firstLine = error.components(separatedBy: "\n").first ?? error
+          patternCoordinator.setDynamicBoxStatus("Error: \(firstLine)")
+        } else {
+          print("[DynamicBox] Shader loaded: \(name)")
+          patternCoordinator.setDynamicBoxStatus(name)
+        }
+      }
+    }
+
     let requestedPattern = patternCoordinator.currentPattern()
     if controllers[requestedPattern] != nil || deferredPatternBuilders[requestedPattern] != nil {
       self.activePatternKind = requestedPattern
@@ -886,6 +904,16 @@ class Renderer {
       controllers[.glassBox] = glassBox
     } else {
       print("[Renderer] GlassBox pattern unavailable.")
+    }
+
+    if let dynamicBox = try? DynamicBoxRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.dynamicBox] = dynamicBox
+    } else {
+      print("[Renderer] DynamicBox pattern unavailable.")
     }
 
     if let platonicMirror = try? PlatonicMirrorRenderer(

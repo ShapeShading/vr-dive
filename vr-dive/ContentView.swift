@@ -217,9 +217,13 @@ struct ControlButtonsView: View {
             Button(action: {
               model.nextDynamicBoxShader()
             }) {
-              Label("下一个", systemImage: "arrow.right.circle")
+              Image(systemName: "arrow.right.circle.fill")
+                .font(.title3)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderless)
+            .accessibilityLabel("下一个着色器")
+            .help("切换到下一个着色器")
+            .frame(width: 28, height: 28)
             .disabled(model.dynamicBoxAvailableShaders.count <= 1)
 
             Button(action: {

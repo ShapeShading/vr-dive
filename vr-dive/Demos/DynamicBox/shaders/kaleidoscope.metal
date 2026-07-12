@@ -14,8 +14,9 @@
 //     二者共同决定分形细节的疏密。
 //   - axis + rot(t*0.12, axis)：让整个分形绕固定轴缓慢旋转，避免画面
 //     静止。
-// 性能特征: 每次 DE 迭代 14 次，含 3 次 swap 排序 + 条件反演，法线额外
-//           6 次求值；march 100 步/maxD=25，中等开销。
+// 性能特征: 每次 DE 迭代 10 次（原 14，因 perf 抽样显示单帧最高 139ms 而收紧），
+//           含 3 次 swap 排序 + 条件反演，法线额外 6 次求值；march 80 步
+//           （原 100）/maxD=25，中等开销。
 // 已知限制/优化方向:
 //   - 折叠参数 (scale/foldR/位移 -0.8) 目前是写死的「经典」KaliSet 配置，
 //     可以考虑暴露为 uniform 或时间函数，实现「变形态」的万花筒效果。
@@ -51,7 +52,7 @@ static float kifsDE(float3 p, float t) {
     float3 axis = normalize(float3(1.0f, 0.7f, 0.3f));
     float3x3 rotM = rot(t * 0.12f, axis);
 
-    for (int i = 0; i < 14; i++) {
+    for (int i = 0; i < 10; i++) {
         // Box fold: reflect across +/- 1 planes
         q = abs(q);
         if (q.x > q.y) { float tmp = q.x; q.x = q.y; q.y = tmp; }
@@ -128,7 +129,7 @@ fragment float4 dynamicBoxFragment(
     float march = 0.0f;
     float maxD  = 25.0f;
 
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 80; i++) {
         float3 p = ro + rd * march;
         float d = kifsDE(p, t);
         if (d < 0.003f) {

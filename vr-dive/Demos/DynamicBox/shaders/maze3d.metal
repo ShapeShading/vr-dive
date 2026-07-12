@@ -46,7 +46,9 @@ static float mazeSDF(float3 p) {
         float dx = (local.x - 1.0f) * cellSize; // distance to east border
         float dz = min(local.y, 1.0f - local.y) * cellSize;
         float dy = abs(p.y);
-        d = min(d, max(max(abs(dx) - wallHalf, dz - cellSize * 0.5f), dy - wallH));
+        // Span-containment term: very negative at the wall's z-center (deep
+        // inside its length), rising to 0 at the wall's z-ends.
+        d = min(d, max(max(abs(dx) - wallHalf, -dz), dy - wallH));
     }
 
     // North wall (+z border of this cell)
@@ -55,7 +57,7 @@ static float mazeSDF(float3 p) {
         float dz = (local.y - 1.0f) * cellSize;
         float dx = min(local.x, 1.0f - local.x) * cellSize;
         float dy = abs(p.y);
-        d = min(d, max(max(abs(dz) - wallHalf, dx - cellSize * 0.5f), dy - wallH));
+        d = min(d, max(max(abs(dz) - wallHalf, -dx), dy - wallH));
     }
 
     // West wall (-x border = east wall of cell (ix-1, iz))
@@ -64,7 +66,7 @@ static float mazeSDF(float3 p) {
         float dx = local.x * cellSize;
         float dz = min(local.y, 1.0f - local.y) * cellSize;
         float dy = abs(p.y);
-        d = min(d, max(max(abs(dx) - wallHalf, dz - cellSize * 0.5f), dy - wallH));
+        d = min(d, max(max(abs(dx) - wallHalf, -dz), dy - wallH));
     }
 
     // South wall (-z border = north wall of cell (ix, iz-1))
@@ -73,7 +75,7 @@ static float mazeSDF(float3 p) {
         float dz = local.y * cellSize;
         float dx = min(local.x, 1.0f - local.x) * cellSize;
         float dy = abs(p.y);
-        d = min(d, max(max(abs(dz) - wallHalf, dx - cellSize * 0.5f), dy - wallH));
+        d = min(d, max(max(abs(dz) - wallHalf, -dx), dy - wallH));
     }
 
     // Floor and ceiling

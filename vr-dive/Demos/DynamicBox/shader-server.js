@@ -10,7 +10,8 @@
  * Endpoints:
  *   GET  /shaders/:name.metal   – serve a shader file
  *   GET  /shaders               – list available shader files (JSON array)
- *   POST /report-error          – log a compilation error to shader-compiling-error.log
+ *   POST /report-error          – log a compile error/success to shader-compiling-error.log
+ *   POST /report-perf           – log a sampled performance report to shader-performance.log
  *
  * Usage:
  *   cd vr-dive/Demos/DynamicBox && node shader-server.js
@@ -24,6 +25,7 @@ const PORT       = 8888;
 const SHADERS_DIR = path.join(__dirname, "shaders");
 const ERROR_LOG   = path.join(__dirname, "shader-compiling-error.log");
 const SERVER_LOG  = path.join(__dirname, "server.log");
+const PERF_LOG    = path.join(__dirname, "shader-performance.log");
 
 // ─── Log helper (console + file) ──────────────────────────────────────────────
 function log(msg) {
@@ -113,6 +115,24 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── POST /report-perf ─────────────────────────────────────────────────────
+  // Sampled performance reports from DynamicBoxRenderer (up to ~10 per shader
+  // load, only sent for noticeably slow frames). Appended to a dedicated log
+  // so they don't get mixed in with compile error/success entries.
+  if (req.method === "POST" && pathname === "/report-perf") {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      const timestamp = new Date().toISOString();
+      const entry = `[${timestamp}] ${body}\n`;
+      fs.appendFileSync(PERF_LOG, entry, "utf-8");
+      log(`[PERF] ${body.split("\n")[0]}`);
+      res.writeHead(200);
+      res.end("OK");
+    });
+    return;
+  }
+
   // ── 404 ───────────────────────────────────────────────────────────────────
   res.writeHead(404);
   res.end("Not found");
@@ -123,6 +143,7 @@ server.listen(PORT, () => {
   log(`Listening on http://localhost:${PORT}`);
   log(`All logs → ${SERVER_LOG}`);
   log(`Errors     → ${ERROR_LOG}`);
+  log(`Perf       → ${PERF_LOG}`);
   log(`Available shaders:`);
   try {
     const files = fs.readdirSync(SHADERS_DIR).filter(f => f.endsWith(".metal"));

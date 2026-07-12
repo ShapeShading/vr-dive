@@ -21,6 +21,9 @@
 			membershipExceptions = (
 				Demos/DynamicBox/shaders/apollonian.metal,
 				Demos/DynamicBox/shaders/default.metal,
+				"Demos/DynamicBox/shaders/fibers-coral.metal",
+				"Demos/DynamicBox/shaders/fibers-vortex.metal",
+				"Demos/DynamicBox/shaders/fibers-wave.metal",
 				Demos/DynamicBox/shaders/fractree.metal,
 				Demos/DynamicBox/shaders/gyroid.metal,
 				Demos/DynamicBox/shaders/hyper4d.metal,

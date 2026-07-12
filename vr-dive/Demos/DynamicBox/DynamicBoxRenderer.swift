@@ -40,6 +40,18 @@ final class DynamicBoxRenderer: VisualPatternController {
   /// Base URL of the shader server. Keep in sync with PatternMenuModel.shaderServerBaseURL.
   private let serverBaseURL = "http://192.168.31.49:8888"
 
+  // MARK: - Performance sampling
+  //
+  // Each time a shader is (re)loaded, we get a fresh budget of at most
+  // `perfMaxReportsPerLoad` performance reports. Frames whose real wall-clock
+  // delta exceeds `perfSlowFrameThresholdSeconds` are candidates; only a random
+  // sample of those actually get POSTed, so the reports are spread out over the
+  // shader's lifetime instead of firing all at once during the first hitch.
+  private static let perfMaxReportsPerLoad = 10
+  private static let perfSlowFrameThresholdSeconds: Double = 0.03  // ~33ms (well below 90Hz/60Hz budget)
+  private static let perfSampleProbability: Double = 0.2
+  private var perfReportsRemaining = DynamicBoxRenderer.perfMaxReportsPerLoad
+
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.device = device
     self.library = library
@@ -66,13 +78,38 @@ final class DynamicBoxRenderer: VisualPatternController {
   func updateSimulation(_ context: PatternSimulationContext) {
     defer { lastSimulationTime = context.time }
     guard let lastSimulationTime else { return }
-    let deltaTime = max(0, min(context.time - lastSimulationTime, 1.0 / 20.0))
+    let rawDelta = context.time - lastSimulationTime
+    let deltaTime = max(0, min(rawDelta, 1.0 / 20.0))
     animationTime += deltaTime * max(context.speedMultiplier, 0)
+
+    maybeSampleSlowFrame(rawDelta: Double(rawDelta))
   }
 
   func resetToInitialState() {
     animationTime = 0
     lastSimulationTime = nil
+  }
+
+  // MARK: - Performance sampling
+
+  /// Called once per real frame with the (uncapped) wall-clock delta since the
+  /// previous frame. If the frame was noticeably slow, randomly samples up to
+  /// `perfMaxReportsPerLoad` reports for the currently-loaded shader.
+  private func maybeSampleSlowFrame(rawDelta: Double) {
+    guard perfReportsRemaining > 0 else { return }
+    guard rawDelta > Self.perfSlowFrameThresholdSeconds else { return }
+    guard Double.random(in: 0..<1) < Self.perfSampleProbability else { return }
+
+    perfReportsRemaining -= 1
+    let sampleIndex = Self.perfMaxReportsPerLoad - perfReportsRemaining
+    let shaderName = currentShaderName.isEmpty ? "default" : currentShaderName
+    let frameMS = rawDelta * 1000.0
+    let fps = rawDelta > 0 ? 1.0 / rawDelta : 0
+    let message = String(
+      format: "[perf][%@] slow frame: %.1f ms (~%.1f fps) — sample %d/%d",
+      shaderName, frameMS, fps, sampleIndex, Self.perfMaxReportsPerLoad)
+
+    Task { await reportPerfToServer(message) }
   }
 
   // MARK: - Shader hot-reload
@@ -88,6 +125,10 @@ final class DynamicBoxRenderer: VisualPatternController {
   /// - Parameter name: shader file name (without `.metal` extension), e.g. `"waves"`
   /// - Returns: `nil` on success, or an error description string on failure.
   func reloadShader(named name: String) async -> String? {
+    // Any load attempt starts a fresh performance-sampling budget for the
+    // (possibly new) shader that ends up active.
+    perfReportsRemaining = Self.perfMaxReportsPerLoad
+
     // "default" uses the embedded shader compiled into the app – no server fetch.
     if name == "default" {
       guard let vertFn = library.makeFunction(name: "dynamicBoxVertex"),
@@ -226,6 +267,17 @@ final class DynamicBoxRenderer: VisualPatternController {
 
   private func reportToServer(_ message: String) async {
     let url = URL(string: "\(serverBaseURL)/report-error")!
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.httpBody = message.data(using: .utf8)
+    req.setValue("text/plain", forHTTPHeaderField: "Content-Type")
+    _ = try? await URLSession.shared.data(for: req)
+  }
+
+  /// Posts a sampled performance report (e.g. a noticeably slow frame) to the
+  /// shader server, which appends it to `shader-performance.log`.
+  private func reportPerfToServer(_ message: String) async {
+    let url = URL(string: "\(serverBaseURL)/report-perf")!
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.httpBody = message.data(using: .utf8)

@@ -1,116 +1,80 @@
 // fibers-vortex.metal
 //
-// Spiral thread columns that twist into a turbulent vortex,
-// with rough matte highlights.
+// Several semi-transparent cylindrical shells nested around the Y axis,
+// each gently undulating (not perfectly circular). What you actually see
+// are dense, thin, spiraling fiber lines living ON each shell (~25% of its
+// area) — a vortex-like woven mesh twisting around the central axis.
 //
 // ─── 设计方案 ────────────────────────────────────────────────────────────
-// 思路: 18 条螺旋丝线绕 Y 轴盘旋 (spin = p.y*spinRate + 相位 + 时间)，
-//       半径随「车道序号」lane 从内到外递增，制造「漩涡」分层效果；同样
-//       解析求出切线供各向异性高光使用。
+// 思路: 先定义若干层「同心圆柱曲面」（半径 rk 随 y 轻微波动，制造有机的
+//       不规则感），曲面本身只贡献极低 alpha；再在曲面的局部坐标
+//       (方位角 theta, 高度 y) 上定义一个「随高度扭转」的周期场
+//       vortexFlow —— theta 项乘以圈数、y 项乘以扭转速率并叠加一个正弦
+//       扭曲，取其小数部分距离最近整数的三角波，阈值化成占周期 25%
+//       宽度的细线掩码，这就是「很细、比较密集、约占 1/4 面积」的丝线；
+//       由于 flow 场含有额外正弦扭曲项，细线本身沿曲面走向天然带有波动
+//       曲率，而不是笔直螺旋线。体积 march 每步找「到最近圆柱曲面的距离」
+//       （精确的 `abs(length(p.xz)-r) `形式，无需近似），命中薄壳时按
+//       alpha 做前向合成，多层由内到外/由近到远叠加，呈现半透明漩涡的
+//       纵深感。
 // 关键参数:
-//   - strandCount = 18、spinRate = 5 + 1.2*sin(t*0.2+fi)：螺旋圈数密度，
-//     随时间轻微调制避免完全周期性重复。
-//   - fiberRadius 从 0.014(内圈) 渐变到 0.008(外圈)，内圈更粗更显眼。
-// 性能特征: 每次 SDF 求值遍历 18 条丝线，法线额外 6 次；march 128
-//           步/maxD=30，是三个纤维 demo 里最贵的一个。
+//   - kVortexShellCount = 4、基础半径 0.24 起、层间距 0.17：同心圆柱的
+//     半径分布，决定漩涡的"层数"与稀疏程度。
+//   - vortexFlow 里 theta*turns + y*twistRate：turns 控制每层螺旋圈数，
+//     twistRate 控制随高度扭转的速度，两者共同决定螺旋的"扭紧"程度。
+//   - fiberLineMask 的 halfWidth = 0.125：对应 25% 占空比。
+// 性能特征: 固定步长体积 march（stepSize=0.024），每步检测 4 层圆柱壳的
+//           「到最近壳距离」（含 atan2），命中薄壳时再算一次 flow 场；
+//           ≤230 步/maxD=25，是三个纤维 demo 里最贵的一个。
 // 已知限制/优化方向:
-//   - 目前 18 条丝线均匀分布在同一层，如果想要更强的「漩涡吸入」视觉，
-//     可以让 radius 随时间整体收缩/扩张来模拟吸入/喷出的呼吸感。
+//   - 目前每层壳的扭转速率相同，只有半径不同；如需更强的"漩涡吸入"感，
+//     可以让 twistRate 也随层数 k 递增，形成内层转得更快的差速漩涡。
 
-struct FiberHit {
-    float d;
-    float3 tangent;
-    float id;
+// ─── Thin curved fiber-line mask ──────────────────────────────────────────
+static float fiberLineMask(float flow, float halfWidth) {
+    float tri = abs(fract(flow + 0.5f) - 0.5f);
+    float aa  = 0.02f;
+    return 1.0f - smoothstep(halfWidth - aa, halfWidth + aa, tri);
+}
+
+// ─── Spiraling fiber flow field on a cylindrical shell ────────────────────
+// theta: azimuth angle around Y; y: height. Warped so the spiral bands
+// curve naturally instead of running as straight helices.
+static float vortexFlow(float theta, float y, float t, float phase) {
+    float turns = 3.0f;
+    float twistRate = 1.6f;
+    float warp = 0.5f * sin(y * 1.4f + phase + t * 0.15f);
+    return (theta + warp) * turns + y * twistRate + phase + t * 0.25f;
+}
+
+#define FIBER_VORTEX_SHELL_COUNT 4
+
+struct ShellHit {
+    float absDist;
+    int   k;
+    float theta;
 };
 
-static float hash13(float3 p) {
-    p = fract(p * 0.1031f);
-    p += dot(p, p.yzx + 33.33f);
-    return fract((p.x + p.y) * p.z);
-}
+static ShellHit nearestVortexShell(float3 p, float t) {
+    ShellHit best;
+    best.absDist = 1e9f;
+    best.k = 0;
+    best.theta = 0.0f;
 
-static FiberHit mapVortexFibers(float3 p, float t) {
-    FiberHit best;
-    best.d = 1e9f;
-    best.tangent = float3(0.0f, 1.0f, 0.0f);
-    best.id = 0.0f;
+    float theta = atan2(p.z, p.x);
+    float radius = length(p.xz);
 
-    const int strandCount = 18;
-    for (int i = 0; i < strandCount; i++) {
-        float fi = float(i);
-        float lane = fi / float(strandCount - 1);
-
-        float spinRate = 5.0f + 1.2f * sin(t * 0.2f + fi);
-        float spin = p.y * spinRate + fi * (DB_PI * 2.0f / float(strandCount)) + t * (0.8f + 0.05f * fi);
-
-        float radius = 0.22f + 0.28f * lane + 0.04f * sin(p.y * 3.0f + fi * 1.7f + t);
-        float2 cXZ = radius * float2(cos(spin), sin(spin));
-        float yOffset = 0.03f * sin(fi + t + p.y * 4.0f);
-        float3 c = float3(cXZ.x, p.y + yOffset, cXZ.y);
-
-        float fiberRadius = mix(0.014f, 0.008f, lane);
-        float d = length(p - c) - fiberRadius;
-
-        if (d < best.d) {
-            float drdy = 0.12f * cos(p.y * 3.0f + fi * 1.7f + t);
-            float dxdy = drdy * cos(spin) - radius * sin(spin) * spinRate;
-            float dzdy = drdy * sin(spin) + radius * cos(spin) * spinRate;
-            float dydy = 1.0f + 0.12f * cos(fi + t + p.y * 4.0f);
-
-            best.d = d;
-            best.tangent = normalize(float3(dxdy, dydy, dzdy));
-            best.id = fi;
+    for (int k = 0; k < FIBER_VORTEX_SHELL_COUNT; k++) {
+        float phase = float(k) * 2.1f;
+        float rk = 0.24f + 0.17f * float(k) + 0.035f * sin(p.y * 2.2f + phase + t * 0.2f);
+        float d = abs(radius - rk);
+        if (d < best.absDist) {
+            best.absDist = d;
+            best.k = k;
+            best.theta = theta;
         }
     }
-
     return best;
-}
-
-static float mapVortexDistance(float3 p, float t) {
-    return mapVortexFibers(p, t).d;
-}
-
-static float3 calcVortexNormal(float3 p, float t) {
-    float2 e = float2(0.003f, 0.0f);
-    return normalize(float3(
-        mapVortexDistance(p + e.xyy, t) - mapVortexDistance(p - e.xyy, t),
-        mapVortexDistance(p + e.yxy, t) - mapVortexDistance(p - e.yxy, t),
-        mapVortexDistance(p + e.yyx, t) - mapVortexDistance(p - e.yyx, t)
-    ));
-}
-
-static float3 shadeVortexFiber(
-    float3 p,
-    float3 n,
-    float3 rd,
-    float3 tangent,
-    float id,
-    float march,
-    float t)
-{
-    float3 lightA = normalize(float3(0.30f, 0.90f, 0.25f));
-    float3 lightB = normalize(float3(-0.50f, 0.35f, 0.80f));
-    float3 v = -rd;
-
-    float diffuse = 0.16f + 0.66f * max(dot(n, lightA), 0.0f) + 0.28f * max(dot(n, lightB), 0.0f);
-
-    float3 hA = normalize(v + lightA);
-    float rough = pow(max(dot(n, hA), 0.0f), 9.0f) * 0.18f;
-    float anis = pow(max(dot(tangent, hA), 0.0f), 18.0f) * 0.10f;
-    float rim = pow(1.0f - max(dot(v, n), 0.0f), 2.0f);
-
-    float tone = 0.5f + 0.5f * sin(id * 0.57f + t * 0.35f);
-    float3 base = mix(float3(0.70f, 0.63f, 0.56f), float3(0.44f, 0.39f, 0.34f), tone);
-
-    float dust = 0.76f + 0.24f * hash13(p * 48.0f + id * 0.19f + t * 0.4f);
-
-    float3 color = base * diffuse;
-    color += float3(0.92f) * rough;
-    color += base * (0.20f * rim + anis);
-    color *= dust;
-
-    float fog = exp(-march * 0.06f);
-    return color * fog;
 }
 
 fragment float4 dynamicBoxFragment(
@@ -153,24 +117,45 @@ fragment float4 dynamicBoxFragment(
     float3 rd = normalize(float3(uniforms.patternTransform * float4(boxRd, 0.0f)));
 
     float t = uniforms.time;
-    float march = 0.0f;
-    float maxMarch = 30.0f;
 
-    for (int i = 0; i < 128; i++) {
-        float3 p = ro + rd * march;
-        FiberHit fh = mapVortexFibers(p, t);
+    float stepSize = 0.024f;
+    float maxMarch = 25.0f;
+    int   maxSteps = int(maxMarch / stepSize) + 2;
 
-        if (fh.d < 0.0026f) {
-            float3 n = calcVortexNormal(p, t);
-            float3 col = shadeVortexFiber(p, n, rd, fh.tangent, fh.id, march, t);
-            return float4(col, 1.0f);
+    const float shellHalf = 0.015f;
+
+    float3 accumC = float3(0.0f);
+    float  accumA = 0.0f;
+
+    for (int i = 0; i < min(maxSteps, 230); i++) {
+        float dist = (float(i) + 0.5f) * stepSize;
+        if (dist > maxMarch) break;
+        float3 p = ro + rd * dist;
+
+        ShellHit hit = nearestVortexShell(p, t);
+        if (hit.absDist < shellHalf) {
+            float phase = float(hit.k) * 2.1f;
+            float flow = vortexFlow(hit.theta, p.y, t, phase);
+            float lineMask = fiberLineMask(flow, 0.125f);
+
+            float falloff = 1.0f - hit.absDist / shellHalf;
+            float baseAlpha = 0.025f;
+            float fiberAlpha = 0.6f;
+            float alpha = clamp(mix(baseAlpha, fiberAlpha, lineMask) * falloff * (stepSize * 32.0f), 0.0f, 1.0f);
+
+            float depthTone = float(hit.k) / float(FIBER_VORTEX_SHELL_COUNT - 1);
+            float3 sheetColor = mix(float3(0.42f, 0.20f, 0.34f), float3(0.30f, 0.34f, 0.62f), depthTone);
+            float3 fiberColor = mix(float3(0.95f, 0.55f, 0.75f), float3(0.70f, 0.78f, 1.0f), depthTone);
+            float3 col = mix(sheetColor, fiberColor, lineMask);
+
+            accumC += col * alpha * (1.0f - accumA);
+            accumA += alpha * (1.0f - accumA);
+            if (accumA > 0.97f) break;
         }
-
-        march += clamp(fh.d * 0.72f, 0.005f, 0.06f);
-        if (march > maxMarch) break;
     }
 
     float glow = exp(-0.8f * length(ro.xz));
     float3 bg = mix(float3(0.012f, 0.010f, 0.009f), float3(0.030f, 0.020f, 0.015f), glow);
-    return float4(bg, 1.0f);
+    float3 finalColor = accumC + bg * (1.0f - accumA);
+    return float4(finalColor, 1.0f);
 }

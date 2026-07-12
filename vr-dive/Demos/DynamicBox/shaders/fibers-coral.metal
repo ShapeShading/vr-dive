@@ -1,133 +1,92 @@
 // fibers-coral.metal
 //
-// Coral-like filament colony: branching upward tendrils with
-// rough matte thread shading.
+// Several semi-transparent lobed spherical shells (like a stack of nested
+// coral fans). Each shell is almost invisible on its own; what you actually
+// see are dense, thin, naturally curved fiber lines living ON each shell
+// (~25% of its area), running roughly along meridians like veins in a
+// coral fan / leaf.
 //
 // ─── 设计方案 ────────────────────────────────────────────────────────────
-// 思路: 以「圆柱坐标 + 沿 y 高度插值的半径 (flare)」构造多条从底部向上
-//       发散的珊瑚触手，14 条枝干各自带独立相位的正弦扰动 (branch/sway)，
-//       沿枝干方向解析求出切线 (tangent) 供各向异性高光使用。
+// 思路: 先定义若干层「带花瓣状波纹的球形曲面」——半径不是常数，而是随
+//       方位角 phi 与极角 theta 调制 (numLobes*phi 产生若干个"瓣"，
+//       乘以 sin(theta) 让波纹只在赤道附近明显、两极趋于平滑)，形成像
+//       珊瑚扇/贝壳一样的分瓣轮廓；曲面本身只贡献极低 alpha。再在曲面的
+//       局部坐标 (phi, theta) 上定义一个「沿经线走向、按纬度扭曲」的周期
+//       场 coralFlow，取其小数部分距离最近整数的三角波，阈值化成占周期
+//       25% 宽度的细线掩码——这就是「很细、比较密集、约占 1/4 面积」的
+//       丝线；扭曲项让细线沿曲面走向天然带有波动曲率，而不是笔直经线。
+//       体积 march 每步找「到最近球形曲面的距离」，命中薄壳时按 alpha
+//       做前向合成，多层叠加呈现半透明珊瑚扇的纵深感。
 // 关键参数:
-//   - branchCount = 14、yMin/yMax = -0.92/0.95：枝干数量与高度范围。
-//   - flare 幂指数 1.45：控制枝干半径随高度增长的「喇叭形」曲率。
-//   - 半径 r 从 0.014(根部) 线性过渡到 0.008(梢部)，模拟真实珊瑚「越往上
-//     越细」的形态。
-// 性能特征: 每次 SDF 求值遍历 14 条枝干，法线额外 6 次；march 120
-//           步/maxD=30，中等偏高开销（枝干数量是主要成本来源）。
+//   - kCoralShellCount = 4、基础半径 0.30 起、层间距 0.16：同心球壳的
+//     半径分布。
+//   - numLobes = 6、rippleAmp = 0.09：花瓣数量与波纹幅度，决定"珊瑚扇"
+//     轮廓的分瓣程度。
+//   - coralFlow 里 phi*turns + warpAmp*sin(theta*warpFreq+phase)：细线
+//     沿经线方向排布，warp 项让线条随纬度自然弯曲。
+//   - fiberLineMask 的 halfWidth = 0.125：对应 25% 占空比。
+// 性能特征: 固定步长体积 march（stepSize=0.026），每步检测 4 层球壳的
+//           「到最近壳距离」（含 atan2/acos），命中薄壳时再算一次 flow
+//           场；≤210 步/maxD=25，中等偏高开销。
 // 已知限制/优化方向:
-//   - shadeCoralFiber 中的磨砂颗粒 (grain) 用简单 hash13，若需要更均匀
-//     的磨砂质感可尝试叠加多个频率的 hash（类似 fbm）。
+//   - 目前花瓣调制只作用在半径上，若想要更强的"珊瑚"分支感，可以让
+//     rippleAmp 或 numLobes 也随壳层 k 变化，形成外层更密的分瓣。
 
-struct FiberHit {
-    float d;
-    float3 tangent;
-    float id;
+// ─── Thin curved fiber-line mask ──────────────────────────────────────────
+static float fiberLineMask(float flow, float halfWidth) {
+    float tri = abs(fract(flow + 0.5f) - 0.5f);
+    float aa  = 0.02f;
+    return 1.0f - smoothstep(halfWidth - aa, halfWidth + aa, tri);
+}
+
+// ─── Lobed shell radius field ──────────────────────────────────────────────
+static float coralRadius(float phi, float theta, float t, float phase, float baseR) {
+    const float numLobes = 6.0f;
+    const float rippleAmp = 0.09f;
+    float ripple = rippleAmp * sin(numLobes * phi + phase + t * 0.12f) * sin(theta);
+    return baseR + ripple;
+}
+
+// ─── Meridian fiber flow field on a shell (warped to curve naturally) ────
+static float coralFlow(float phi, float theta, float t, float phase) {
+    float turns = 5.0f;
+    float warp = 0.6f * sin(theta * 2.4f + phase + t * 0.10f);
+    return (phi + warp) * turns + phase + t * 0.06f;
+}
+
+#define FIBER_CORAL_SHELL_COUNT 4
+
+struct CoralShellHit {
+    float absDist;
+    int   k;
+    float phi;
+    float theta;
 };
 
-static float hash13(float3 p) {
-    p = fract(p * 0.1031f);
-    p += dot(p, p.yzx + 33.33f);
-    return fract((p.x + p.y) * p.z);
-}
+static CoralShellHit nearestCoralShell(float3 p, float t) {
+    CoralShellHit best;
+    best.absDist = 1e9f;
+    best.k = 0;
+    best.phi = 0.0f;
+    best.theta = 0.0f;
 
-static FiberHit mapCoralFibers(float3 p, float t) {
-    FiberHit best;
-    best.d = 1e9f;
-    best.tangent = float3(0.0f, 1.0f, 0.0f);
-    best.id = 0.0f;
+    float radius = length(p);
+    float phi = atan2(p.z, p.x);
+    float theta = acos(clamp(p.y / max(radius, 1e-4f), -1.0f, 1.0f));
 
-    const int branchCount = 14;
-    const float yMin = -0.92f;
-    const float yMax = 0.95f;
-
-    for (int i = 0; i < branchCount; i++) {
-        float fi = float(i);
-        float a = fi * (DB_PI * 2.0f / float(branchCount));
-
-        float y = clamp(p.y, yMin, yMax);
-        float h = (y - yMin) / (yMax - yMin);
-
-        float flare = 0.06f + 0.55f * pow(max(h, 0.0001f), 1.45f);
-        float branch = 0.09f * sin(6.0f * h + t * 0.60f + fi * 1.30f) * (0.3f + 0.7f * h);
-
-        float swayX = 0.06f * sin(y * 3.5f + t * 0.40f + fi);
-        float swayZ = 0.06f * cos(y * 3.2f - t * 0.50f + fi * 0.70f);
-
-        float radial = flare + branch;
-        float3 c = float3(
-            cos(a) * radial + swayX,
-            y,
-            sin(a) * radial + swayZ
-        );
-
-        float r = mix(0.014f, 0.008f, h) + 0.0015f * sin(fi + t * 0.2f);
-        float d = length(p - c) - r;
-
-        if (d < best.d) {
-            float dhdy = 1.0f / (yMax - yMin);
-            float dFlareDy = 0.55f * 1.45f * pow(max(h, 0.0001f), 0.45f) * dhdy;
-            float wave = sin(6.0f * h + t * 0.60f + fi * 1.30f);
-            float dWaveDy = 6.0f * dhdy * cos(6.0f * h + t * 0.60f + fi * 1.30f);
-            float dBranchDy = 0.09f * (dWaveDy * (0.3f + 0.7f * h) + wave * 0.7f * dhdy);
-            float dRadialDy = dFlareDy + dBranchDy;
-
-            float dxdy = cos(a) * dRadialDy + 0.21f * cos(y * 3.5f + t * 0.40f + fi);
-            float dzdy = sin(a) * dRadialDy - 0.192f * sin(y * 3.2f - t * 0.50f + fi * 0.70f);
-
-            best.d = d;
-            best.tangent = normalize(float3(dxdy, 1.0f, dzdy));
-            best.id = fi;
+    for (int k = 0; k < FIBER_CORAL_SHELL_COUNT; k++) {
+        float phase = float(k) * 1.9f;
+        float baseR = 0.30f + 0.16f * float(k);
+        float rk = coralRadius(phi, theta, t, phase, baseR);
+        float d = abs(radius - rk);
+        if (d < best.absDist) {
+            best.absDist = d;
+            best.k = k;
+            best.phi = phi;
+            best.theta = theta;
         }
     }
-
     return best;
-}
-
-static float mapCoralDistance(float3 p, float t) {
-    return mapCoralFibers(p, t).d;
-}
-
-static float3 calcCoralNormal(float3 p, float t) {
-    float2 e = float2(0.003f, 0.0f);
-    return normalize(float3(
-        mapCoralDistance(p + e.xyy, t) - mapCoralDistance(p - e.xyy, t),
-        mapCoralDistance(p + e.yxy, t) - mapCoralDistance(p - e.yxy, t),
-        mapCoralDistance(p + e.yyx, t) - mapCoralDistance(p - e.yyx, t)
-    ));
-}
-
-static float3 shadeCoralFiber(
-    float3 p,
-    float3 n,
-    float3 rd,
-    float3 tangent,
-    float id,
-    float march,
-    float t)
-{
-    float3 lightA = normalize(float3(0.40f, 0.88f, 0.28f));
-    float3 lightB = normalize(float3(-0.34f, 0.25f, 0.91f));
-    float3 v = -rd;
-
-    float diffuse = 0.20f + 0.62f * max(dot(n, lightA), 0.0f) + 0.22f * max(dot(n, lightB), 0.0f);
-
-    float3 hA = normalize(v + lightA);
-    float rough = pow(max(dot(n, hA), 0.0f), 8.0f) * 0.20f;
-    float anis = pow(max(dot(tangent, hA), 0.0f), 16.0f) * 0.08f;
-    float rim = pow(1.0f - max(dot(v, n), 0.0f), 2.2f);
-
-    float tint = 0.5f + 0.5f * sin(id * 0.91f + t * 0.22f);
-    float3 base = mix(float3(0.80f, 0.62f, 0.48f), float3(0.58f, 0.44f, 0.34f), tint);
-
-    float grain = 0.74f + 0.26f * hash13(p * 52.0f + id * 0.33f + t * 0.3f);
-
-    float3 color = base * diffuse;
-    color += float3(0.94f) * rough;
-    color += base * (0.24f * rim + anis);
-    color *= grain;
-
-    float fog = exp(-march * 0.05f);
-    return color * fog;
 }
 
 fragment float4 dynamicBoxFragment(
@@ -170,24 +129,45 @@ fragment float4 dynamicBoxFragment(
     float3 rd = normalize(float3(uniforms.patternTransform * float4(boxRd, 0.0f)));
 
     float t = uniforms.time;
-    float march = 0.0f;
-    float maxMarch = 30.0f;
 
-    for (int i = 0; i < 120; i++) {
-        float3 p = ro + rd * march;
-        FiberHit fh = mapCoralFibers(p, t);
+    float stepSize = 0.026f;
+    float maxMarch = 25.0f;
+    int   maxSteps = int(maxMarch / stepSize) + 2;
 
-        if (fh.d < 0.0027f) {
-            float3 n = calcCoralNormal(p, t);
-            float3 col = shadeCoralFiber(p, n, rd, fh.tangent, fh.id, march, t);
-            return float4(col, 1.0f);
+    const float shellHalf = 0.016f;
+
+    float3 accumC = float3(0.0f);
+    float  accumA = 0.0f;
+
+    for (int i = 0; i < min(maxSteps, 210); i++) {
+        float dist = (float(i) + 0.5f) * stepSize;
+        if (dist > maxMarch) break;
+        float3 p = ro + rd * dist;
+
+        CoralShellHit hit = nearestCoralShell(p, t);
+        if (hit.absDist < shellHalf) {
+            float phase = float(hit.k) * 1.9f;
+            float flow = coralFlow(hit.phi, hit.theta, t, phase);
+            float lineMask = fiberLineMask(flow, 0.125f);
+
+            float falloff = 1.0f - hit.absDist / shellHalf;
+            float baseAlpha = 0.028f;
+            float fiberAlpha = 0.62f;
+            float alpha = clamp(mix(baseAlpha, fiberAlpha, lineMask) * falloff * (stepSize * 30.0f), 0.0f, 1.0f);
+
+            float depthTone = float(hit.k) / float(FIBER_CORAL_SHELL_COUNT - 1);
+            float3 sheetColor = mix(float3(0.55f, 0.30f, 0.22f), float3(0.40f, 0.30f, 0.46f), depthTone);
+            float3 fiberColor = mix(float3(0.95f, 0.70f, 0.55f), float3(0.85f, 0.70f, 0.95f), depthTone);
+            float3 col = mix(sheetColor, fiberColor, lineMask);
+
+            accumC += col * alpha * (1.0f - accumA);
+            accumA += alpha * (1.0f - accumA);
+            if (accumA > 0.97f) break;
         }
-
-        march += clamp(fh.d * 0.72f, 0.005f, 0.06f);
-        if (march > maxMarch) break;
     }
 
     float horizon = 0.5f + 0.5f * rd.y;
     float3 bg = mix(float3(0.014f, 0.012f, 0.010f), float3(0.026f, 0.020f, 0.016f), horizon);
-    return float4(bg, 1.0f);
+    float3 finalColor = accumC + bg * (1.0f - accumA);
+    return float4(finalColor, 1.0f);
 }

@@ -7,16 +7,26 @@
 //
 // ─── 设计方案 ────────────────────────────────────────────────────────────
 // 思路: 用「折叠空间 + 圆柱体 SDF」近似分形树。每一级迭代先算主干圆柱
-//       (trunk) 和沿 foldDir 方向的分支圆柱 (branch)，取 min 后，再对
-//       空间做取绝对值 + 轴交换的折叠，模拟真实分叉产生的自相似结构。
+//       (trunk) 和沿 foldDir 方向的分支圆柱 (branch)，取 min 后与累计的
+//       最小距离 `d`（除以当前累计缩放 scale，换算回原始坐标尺度）取
+//       min，再对空间做取绝对值 + 轴交换的折叠并放大，模拟真实分叉产生
+//       的自相似结构。
 // 关键参数:
 //   - foldDir 由 sway = sin(t*0.5 + i*1.5) 计算，让每一级分支随时间摆动，
 //     模拟风吹效果；i 越大摆动相位差越大，看起来更自然。
 //   - rep = 0.35：每级迭代前沿 y 轴平移的距离，决定分支的分布密度。
-//   - 迭代 7 级，每级 q *= 1.5 放大，配合 r *= 1.5 保持是有效距离场。
+//   - 迭代 7 级，每级 q *= 1.5 放大、scale *= 1.5 同步累积，用于把每级
+//     算出的局部距离 `seg` 除以 scale 换算回世界坐标尺度。
 // 性能特征: 每次 DE 求值仅 7 次循环（三角函数调用可控），march 步进用
 //           max(d*0.8, 0.01) 做保守推进，100 步 / maxD=25。
-// 已知限制/优化方向:
+// 已知限制/优化方向（⚠️ 曾踩坑记录）:
+//   - 最初实现只在 `i==0` 时把 `seg` 赋给累计距离 `r`，之后 6 级迭代算出
+//     的 `seg` 从未合并进 `r`（只有 `r *= 1.5` 在空转），等价于距离场
+//     只反映第一级的单根主干+单个分支，其余 6 级的折叠分支全部白算。
+//     由于该"有效形状"只是一根细圆柱(半径0.04)+一根细分支(半径0.025)，
+//     在半径~0.95 的盒子里几乎不可见，导致画面「几乎是空的」。
+//     修复方式：每级都执行 `d = min(d, seg / scale)`（除以累计缩放换算
+//     回原始尺度），才能让全部 7 级折叠出的分支真正参与最终形状。
 //   - 树冠和树干目前共享同一套折叠逻辑，层次感可通过在高层级减小
 //     branch 半径来增强「越往上越细」的真实感。
 //   - 可尝试给顶端加入叶片/花朵状 SDF 提升识别度。
@@ -25,7 +35,8 @@
 // Approximates a branching tree by folding space toward branches.
 static float treeSDF(float3 p, float t) {
     float3 q = p;
-    float  r = 0.0f;
+    float  scale = 1.0f;
+    float  d = 1e10f;
 
     // Trunk and branching
     for (int i = 0; i < 7; i++) {
@@ -46,7 +57,10 @@ static float treeSDF(float3 p, float t) {
 
         seg = min(seg, branch);
 
-        if (i == 0) r = seg;
+        // Fold back into original coordinate scale and merge into the
+        // running minimum — every level of the fold must contribute here,
+        // not just the first one.
+        d = min(d, seg / scale);
 
         // Fold space for next level: reflect and scale toward branches
         float rep = 0.35f;
@@ -57,10 +71,10 @@ static float treeSDF(float3 p, float t) {
 
         // Scale down for finer detail
         q = q * 1.5f;
-        r *= 1.5f;
+        scale *= 1.5f;
     }
 
-    return r / 3.0f - 0.01f;
+    return d - 0.01f;
 }
 
 static float3 calcNormal(float3 p, float t) {

@@ -1,110 +1,81 @@
 // fibers-wave.metal
 //
-// Dense wave-driven fiber bundles with frosted thread shading.
+// Several semi-transparent wavy sheets stacked in Y. Each sheet is almost
+// invisible on its own; what you actually see are dense, thin, naturally
+// curved fiber lines that live ON the sheet surface (~25% of its area),
+// like a woven mesh of threads draped over a rippling membrane.
 //
 // ─── 设计方案 ────────────────────────────────────────────────────────────
-// 思路: ±8 共 17 条丝线沿 X 轴排列，每条丝线的 y/z 位置由不同相位的
-//       sin/cos 组合决定，形成水平方向的「波浪丝束」；解析求出切线供
-//       各向异性高光使用。
+// 思路: 先定义若干层「水平波浪曲面」（sheetHeight 高度场），每层曲面本身
+//       只贡献极低的 alpha（近乎透明）；再在曲面的局部 2D 坐标 (x,z) 上
+//       定义一个「扭曲后的周期场」sheetFlow，取其小数部分距离最近整数的
+//       三角波，阈值化成占周期 25% 宽度的细线掩码 fiberLineMask——这就是
+//       曲面上「很细、比较密集、约占 1/4 面积」的丝线。sheetFlow 在计算
+//       周期坐标前先用 sin() 对坐标做了扭曲，因此细线本身沿曲面走向也是
+//       自然弯曲的曲线，而不是笔直条纹。体积 march 沿途在每一步找「最近
+//       的曲面」，命中曲面薄壳时按 alpha 做前向合成，多层前后叠加，透过
+//       前层能看到后层，呈现有纵深的半透明多层薄纱效果。
 // 关键参数:
-//   - fiberRadius = 0.012（固定，不随丝线变化）。
-//   - phase = fi * 0.63：相邻丝线的相位差，决定波浪起伏的错落感。
-// 性能特征: 每次 SDF 求值遍历 17 条丝线，法线额外 6 次；march 120
-//           步/maxD=30，与 fibers-coral 接近，中等偏高开销。
+//   - kSheetCount = 5、层间距 0.5：曲面层数与纵深范围（覆盖盒子 y 方向
+//     约 [-1,1]）。
+//   - fiberLineMask 的 halfWidth = 0.125：对应 25% 占空比（占面积 1/4）。
+//   - sheetFlow 里的 0.35*sin(uv.y*1.7+phase) 扭曲项：决定细线弯曲的
+//     幅度/频率；去掉它细线会退化成笔直条纹。
+//   - baseAlpha=0.03（曲面本身，近乎透明）/ fiberAlpha=0.65（细线，明显
+//     更不透明）：两者之差就是「曲面透明、细线可见」的核心对比。
+// 性能特征: 固定步长体积 march（stepSize=0.026），每步检测 5 层曲面的
+//           「到最近曲面距离」，命中薄壳时再算一次 flow 场；≤220 步/
+//           maxD=25，中等偏高开销，建议关注其 perf 抽样日志。
 // 已知限制/优化方向:
-//   - 目前所有丝线共享同一组频率 (2.10f/1.70f)，只有相位不同，波形略显
-//     规律；如需更自然的水波感可以让频率也随 fi 轻微抖动。
+//   - 曲面用「点到高度场的竖直距离」近似代替真实最近距离，曲面坡度较大
+//     处会有轻微误差；本 demo 幅度刻意控制得较小以规避明显瑕疵。
+//   - 目前每层曲面权重相同，如需更强纵深感可让远处层的 alpha 随深度
+//     衰减得更快。
 
-struct FiberHit {
-    float d;
-    float3 tangent;
-    float id;
+// ─── Thin curved fiber-line mask ──────────────────────────────────────────
+// 1 inside a thin band around integer values of `flow`; band half-width in
+// units of one period, so halfWidth=0.125 gives ~25% coverage per period.
+static float fiberLineMask(float flow, float halfWidth) {
+    float tri = abs(fract(flow + 0.5f) - 0.5f);
+    float aa  = 0.02f;
+    return 1.0f - smoothstep(halfWidth - aa, halfWidth + aa, tri);
+}
+
+// ─── Sheet height field ────────────────────────────────────────────────────
+static float sheetHeight(float2 uv, float t, float phase) {
+    return 0.16f * sin(uv.x * 1.3f + phase + t * 0.15f) * cos(uv.y * 1.05f - phase * 0.6f)
+         + 0.07f * sin(uv.x * 2.4f - uv.y * 1.8f + t * 0.22f + phase * 1.4f);
+}
+
+// ─── Fiber flow field on a sheet (warped so iso-lines curve naturally) ────
+static float sheetFlow(float2 uv, float t, float phase) {
+    float warped = uv.x + 0.35f * sin(uv.y * 1.7f + phase + t * 0.10f);
+    return warped * 3.2f + 0.6f * sin(uv.y * 2.3f - phase * 0.8f + t * 0.08f);
+}
+
+#define FIBER_WAVE_SHEET_COUNT 5
+
+struct SheetHit {
+    float absDist;
+    int   k;
 };
 
-static float hash13(float3 p) {
-    p = fract(p * 0.1031f);
-    p += dot(p, p.yzx + 33.33f);
-    return fract((p.x + p.y) * p.z);
-}
+static SheetHit nearestWaveSheet(float3 p, float t) {
+    SheetHit best;
+    best.absDist = 1e9f;
+    best.k = 0;
 
-static FiberHit mapWaveFibers(float3 p, float t) {
-    FiberHit best;
-    best.d = 1e9f;
-    best.tangent = float3(1.0f, 0.0f, 0.0f);
-    best.id = 0.0f;
-
-    const float fiberRadius = 0.012f;
-    for (int i = -8; i <= 8; i++) {
-        float fi = float(i);
-        float phase = fi * 0.63f;
-
-        float y = 0.28f * sin(p.x * 2.10f + phase + t * 0.90f) + fi * 0.065f;
-        float z = 0.24f * cos(p.x * 1.70f - phase * 1.20f + t * 0.55f);
-
-        float3 c = float3(p.x, y, z);
-        float d = length(p - c) - fiberRadius;
-        if (d < best.d) {
-            float dy = 0.28f * 2.10f * cos(p.x * 2.10f + phase + t * 0.90f);
-            float dz = -0.24f * 1.70f * sin(p.x * 1.70f - phase * 1.20f + t * 0.55f);
-            best.d = d;
-            best.tangent = normalize(float3(1.0f, dy, dz));
-            best.id = fi;
+    for (int k = 0; k < FIBER_WAVE_SHEET_COUNT; k++) {
+        float phase = float(k) * 1.7f;
+        float y0 = (float(k) - 2.0f) * 0.5f;
+        float h = sheetHeight(p.xz, t, phase);
+        float d = abs(p.y - y0 - h);
+        if (d < best.absDist) {
+            best.absDist = d;
+            best.k = k;
         }
     }
-
     return best;
-}
-
-static float mapWaveDistance(float3 p, float t) {
-    return mapWaveFibers(p, t).d;
-}
-
-static float3 calcWaveNormal(float3 p, float t) {
-    float2 e = float2(0.003f, 0.0f);
-    return normalize(float3(
-        mapWaveDistance(p + e.xyy, t) - mapWaveDistance(p - e.xyy, t),
-        mapWaveDistance(p + e.yxy, t) - mapWaveDistance(p - e.yxy, t),
-        mapWaveDistance(p + e.yyx, t) - mapWaveDistance(p - e.yyx, t)
-    ));
-}
-
-static float3 shadeFrostedFiber(
-    float3 p,
-    float3 n,
-    float3 rd,
-    float3 tangent,
-    float fiberId,
-    float march,
-    float t)
-{
-    float3 lightA = normalize(float3(0.45f, 0.85f, 0.35f));
-    float3 lightB = normalize(float3(-0.60f, 0.40f, 0.70f));
-    float3 v = -rd;
-
-    float difA = max(dot(n, lightA), 0.0f);
-    float difB = max(dot(n, lightB), 0.0f);
-    float diffuse = 0.18f + difA * 0.62f + difB * 0.30f;
-
-    float3 h = normalize(lightA + v);
-    float roughSpec = pow(max(dot(n, h), 0.0f), 10.0f) * 0.16f;
-
-    float rim = pow(1.0f - max(dot(v, n), 0.0f), 2.1f);
-    float fiberScatter = pow(max(dot(tangent, h), 0.0f), 22.0f) * 0.08f;
-
-    float hueBand = 0.5f + 0.5f * sin(fiberId * 0.44f + t * 0.2f);
-    float3 baseA = float3(0.58f, 0.70f, 0.78f);
-    float3 baseB = float3(0.36f, 0.50f, 0.64f);
-    float3 base = mix(baseA, baseB, hueBand);
-
-    float grain = 0.78f + 0.22f * hash13(p * 45.0f + fiberId * 0.37f + t);
-
-    float3 color = base * diffuse;
-    color += float3(0.95f) * roughSpec;
-    color += base * (0.22f * rim + fiberScatter);
-    color *= grain;
-
-    float fog = exp(-march * 0.055f);
-    return color * fog;
 }
 
 fragment float4 dynamicBoxFragment(
@@ -147,24 +118,45 @@ fragment float4 dynamicBoxFragment(
     float3 rd = normalize(float3(uniforms.patternTransform * float4(boxRd, 0.0f)));
 
     float t = uniforms.time;
-    float march = 0.0f;
-    float maxMarch = 30.0f;
 
-    for (int i = 0; i < 120; i++) {
-        float3 p = ro + rd * march;
-        FiberHit fh = mapWaveFibers(p, t);
+    float stepSize = 0.026f;
+    float maxMarch = 25.0f;
+    int   maxSteps = int(maxMarch / stepSize) + 2;
 
-        if (fh.d < 0.0028f) {
-            float3 n = calcWaveNormal(p, t);
-            float3 col = shadeFrostedFiber(p, n, rd, fh.tangent, fh.id, march, t);
-            return float4(col, 1.0f);
+    const float shellHalf = 0.016f;
+
+    float3 accumC = float3(0.0f);
+    float  accumA = 0.0f;
+
+    for (int i = 0; i < min(maxSteps, 220); i++) {
+        float dist = (float(i) + 0.5f) * stepSize;
+        if (dist > maxMarch) break;
+        float3 p = ro + rd * dist;
+
+        SheetHit hit = nearestWaveSheet(p, t);
+        if (hit.absDist < shellHalf) {
+            float phase = float(hit.k) * 1.7f;
+            float flow = sheetFlow(p.xz, t, phase);
+            float lineMask = fiberLineMask(flow, 0.125f);
+
+            float falloff = 1.0f - hit.absDist / shellHalf;
+            float baseAlpha = 0.03f;
+            float fiberAlpha = 0.65f;
+            float alpha = clamp(mix(baseAlpha, fiberAlpha, lineMask) * falloff * (stepSize * 30.0f), 0.0f, 1.0f);
+
+            float depthTone = float(hit.k) / float(FIBER_WAVE_SHEET_COUNT - 1);
+            float3 sheetColor = mix(float3(0.28f, 0.40f, 0.54f), float3(0.55f, 0.68f, 0.80f), depthTone);
+            float3 fiberColor = mix(float3(0.86f, 0.91f, 0.98f), float3(0.98f, 0.95f, 0.86f), depthTone);
+            float3 col = mix(sheetColor, fiberColor, lineMask);
+
+            accumC += col * alpha * (1.0f - accumA);
+            accumA += alpha * (1.0f - accumA);
+            if (accumA > 0.97f) break;
         }
-
-        march += clamp(fh.d * 0.75f, 0.005f, 0.06f);
-        if (march > maxMarch) break;
     }
 
     float sky = 0.5f + 0.5f * rd.y;
     float3 bg = mix(float3(0.012f, 0.015f, 0.022f), float3(0.02f, 0.028f, 0.04f), sky);
-    return float4(bg, 1.0f);
+    float3 finalColor = accumC + bg * (1.0f - accumA);
+    return float4(finalColor, 1.0f);
 }

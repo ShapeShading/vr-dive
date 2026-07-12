@@ -779,6 +779,18 @@ final class PatternMenuModel {
     coordinator.loadDynamicBoxShader(named: name)
   }
 
+  /// Advances to the next shader in `dynamicBoxAvailableShaders` (wrapping
+  /// around), triggering a hot-reload via `dynamicBoxSelectedShader`'s didSet.
+  func nextDynamicBoxShader() {
+    guard !dynamicBoxAvailableShaders.isEmpty else { return }
+    if let idx = dynamicBoxAvailableShaders.firstIndex(of: dynamicBoxSelectedShader) {
+      let nextIndex = (idx + 1) % dynamicBoxAvailableShaders.count
+      dynamicBoxSelectedShader = dynamicBoxAvailableShaders[nextIndex]
+    } else {
+      dynamicBoxSelectedShader = dynamicBoxAvailableShaders[0]
+    }
+  }
+
   func refreshShaderList() {
     Task {
       let url = URL(string: "\(Self.shaderServerBaseURL)/shaders")!

@@ -215,6 +215,14 @@ struct ControlButtonsView: View {
             .frame(width: 180)
 
             Button(action: {
+              model.nextDynamicBoxShader()
+            }) {
+              Label("下一个", systemImage: "arrow.right.circle")
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.dynamicBoxAvailableShaders.count <= 1)
+
+            Button(action: {
               model.refreshShaderList()
             }) {
               Label("刷新", systemImage: "arrow.clockwise")

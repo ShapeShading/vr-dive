@@ -3,6 +3,21 @@
 // Renders an undulating liquid/organic surface using domain-warped
 // layered noise. The surface moves like a living fluid with
 // iridescent reflections. Inspired by fluid simulation visuals.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 用 3 阶 fbm (基于 hash-based value noise) 对采样点做多重 domain
+//       warp (先按 sin/cos 位移 q，再叠加两层不同频率/相位的 fbm)，最终
+//       以 `field - 0.45` 作为隐式等值面，模拟流体扰动表面。
+// 关键参数:
+//   - 0.3f/0.2f 系数的正弦位移：一次形变的幅度，决定表面起伏剧烈程度。
+//   - fbm 混合比例 0.7/0.3：两层噪声的权重，影响细节层次的丰富度。
+//   - isosurface 阈值 0.45：值越大，「液面」越薄/越少被 march 命中。
+// 性能特征: 每个 fbm 调用 4 octave noise，每次 map 求值调用 2 次 fbm，
+//           法线额外 6 次；map 非严格 SDF，用 max(fabs(d),0.02) 兜底
+//           步进，80 步/maxD=25，属于中等开销。
+// 已知限制/优化方向:
+//   - 由于不是真实 SDF，命中判定用 `d < 0.008 && d > -0.05` 双边阈值，
+//     表面可能出现锯齿；如需更光滑可提高步进采样密度或改用解析梯度。
 
 // ─── Noise helpers ────────────────────────────────────────────────────────────
 static float hash(float3 p) {

@@ -3,6 +3,20 @@
 // A classic 3D fractal: a cube with recursively removed sub-cubes,
 // creating an infinitely detailed sponge-like structure.
 // Rendered with ray marching and distance estimation.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 标准 Menger sponge DE：每级先取绝对值 + 3 次冒泡排序让坐标单调，
+//       再用 3 个 max() 组合出十字形镂空区域，从实心方块中「挖空」，最后
+//       缩放 3 倍进入下一级，共 6 级。
+// 关键参数:
+//   - 挖空阈值 1/3：十字形镂空的宽度比例，决定海绵孔洞的疏密（标准值，
+//     不建议随意更改否则会破坏自相似性）。
+//   - 迭代 6 级：级数越高细节越多，但每级都线性放大法线计算的误差敏感度。
+// 性能特征: 每次 DE 6 次迭代（排序 + 两次 max 合并），法线 6 次求值；
+//           march 120 步/maxD=25，中等开销，是分形中较「便宜」的一种。
+// 已知限制/优化方向:
+//   - 目前只有全局慢速旋转 (ca/sa)，可尝试让镂空阈值随时间轻微呼吸，
+//     做出「海绵在生长/收缩」的动态效果。
 
 // ─── Menger sponge DE ─────────────────────────────────────────────────────────
 static float mengerDE(float3 p) {

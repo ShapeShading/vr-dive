@@ -6,6 +6,23 @@
 //
 // The corridor has glowing wall panels and floating energy orbs
 // that recede into infinite depth.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 用 `round(p.z/segLen)` 沿 Z 轴做无限重复 (domain repetition)，把
+//       每个「走廊段」折回原点附近计算；每段由「外墙盒子 - 内部镂空盒子」
+//       构成走廊边框，再叠加网格线、发光面板、中心能量球三种细节 SDF，
+//       取 min 合并。
+// 关键参数:
+//   - segLen = 0.8：每个走廊段的长度，决定重复频率。
+//   - corridorW/corridorH = 0.3：走廊内部净空半宽/半高，配合
+//     wallThick=0.05 决定通道大小。
+//   - hue 由 segment 编号 + 时间决定，让每一段颜色随深度渐变，增强
+//     「无限」错觉。
+// 性能特征: map() 内只有常数次运算（无迭代循环），march 150 步/maxD=25，
+//           是该目录里较轻量的 shader，可承受更多细节层。
+// 已知限制/优化方向:
+//   - 目前 grid/panel 的镂空判定用多个 max() 拼接，可读性一般，如需增加
+//     走廊分岔可以在这里扩展成真正的多分支网络（类似 maze3d 的做法）。
 
 // ─── Scene SDF ────────────────────────────────────────────────────────────────
 static float map(float3 p, float t) {

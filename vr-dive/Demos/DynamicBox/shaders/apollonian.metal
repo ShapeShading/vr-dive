@@ -6,6 +6,22 @@
 //
 // Based on the standard Apollonian fractal DE popularized by
 // Syntopia / FractalForums.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 标准 Apollonian gasket 距离估计器 (DE)。每次迭代对点做球面反演
+//       (q = q / |q|²)，再取绝对值做镜像折叠，最后整体平移 + 缩放，
+//       14 次迭代后用 length(q)/dr 作为距离场。
+// 关键参数:
+//   - scale = 3.0：每次迭代的缩放倍数，决定球体嵌套的密度。
+//   - 迭代次数 14：越多细节越丰富，但法线计算(6 次求值)成本也线性增加。
+//   - march 步进直接用原始 d（未做安全系数缩放），因为 DE 本身已是保守估计。
+// 性能特征: 单点 DE 迭代 14 次 + 有限差分法线 ×6 次 DE 调用；march 上限
+//           120 步、maxD=25。整体开销中等偏高，属于本目录里较重的分形。
+// 已知限制/优化方向:
+//   - 目前没有做「orbit trap」之类按迭代轨迹着色，只用 palette(length(p))，
+//     细节层次的色彩变化有限，可尝试引入 orbit trap 提升可读性。
+//   - 可尝试提前判断 m 过小时 break（已有），或增加自适应步进系数以降低
+//     远处采样开销。
 
 // ─── Apollonian DE ────────────────────────────────────────────────────────────
 // Standard Apollonian gasket: iterative sphere inversion + fold + scale.

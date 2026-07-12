@@ -3,6 +3,20 @@
 // Renders animated blobby metaballs using sphere-based SDF with
 // smooth blending. Multiple metaballs orbit and merge together
 // like living cells, with iridescent surface coloring.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 5 个球体 (3 个中心簇 + 2 个绕轨卫星) 用 `opSmoothUnion`（基于
+//       smoothstep 的平滑并集）逐个合并，每个球心位置由不同频率/相位的
+//       三角函数驱动，模拟有机细胞般的聚合与分离。
+// 关键参数:
+//   - k = 0.3（中心簇）/ k*0.7、k*0.5（卫星）：平滑混合系数，越大融合
+//     越「粘稠」，过渡越柔和；卫星用更小的 k 保持相对独立的轮廓。
+//   - 各球心运动的角频率/相位互不相同，避免同步运动导致的呆板感。
+// 性能特征: map() 只需 5 次 opSmoothUnion + 5 次 length，法线 6 次求值；
+//           march 80 步/maxD=25，是本目录里最轻量的 shader 之一。
+// 已知限制/优化方向:
+//   - 目前只用 hue = length(p) 做虹彩着色，可尝试按「距离最近球心索引」
+//     分别赋色，让每个 metaball 有独立色调，增强「细胞」辨识度。
 
 // ─── Metaball SDF (smooth union) ─────────────────────────────────────────────
 static float opSmoothUnion(float d1, float d2, float k) {

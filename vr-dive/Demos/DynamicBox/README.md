@@ -94,6 +94,32 @@ ipconfig getifaddr en0
 tail -f vr-dive/Demos/DynamicBox/shader-performance.log
 ```
 
+---
+
+## 构建时类型检查
+
+`shaders/` 目录下的 `.metal` 文件不会被 Xcode 打包进 app（见下方 `membershipExceptions`
+配置），但每次构建 `vr-dive` target 时，会自动执行一个 Run Script Build Phase
+（`Check DynamicBox Shaders`），调用 [`check-shaders.js`](./check-shaders.js)：
+
+- 用与 `DynamicBoxRenderer.wrapShaderSource()` **完全一致**的前置代码（结构体 /
+  宏 / `db_boxHit` 辅助函数）包装每个 `.metal` 文件，然后用真实的
+  `xcrun metal -c` 编译器做完整的类型检查。
+- 编译输出（含 warning/error）会直接打印在 Xcode 的 Build Log 里。
+- **任意一个 shader 编译失败都会导致整个 app 构建失败**，从而保证仓库里的
+  runtime shader 始终是类型正确的。
+- 若本机没有 `node`，脚本会打印一条 warning 并跳过检查（不会阻塞构建）。
+
+也可以脱离 Xcode 手动运行：
+
+```bash
+cd vr-dive/Demos/DynamicBox && node check-shaders.js          # 检查全部
+cd vr-dive/Demos/DynamicBox && node check-shaders.js waves     # 只检查指定文件
+```
+
+> 修改 `DynamicBoxRenderer.wrapShaderSource()` 里的前置代码时，务必同步更新
+> `check-shaders.js` 里的 `PRELUDE` 常量，两者必须保持一致。
+
 ### 查看日志
 
 ```bash

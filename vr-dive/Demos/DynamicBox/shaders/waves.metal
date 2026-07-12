@@ -4,6 +4,20 @@
 // color waves that drift through the box volume.
 //
 // The function MUST be named `dynamicBoxFragment`.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 体积渲染，逐步 march 采样点并叠加 3 组不同频率/相位/方向的正弦
+//       干涉波形 `w`，取绝对值后转 HSV 上色，按 alpha 累积实现半透明的
+//       「波形干涉云」效果，而非实心表面。
+// 关键参数:
+//   - stepSize = 0.03、maxSteps ≤ 200：体积采样密度上限，直接影响细腻度
+//     与性能。
+//   - alpha = w*0.15：单步不透明度系数，配合 accumA>0.98 提前跳出。
+// 性能特征: 每步只需常数次 sin/cos 组合，无需法线/光照计算，是本目录里
+//           结构最简单的 shader，适合作为「体积着色」的最小示例。
+// 已知限制/优化方向:
+//   - 当前 3 组波形的频率/相位是硬编码的「看起来还行」的值，可考虑暴露
+//     为 uniform 做 A/B 对比调参。
 
 static float3 hsv2rgb(float3 c) {
     float4 K = float4(1.0f, 2.0f / 3.0f, 1.0f / 3.0f, 3.0f);

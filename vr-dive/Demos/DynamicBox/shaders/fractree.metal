@@ -4,6 +4,22 @@
 // iterative branch approximation. Each branch splits into two
 // at each level, creating a natural fractal structure.
 // The tree sways gently in an invisible wind.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 用「折叠空间 + 圆柱体 SDF」近似分形树。每一级迭代先算主干圆柱
+//       (trunk) 和沿 foldDir 方向的分支圆柱 (branch)，取 min 后，再对
+//       空间做取绝对值 + 轴交换的折叠，模拟真实分叉产生的自相似结构。
+// 关键参数:
+//   - foldDir 由 sway = sin(t*0.5 + i*1.5) 计算，让每一级分支随时间摆动，
+//     模拟风吹效果；i 越大摆动相位差越大，看起来更自然。
+//   - rep = 0.35：每级迭代前沿 y 轴平移的距离，决定分支的分布密度。
+//   - 迭代 7 级，每级 q *= 1.5 放大，配合 r *= 1.5 保持是有效距离场。
+// 性能特征: 每次 DE 求值仅 7 次循环（三角函数调用可控），march 步进用
+//           max(d*0.8, 0.01) 做保守推进，100 步 / maxD=25。
+// 已知限制/优化方向:
+//   - 树冠和树干目前共享同一套折叠逻辑，层次感可通过在高层级减小
+//     branch 半径来增强「越往上越细」的真实感。
+//   - 可尝试给顶端加入叶片/花朵状 SDF 提升识别度。
 
 // ─── Tree SDF ─────────────────────────────────────────────────────────────────
 // Approximates a branching tree by folding space toward branches.

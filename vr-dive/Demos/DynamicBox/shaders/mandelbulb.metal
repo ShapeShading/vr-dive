@@ -3,6 +3,20 @@
 // A classic 3D fractal rendered with ray marching inside the DynamicBox.
 // The Mandelbulb is a 3D generalization of the Mandelbrot set using
 // spherical coordinates. Colors cycle with position and time.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 标准 power-8 Mandelbulb DE：把 3D 点转球坐标 (r, θ, φ)，对角度
+//       乘以 power 后再转回直角坐标并叠加原始点 p，重复直到 |w|² 超过
+//       逃逸半径 256，用 `0.5*log(m)*r/dz` 得到距离估计。
+// 关键参数:
+//   - power = 8 + 0.5*sin(t*0.15)：让分形的「瓣数」随时间缓慢在 7.5~8.5
+//     间脉动，产生呼吸感。
+//   - 逃逸阈值 256、迭代上限 10：影响细节精度与性能的折衷。
+// 性能特征: 每次 DE 最多 10 次迭代（含三角函数 + pow），法线额外 6 次；
+//           march 100 步/maxD=25，是本目录较重的分形之一。
+// 已知限制/优化方向:
+//   - 当前只用 palette(length(p)) 上色，未反映迭代逃逸速度（常见的
+//     「smooth iteration count」着色），可引入以增强分形边界的层次感。
 
 // ─── Rotation helpers ─────────────────────────────────────────────────────────
 static float3x3 rotX(float a) {

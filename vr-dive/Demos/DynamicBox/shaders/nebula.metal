@@ -3,6 +3,24 @@
 // Renders a colorful nebula cloud with embedded stars using
 // volumetric ray marching. The nebula density is generated with
 // layered procedural noise, producing wispy organic shapes.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 体积雾渲染 (volumetric ray march)：每步用 3 octave fbm 计算密度
+//       density，density 超过阈值时按 alpha-blending 累积颜色，同时用
+//       隔行采样 (`i & 1 == 0`) 在网格化的星点位置抽样做闪烁星星特效。
+// 关键参数:
+//   - step = 0.08：体积采样步长，越小越细腻但越贵；march 时用
+//     `step*(1+density*2)` 做自适应加速（密度低的空白区域走得更快）。
+//   - density 阈值 0.35（`d*1.2 - 0.35`）：控制星云「浓度」，越大云越
+//     稀薄。
+//   - accumA 累积透过率，< 0.02 提前 break，是一种简单的 early-out
+//     优化。
+// 性能特征: 每步 1~2 次 fbm(3 octave noise) 调用，100 步/maxD=25；由于
+//           是体积渲染 (无解析法线/无跳步)，是本目录里 GPU 成本较高的
+//           shader 之一，性能采样(slow frame report)时值得重点关注。
+// 已知限制/优化方向:
+//   - 目前星点检测与云层密度共享同一套 hash/fbm，可考虑拆分频率避免
+//     两者在同一位置总是同时出现或同时消失的相关性瑕疵。
 
 // ─── Pseudo-random ────────────────────────────────────────────────────────────
 static float hash(float3 p) {

@@ -3,6 +3,22 @@
 // A colorful kaleidoscopic fractal rendered with ray marching.
 // Uses iterated fold-and-scale transformations with a sphere inversion,
 // creating intricate self-symmetric 3D patterns.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: KaliSet 变体：每次迭代先做「box fold」(排序坐标模拟对称镜面
+//       反射)，再做「sphere fold」(对落入单位球内的点做反演放大)，最后
+//       整体缩放平移并应用一个固定旋转矩阵，14 次迭代后用 length(q)/dr
+//       得到 DE。
+// 关键参数:
+//   - scale = 2.0、foldR = 1.0：分别控制缩放速度和球面反演的触发半径，
+//     二者共同决定分形细节的疏密。
+//   - axis + rot(t*0.12, axis)：让整个分形绕固定轴缓慢旋转，避免画面
+//     静止。
+// 性能特征: 每次 DE 迭代 14 次，含 3 次 swap 排序 + 条件反演，法线额外
+//           6 次求值；march 100 步/maxD=25，中等开销。
+// 已知限制/优化方向:
+//   - 折叠参数 (scale/foldR/位移 -0.8) 目前是写死的「经典」KaliSet 配置，
+//     可以考虑暴露为 uniform 或时间函数，实现「变形态」的万花筒效果。
 
 // ─── Rotation matrix ──────────────────────────────────────────────────────────
 static float3x3 rot(float a, float3 ax) {

@@ -10,7 +10,7 @@
 //
 // ─── 设计方案 ────────────────────────────────────────────────────────────
 // 思路: 把 3D 点转成 (r, theta, y)，theta 对 6 瓣做角度折叠（domain-fold）
-//       得到瓣内局部角 la；在这一个瓣内用固定 7 次的小循环生成 7 条独立
+//       得到瓣内局部角 la；在这一个瓣内用固定 9 次的小循环生成 9 条独立
 //       粒子轨迹（复用 hyper4d 的 sdSpherePack4D / apollonian 的 domain-
 //       repeat 思路：靠折叠免去对花瓣数量的循环，只需循环「每瓣粒子数」，
 //       O(1) 复杂度，不随花瓣数增加而变慢）。每个粒子的年龄
@@ -21,23 +21,24 @@
 //       length(tangential,y-particleY,radial)-size 的球形距离场表示。
 // 关键参数:
 //   - petalCount=6：花瓣数量，只影响角度折叠周期，不影响性能。
-//   - kParticles=7（每瓣粒子数）：决定花瓣弧线的连续感，7 条足够连续又
-//     不至于过密。
+//   - kParticles=9（每瓣粒子数）：粒子生命周期使用等间隔相位，保证整条
+//     花瓣弧始终有粒子覆盖，修复旧版随机相位/随机速度导致的边缘与中段
+//     断续；轻微减小摆幅，也避免粒子跨越六瓣折叠边界后出现接缝。
 //   - bloomT = 0.5+0.5*sin(time*0.10)、maxRadius = mix(0.22,0.60,bloomT)：
 //     整朵花的「慢呼吸」包络，周期约 63s，比单个粒子的生命周期慢一个
 //     数量级，制造「持续放射粒子」与「花整体缓慢开合」两种时间尺度叠加
 //     的效果。
 //   - size = mix(0.12, 0.028, grown)：粒子从中心诞生时更大更亮，随着
 //     ageFrac 增长逐渐收缩，视觉上等价于「远离中心逐渐消散」。
-// 性能特征: 每次 DE 求值 1 次中心核心球 + 7 次粒子距离（每次几次三角
+// 性能特征: 每次 DE 求值 1 次中心核心球 + 9 次粒子距离（每次几次三角
 //           函数 + hash1），复杂度与 quaternion-julia（11 次迭代）、
 //           apollonian（10 次迭代）同量级；march 90 步/maxD=25。
 // 已知限制/优化方向:
 //   - 粒子用不透明「最近命中」渲染（与本目录其它 shader 一致），没有真正
 //     的半透明叠加发光；如需更浓密的粒子云观感，可在命中点周围额外做一
 //     次体积雾状的辉光累积（会显著增加开销，建议先看 perf log 再决定）。
-//   - 若后续性能采样显示这个 shader 偏慢，可优先把 kParticles 从 7 降到
-//     5，或将 march 步数从 90 降到 75。
+//   - 若后续性能采样显示这个 shader 偏慢，可优先把 kParticles 从 9 降到
+//     7，或将 march 步数从 90 降到 75。
 
 // ─── Small hash ────────────────────────────────────────────────────────────────
 static float hash1(float n) {
@@ -63,11 +64,11 @@ static float petalParticlesDE(float3 p, float time) {
 
     float best = length(p) - 0.045f; // small glowing core at the flower's heart
 
-    for (int i = 0; i < 7; i++) {
-        float seed = float(i) * 1.37f + 5.0f;
-        float speed = 0.06f + 0.02f * hash1(seed);
-        float phase = hash1(seed + 4.1f);
-        float ageFrac = fract(time * speed + phase);
+    for (int i = 0; i < 9; i++) {
+        float seed = float(i) + 1.0f;
+        // Uniform phase spacing prevents gaps along a petal when random
+        // lifetimes happen to cluster near its center or tip.
+        float ageFrac = fract(time * 0.072f + float(i) / 9.0f);
 
         // Ease-out growth: quick start, slows near the petal tip.
         float grown = pow(ageFrac, 0.55f);
@@ -75,12 +76,11 @@ static float petalParticlesDE(float3 p, float time) {
 
         // Petal lobe sway: swings toward one side then eases back to the
         // sector's centerline, tracing a petal-shaped outward arc.
-        float lobeAmp = halfSector * 0.55f;
-        float side = hash1(seed + 8.0f) > 0.5f ? 1.0f : -1.0f;
-        float sway = lobeAmp * sin(ageFrac * 3.14159265f) * side;
-        float particleY = 0.14f * sin(ageFrac * 3.14159265f + hash1(seed + 2.0f) * 6.2831853f);
+        float lobeAmp = halfSector * 0.38f;
+        float sway = lobeAmp * sin(ageFrac * 3.14159265f);
+        float particleY = 0.10f * sin(ageFrac * 3.14159265f + seed * 1.71f);
 
-        float size = mix(0.12f, 0.028f, grown);
+        float size = mix(0.11f, 0.045f, grown);
 
         float tangential = r * (la - sway);
         float radial = r - particleR;

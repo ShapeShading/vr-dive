@@ -5,6 +5,9 @@
 // numbers) instead of spherical coordinates. The 3-space ray-marched point
 // becomes the (x, y, z) part of a quaternion with w = 0; a slowly drifting
 // quaternion constant `c` reshapes the Julia set continuously over time.
+// It is retained alongside quaternion-julia-slice: this shader changes the
+// fractal's parameter, whereas the slice shader keeps one 4D object fixed and
+// changes only the 3D cross-section used to observe it.
 //
 // ─── 设计方案 ────────────────────────────────────────────────────────────
 // 思路: 标准四元数 Julia set DE：把 march 采样点 p 当作四元数

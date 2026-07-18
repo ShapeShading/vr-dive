@@ -232,6 +232,14 @@ struct ControlButtonsView: View {
               Label("刷新", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
+
+            Button(action: {
+              model.nextDynamicBoxSize()
+            }) {
+              Label(model.dynamicBoxSizeLabel, systemImage: "cube")
+            }
+            .buttonStyle(.bordered)
+            .help("切换盒子大小：0.5 m、1 m、2 m")
           }
 
           Text("状态: \(model.dynamicBoxStatus)")

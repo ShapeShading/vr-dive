@@ -689,8 +689,22 @@ final class PatternCoordinator {
     }
   }
 
+  func setDynamicBoxSize(meters: Float) {
+    let action = queue.sync { self._dynamicBoxSizeAction }
+    guard let action else { return }
+    Task { @MainActor in
+      action(meters)
+    }
+  }
+
   private var _dynamicBoxLoadAction: (@MainActor (String) async -> Void)?
+  private var _dynamicBoxSizeAction: (@MainActor @Sendable (Float) -> Void)?
   private var _dynamicBoxStatus: String = "default"
+
+  /// Called by Renderer after DynamicBoxRenderer is created.
+  func setDynamicBoxSizeAction(_ action: @escaping @MainActor @Sendable (Float) -> Void) {
+    queue.async(flags: .barrier) { self._dynamicBoxSizeAction = action }
+  }
 
   /// Called by the Renderer's load action to report status back to the UI.
   func setDynamicBoxStatus(_ status: String) {
@@ -771,6 +785,12 @@ final class PatternMenuModel {
   }
   /// Displayed status: current shader name, "Loading…", or error text.
   var dynamicBoxStatus: String = "default"
+  /// Width of the DynamicBox in meters. The renderer maps it to local box scale.
+  var dynamicBoxSizeMeters: Float = 2.0 {
+    didSet {
+      coordinator.setDynamicBoxSize(meters: dynamicBoxSizeMeters)
+    }
+  }
 
   func loadDynamicBoxShader() {
     let name = dynamicBoxSelectedShader
@@ -789,6 +809,18 @@ final class PatternMenuModel {
     } else {
       dynamicBoxSelectedShader = dynamicBoxAvailableShaders[0]
     }
+  }
+
+  func nextDynamicBoxSize() {
+    let sizes: [Float] = [0.5, 1.0, 2.0]
+    let index = sizes.firstIndex(where: { abs($0 - dynamicBoxSizeMeters) < 0.001 }) ?? 0
+    dynamicBoxSizeMeters = sizes[(index + 1) % sizes.count]
+  }
+
+  var dynamicBoxSizeLabel: String {
+    dynamicBoxSizeMeters == dynamicBoxSizeMeters.rounded()
+      ? "\(Int(dynamicBoxSizeMeters)) m"
+      : String(format: "%.1f m", Double(dynamicBoxSizeMeters))
   }
 
   func refreshShaderList() {

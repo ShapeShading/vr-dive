@@ -32,7 +32,8 @@ final class DynamicBoxRenderer: VisualPatternController {
   // The currently-loaded shader name (empty string = default embedded shader)
   private(set) var currentShaderName: String = ""
 
-  private let boxScale: Float = 0.84
+  // The local box is 1.9 m wide on X/Y at a scale of 1.0.
+  private var boxScale: Float = 2.0 / 1.9
   private let objectCenter = SIMD3<Float>(0.0, -0.05, -1.1)
   private var animationTime: Float = 0
   private var lastSimulationTime: Float?
@@ -88,6 +89,10 @@ final class DynamicBoxRenderer: VisualPatternController {
   func resetToInitialState() {
     animationTime = 0
     lastSimulationTime = nil
+  }
+
+  func setBoxSize(meters: Float) {
+    boxScale = max(meters, 0.1) / 1.9
   }
 
   // MARK: - Performance sampling

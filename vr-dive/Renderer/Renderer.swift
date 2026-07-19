@@ -120,9 +120,6 @@ class Renderer {
           patternCoordinator.setDynamicBoxStatus(name)
         }
       }
-      patternCoordinator.setDynamicBoxSizeAction { [weak dynamicBox] meters in
-        dynamicBox?.setBoxSize(meters: meters)
-      }
     }
 
     let requestedPattern = patternCoordinator.currentPattern()
@@ -325,7 +322,6 @@ class Renderer {
 
         if patternCoordinator.shouldReset() {
           pattern?.resetToInitialState()
-          gameManager.resetPatternNavigation()
           patternCoordinator.clearResetFlag()
         }
 

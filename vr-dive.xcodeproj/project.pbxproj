@@ -38,6 +38,8 @@
 				Demos/DynamicBox/shaders/liquids.metal,
 				"Demos/DynamicBox/shaders/mandelbox-fold.metal",
 				Demos/DynamicBox/shaders/mandelbulb.metal,
+				"Demos/DynamicBox/shaders/mandelbox-cavern.metal",
+				"Demos/DynamicBox/shaders/mandelbox-fast.metal",
 				Demos/DynamicBox/shaders/maze3d.metal,
 				Demos/DynamicBox/shaders/menger.metal,
 				Demos/DynamicBox/shaders/metaballs.metal,

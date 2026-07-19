@@ -689,22 +689,8 @@ final class PatternCoordinator {
     }
   }
 
-  func setDynamicBoxSize(meters: Float) {
-    let action = queue.sync { self._dynamicBoxSizeAction }
-    guard let action else { return }
-    Task { @MainActor in
-      action(meters)
-    }
-  }
-
   private var _dynamicBoxLoadAction: (@MainActor (String) async -> Void)?
-  private var _dynamicBoxSizeAction: (@MainActor @Sendable (Float) -> Void)?
   private var _dynamicBoxStatus: String = "default"
-
-  /// Called by Renderer after DynamicBoxRenderer is created.
-  func setDynamicBoxSizeAction(_ action: @escaping @MainActor @Sendable (Float) -> Void) {
-    queue.async(flags: .barrier) { self._dynamicBoxSizeAction = action }
-  }
 
   /// Called by the Renderer's load action to report status back to the UI.
   func setDynamicBoxStatus(_ status: String) {
@@ -725,9 +711,6 @@ final class PatternMenuModel {
         originCellInspectionEnabled = false
       }
       coordinator.setPattern(selectedPattern)
-      if selectedPattern == .dynamicBox {
-        refreshShaderList()
-      }
     }
   }
 
@@ -771,90 +754,17 @@ final class PatternMenuModel {
   }
 
   // ─── DynamicBox ──────────────────────────────────────────────────────────
-  /// Shader server URL. Change this to your Mac's local IP if the device can't connect.
-  static let shaderServerBaseURL = "http://192.168.31.49:8888"
-  /// Available shader names fetched from the server.
-  var dynamicBoxAvailableShaders: [String] = ["default"]
-  /// Currently selected shader in the Picker.
-  var dynamicBoxSelectedShader: String = "default" {
-    didSet {
-      if dynamicBoxSelectedShader != oldValue {
-        loadDynamicBoxShader()
-      }
-    }
-  }
+  /// Name of the shader currently shown in the text field (user-editable).
+  var dynamicBoxShaderInput: String = ""
   /// Displayed status: current shader name, "Loading…", or error text.
   var dynamicBoxStatus: String = "default"
-  /// Width of the DynamicBox in meters. The renderer maps it to local box scale.
-  var dynamicBoxSizeMeters: Float = 2.0 {
-    didSet {
-      coordinator.setDynamicBoxSize(meters: dynamicBoxSizeMeters)
-    }
-  }
 
   func loadDynamicBoxShader() {
-    let name = dynamicBoxSelectedShader
+    let name = dynamicBoxShaderInput.trimmingCharacters(in: .whitespaces)
+    guard !name.isEmpty else { return }
     dynamicBoxStatus = "Loading…"
     coordinator.setDynamicBoxStatus("Loading…")
     coordinator.loadDynamicBoxShader(named: name)
-  }
-
-  /// Advances to the next shader in `dynamicBoxAvailableShaders` (wrapping
-  /// around), triggering a hot-reload via `dynamicBoxSelectedShader`'s didSet.
-  func nextDynamicBoxShader() {
-    guard !dynamicBoxAvailableShaders.isEmpty else { return }
-    if let idx = dynamicBoxAvailableShaders.firstIndex(of: dynamicBoxSelectedShader) {
-      let nextIndex = (idx + 1) % dynamicBoxAvailableShaders.count
-      dynamicBoxSelectedShader = dynamicBoxAvailableShaders[nextIndex]
-    } else {
-      dynamicBoxSelectedShader = dynamicBoxAvailableShaders[0]
-    }
-  }
-
-  func nextDynamicBoxSize() {
-    let sizes: [Float] = [0.5, 1.0, 2.0]
-    let index = sizes.firstIndex(where: { abs($0 - dynamicBoxSizeMeters) < 0.001 }) ?? 0
-    dynamicBoxSizeMeters = sizes[(index + 1) % sizes.count]
-  }
-
-  var dynamicBoxSizeLabel: String {
-    dynamicBoxSizeMeters == dynamicBoxSizeMeters.rounded()
-      ? "\(Int(dynamicBoxSizeMeters)) m"
-      : String(format: "%.1f m", Double(dynamicBoxSizeMeters))
-  }
-
-  func refreshShaderList() {
-    Task {
-      let url = URL(string: "\(Self.shaderServerBaseURL)/shaders")!
-      guard let (data, response) = try? await URLSession.shared.data(from: url),
-        let httpResp = response as? HTTPURLResponse,
-        httpResp.statusCode == 200,
-        let names = try? JSONDecoder().decode([String].self, from: data),
-        !names.isEmpty
-      else {
-        print(
-          "[DynamicBox] refreshShaderList: server at \(Self.shaderServerBaseURL) unreachable."
-        )
-        if dynamicBoxAvailableShaders.count <= 1 {
-          dynamicBoxStatus = "服务器不可达 (\(Self.shaderServerBaseURL))"
-        }
-        return
-      }
-      // "default" is always available (embedded in app)
-      var allNames = names
-      if !allNames.contains("default") {
-        allNames.insert("default", at: 0)
-      }
-      print("[DynamicBox] Shaders available: \(allNames)")
-      dynamicBoxAvailableShaders = allNames
-      if dynamicBoxAvailableShaders.count > 1 && dynamicBoxStatus.hasPrefix("服务器") {
-        dynamicBoxStatus = "default"
-      }
-      // Ensure selected shader still exists; if not, fall back to first available
-      if !allNames.contains(dynamicBoxSelectedShader) {
-        dynamicBoxSelectedShader = allNames[0]
-      }
-    }
   }
 
   /// Call periodically from the UI to refresh DynamicBox status from the coordinator.

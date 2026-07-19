@@ -5,6 +5,8 @@ ignore/
 
 Packages/RealityKitContent/.build/
 .build/
+build/
+Package.resolved
 
 buildServer.json
 

@@ -1,20 +1,15 @@
-// mandelbox-fold.metal - 3D Mandelbox Fold Fractal
+// mandelbox-fold.metal — 3D Mandelbox 折叠分形
 //
-// A ray-marchable extension of planar iterative fractal ideas. A direct 2D
-// Newton basin is not a suitable surface SDF: its root boundaries are
-// discontinuous and do not provide conservative sphere-tracing steps. This
-// Mandelbox instead extends repeated planar folding into three coordinates,
-// combining box folds and spherical inversions into a stable distance estimate.
-// The orbit trap coloring still gives neighboring attractor regions distinct
-// colors, echoing the visual language of Newton basins without sacrificing
-// reliable three-dimensional geometry.
+// 将平面迭代分形思想扩展到光线行进的三维空间。纯二维牛顿盆地的根边界
+// 不连续，无法提供保守的球体追踪步长。此 Mandelbox 将平面折叠推广到
+// 三个坐标轴，结合盒子折叠和球面反演，形成稳定的距离估计。
+// 轨道陷阱着色仍然赋予邻近吸引子区域不同的颜色，延续了牛顿盆地的
+// 视觉语言，同时保留了可靠的三维几何结构。
 //
-// Design: 12 box/sphere-fold iterations, 88 ray steps, and six normal samples.
-// This is intentionally a new fold/inversion family, distinct from the existing
-// Menger removal rule and the periodic Apollonian sphere packing.
-// The complete fractal, including its central cavity, is enlarged 4x in the
-// box. Three extra fold iterations restore fine self-similar structure that
-// would otherwise be lost when viewing the enlarged interior.
+// 设计：12 次盒子/球面折叠迭代、88 步光线行进、6 次法线采样。
+// 这是一个全新的折叠/反演族，与已有的 Menger 挖除规则和周期性的
+// Apollonian 球体堆叠不同。完整分形（包括中心空腔）在盒子中放大 4 倍，
+// 额外三次折叠迭代恢复了观察放大内部时可能丢失的自相似细节结构。
 
 constant float MANDELBOX_VOLUME_SCALE = 4.0f;
 

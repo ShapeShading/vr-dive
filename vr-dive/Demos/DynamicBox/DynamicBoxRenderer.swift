@@ -8,12 +8,12 @@ import simd
 //
 // Architecture:
 //   - Embedded default shader ("3D grid of light points") ships in DynamicBoxShaders.metal
-//   - A companion Node.js server (vr-dive/Demos/DynamicBox/shader-server.js) serves .metal
-//     files from its shaders/ subdirectory on port 8888
+//   - A companion Node.js server (scripts/shader-server.js) serves .metal files from
+//     scripts/shaders/ on port 8888
 //   - The "Load Shader" button fetches a named shader, compiles it with Metal, and
 //     swaps the fragment function in the render pipeline
 //   - Compilation errors are POSTed back to the server and written to
-//     shader-compiling-error.log in the DynamicBox directory
+//     scripts/shader-compiling-error.log
 
 final class DynamicBoxRenderer: VisualPatternController {
   let identifier: VisualPatternKind = .dynamicBox
@@ -32,26 +32,13 @@ final class DynamicBoxRenderer: VisualPatternController {
   // The currently-loaded shader name (empty string = default embedded shader)
   private(set) var currentShaderName: String = ""
 
-  // The local box is 1.9 m wide on X/Y at a scale of 1.0.
-  private var boxScale: Float = 2.0 / 1.9
+  private let boxScale: Float = 0.84
   private let objectCenter = SIMD3<Float>(0.0, -0.05, -1.1)
   private var animationTime: Float = 0
   private var lastSimulationTime: Float?
 
-  /// Base URL of the shader server. Keep in sync with PatternMenuModel.shaderServerBaseURL.
-  private let serverBaseURL = "http://192.168.31.49:8888"
-
-  // MARK: - Performance sampling
-  //
-  // Each time a shader is (re)loaded, we get a fresh budget of at most
-  // `perfMaxReportsPerLoad` performance reports. Frames whose real wall-clock
-  // delta exceeds `perfSlowFrameThresholdSeconds` are candidates; only a random
-  // sample of those actually get POSTed, so the reports are spread out over the
-  // shader's lifetime instead of firing all at once during the first hitch.
-  private static let perfMaxReportsPerLoad = 10
-  private static let perfSlowFrameThresholdSeconds: Double = 0.03  // ~33ms (well below 90Hz/60Hz budget)
-  private static let perfSampleProbability: Double = 0.2
-  private var perfReportsRemaining = DynamicBoxRenderer.perfMaxReportsPerLoad
+  /// Base URL of the shader server.
+  private let serverBaseURL = "http://localhost:8888"
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.device = device
@@ -79,42 +66,13 @@ final class DynamicBoxRenderer: VisualPatternController {
   func updateSimulation(_ context: PatternSimulationContext) {
     defer { lastSimulationTime = context.time }
     guard let lastSimulationTime else { return }
-    let rawDelta = context.time - lastSimulationTime
-    let deltaTime = max(0, min(rawDelta, 1.0 / 20.0))
+    let deltaTime = max(0, min(context.time - lastSimulationTime, 1.0 / 20.0))
     animationTime += deltaTime * max(context.speedMultiplier, 0)
-
-    maybeSampleSlowFrame(rawDelta: Double(rawDelta))
   }
 
   func resetToInitialState() {
     animationTime = 0
     lastSimulationTime = nil
-  }
-
-  func setBoxSize(meters: Float) {
-    boxScale = max(meters, 0.1) / 1.9
-  }
-
-  // MARK: - Performance sampling
-
-  /// Called once per real frame with the (uncapped) wall-clock delta since the
-  /// previous frame. If the frame was noticeably slow, randomly samples up to
-  /// `perfMaxReportsPerLoad` reports for the currently-loaded shader.
-  private func maybeSampleSlowFrame(rawDelta: Double) {
-    guard perfReportsRemaining > 0 else { return }
-    guard rawDelta > Self.perfSlowFrameThresholdSeconds else { return }
-    guard Double.random(in: 0..<1) < Self.perfSampleProbability else { return }
-
-    perfReportsRemaining -= 1
-    let sampleIndex = Self.perfMaxReportsPerLoad - perfReportsRemaining
-    let shaderName = currentShaderName.isEmpty ? "default" : currentShaderName
-    let frameMS = rawDelta * 1000.0
-    let fps = rawDelta > 0 ? 1.0 / rawDelta : 0
-    let message = String(
-      format: "[perf][%@] slow frame: %.1f ms (~%.1f fps) — sample %d/%d",
-      shaderName, frameMS, fps, sampleIndex, Self.perfMaxReportsPerLoad)
-
-    Task { await reportPerfToServer(message) }
   }
 
   // MARK: - Shader hot-reload
@@ -130,38 +88,12 @@ final class DynamicBoxRenderer: VisualPatternController {
   /// - Parameter name: shader file name (without `.metal` extension), e.g. `"waves"`
   /// - Returns: `nil` on success, or an error description string on failure.
   func reloadShader(named name: String) async -> String? {
-    // Any load attempt starts a fresh performance-sampling budget for the
-    // (possibly new) shader that ends up active.
-    perfReportsRemaining = Self.perfMaxReportsPerLoad
-
-    // "default" uses the embedded shader compiled into the app – no server fetch.
-    if name == "default" {
-      guard let vertFn = library.makeFunction(name: "dynamicBoxVertex"),
-        let fragFn = library.makeFunction(name: "dynamicBoxFragment")
-      else {
-        let msg = "Embedded default shader functions not found."
-        await reportToServer(msg)
-        return msg
-      }
-      do {
-        pipelineState = try DynamicBoxRenderer.makePipeline(
-          device: device, vertexFn: vertFn, fragmentFn: fragFn,
-          maxViewCount: maxViewCount)
-        currentShaderName = "default"
-        return nil
-      } catch {
-        let msg = "Pipeline creation error: \(error.localizedDescription)"
-        await reportToServer(msg)
-        return msg
-      }
-    }
-
     let rawSource: String
     do {
       rawSource = try await fetchShaderSource(named: name)
     } catch {
       let msg = "Failed to fetch shader \"\(name)\": \(error.localizedDescription)"
-      await reportToServer(msg)
+      await reportErrorToServer(msg)
       return msg
     }
 
@@ -174,13 +106,13 @@ final class DynamicBoxRenderer: VisualPatternController {
       newLibrary = try await device.makeLibrary(source: wrappedSource, options: nil)
     } catch {
       let msg = "Metal compilation error: \(error.localizedDescription)"
-      await reportToServer("[\(name)] \(msg)")
+      await reportErrorToServer("[\(name)] \(msg)")
       return msg
     }
 
     guard let newFragFn = newLibrary.makeFunction(name: "dynamicBoxFragment") else {
       let msg = "Compiled library is missing \"dynamicBoxFragment\" function."
-      await reportToServer("[\(name)] \(msg)")
+      await reportErrorToServer("[\(name)] \(msg)")
       return msg
     }
 
@@ -193,14 +125,13 @@ final class DynamicBoxRenderer: VisualPatternController {
         maxViewCount: maxViewCount)
     } catch {
       let msg = "Pipeline creation error: \(error.localizedDescription)"
-      await reportToServer("[\(name)] \(msg)")
+      await reportErrorToServer("[\(name)] \(msg)")
       return msg
     }
 
     // Swap
     pipelineState = newPS
     currentShaderName = name
-    await reportToServer("[\(name)] Shader compiled and loaded successfully.")
     return nil  // success
   }
 
@@ -270,19 +201,8 @@ final class DynamicBoxRenderer: VisualPatternController {
     return source
   }
 
-  private func reportToServer(_ message: String) async {
+  private func reportErrorToServer(_ message: String) async {
     let url = URL(string: "\(serverBaseURL)/report-error")!
-    var req = URLRequest(url: url)
-    req.httpMethod = "POST"
-    req.httpBody = message.data(using: .utf8)
-    req.setValue("text/plain", forHTTPHeaderField: "Content-Type")
-    _ = try? await URLSession.shared.data(for: req)
-  }
-
-  /// Posts a sampled performance report (e.g. a noticeably slow frame) to the
-  /// shader server, which appends it to `shader-performance.log`.
-  private func reportPerfToServer(_ message: String) async {
-    let url = URL(string: "\(serverBaseURL)/report-perf")!
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.httpBody = message.data(using: .utf8)

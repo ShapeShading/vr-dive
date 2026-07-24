@@ -38,7 +38,7 @@ final class DynamicBoxRenderer: VisualPatternController {
   private var lastSimulationTime: Float?
 
   /// Base URL of the shader server.
-  private let serverBaseURL = "http://localhost:8888"
+  private let serverBaseURL = "http://192.168.31.49:8888"
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.device = device
@@ -92,7 +92,8 @@ final class DynamicBoxRenderer: VisualPatternController {
     do {
       rawSource = try await fetchShaderSource(named: name)
     } catch {
-      let msg = "Failed to fetch shader \"\(name)\": \(error.localizedDescription)"
+      let msg = "Shader fetch failed [\(name)] URL=\(serverBaseURL)/shaders/\(name).metal — \(Self.describeNetworkError(error))"
+      print("[DynamicBox] \(msg)")
       await reportErrorToServer(msg)
       return msg
     }
@@ -191,14 +192,35 @@ final class DynamicBoxRenderer: VisualPatternController {
 
   private func fetchShaderSource(named name: String) async throws -> String {
     let url = URL(string: "\(serverBaseURL)/shaders/\(name).metal")!
-    let (data, response) = try await URLSession.shared.data(from: url)
-    guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 8
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let httpResp = response as? HTTPURLResponse else {
       throw URLError(.badServerResponse)
+    }
+    guard httpResp.statusCode == 200 else {
+      let body = String(data: data, encoding: .utf8) ?? "<non-UTF8 body>"
+      throw DynamicBoxHTTPError(statusCode: httpResp.statusCode, body: body)
     }
     guard let source = String(data: data, encoding: .utf8) else {
       throw URLError(.cannotDecodeContentData)
     }
     return source
+  }
+
+  private struct DynamicBoxHTTPError: LocalizedError {
+    let statusCode: Int
+    let body: String
+    var errorDescription: String? { "HTTP \(statusCode): \(body.prefix(180))" }
+  }
+
+  private static func describeNetworkError(_ error: Error) -> String {
+    let ns = error as NSError
+    var text = "\(error.localizedDescription) (domain=\(ns.domain), code=\(ns.code))"
+    if let urlError = error as? URLError, let underlying = urlError.userInfo[NSUnderlyingErrorKey] as? NSError {
+      text += "; underlying=\(underlying.domain):\(underlying.code) \(underlying.localizedDescription)"
+    }
+    return text
   }
 
   private func reportErrorToServer(_ message: String) async {

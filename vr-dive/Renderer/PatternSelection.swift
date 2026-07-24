@@ -754,17 +754,62 @@ final class PatternMenuModel {
   }
 
   // ─── DynamicBox ──────────────────────────────────────────────────────────
-  /// Name of the shader currently shown in the text field (user-editable).
-  var dynamicBoxShaderInput: String = ""
+  static let shaderServerBaseURL = "http://192.168.31.49:8888"
+  var dynamicBoxAvailableShaders: [String] = ["default"]
+  var dynamicBoxSelectedShader: String = "default" {
+    didSet {
+      if dynamicBoxSelectedShader != oldValue { loadDynamicBoxShader() }
+    }
+  }
   /// Displayed status: current shader name, "Loading…", or error text.
   var dynamicBoxStatus: String = "default"
 
   func loadDynamicBoxShader() {
-    let name = dynamicBoxShaderInput.trimmingCharacters(in: .whitespaces)
-    guard !name.isEmpty else { return }
+    let name = dynamicBoxSelectedShader
     dynamicBoxStatus = "Loading…"
     coordinator.setDynamicBoxStatus("Loading…")
     coordinator.loadDynamicBoxShader(named: name)
+  }
+
+  /// Entering the DynamicBox controls immediately renders the current choice.
+  /// The list refresh remains asynchronous and does not block hot loading.
+  func activateDynamicBoxShaderPanel() {
+    refreshShaderList()
+    loadDynamicBoxShader()
+  }
+
+  func nextDynamicBoxShader() {
+    guard !dynamicBoxAvailableShaders.isEmpty else { return }
+    guard let index = dynamicBoxAvailableShaders.firstIndex(of: dynamicBoxSelectedShader) else {
+      dynamicBoxSelectedShader = dynamicBoxAvailableShaders[0]
+      return
+    }
+    dynamicBoxSelectedShader = dynamicBoxAvailableShaders[(index + 1) % dynamicBoxAvailableShaders.count]
+  }
+
+  func refreshShaderList() {
+    Task { @MainActor in
+      let base = Self.shaderServerBaseURL
+      do {
+        let url = URL(string: "\(base)/shaders")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard http.statusCode == 200 else { throw URLError(.badServerResponse) }
+        let names = try JSONDecoder().decode([String].self, from: data)
+        var all = names
+        if !all.contains("default") { all.insert("default", at: 0) }
+        dynamicBoxAvailableShaders = all
+        print("[DynamicBox] Shaders available: \(all)")
+        if !all.contains(dynamicBoxSelectedShader) { dynamicBoxSelectedShader = all[0] }
+      } catch {
+        let ns = error as NSError
+        let msg = "服务器不可达 (\(base), \(ns.domain):\(ns.code) \(error.localizedDescription))"
+        print("[DynamicBox] refreshShaderList failed: \(msg)")
+        if dynamicBoxAvailableShaders.count <= 1 { dynamicBoxStatus = msg }
+      }
+    }
   }
 
   /// Call periodically from the UI to refresh DynamicBox status from the coordinator.

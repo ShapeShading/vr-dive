@@ -132,6 +132,7 @@ const server = http.createServer((req, res) => {
 
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
+  log(`[HTTP] ${req.method} ${pathname}`);
 
   // ── GET /shaders ──────────────────────────────────────────────────────────
   if (req.method === "GET" && pathname === "/shaders") {

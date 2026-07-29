@@ -63,7 +63,7 @@ vertex PongWarVertexOut pongWarVertexShader(
 
   if (isSphere < 0.5) {
     // 立方体：根据边界掩码判断这条棱是否需要显示
-    float nearness = state.edgeData.x;     // 小球接近度 (0=远, 1=近)
+    // float nearness = state.edgeData.x;     // 小球接近度 (0=远, 1=近)
     float boundaryMask = state.edgeData.y; // 6个面的颜色边界状态
     float outerMask = state.edgeData.z; // 6个面的外边界状态（动态）
     int bmask = int(boundaryMask);

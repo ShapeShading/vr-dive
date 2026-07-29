@@ -24,6 +24,7 @@ class AppModel {
   }
 
   let patternCoordinator = PatternCoordinator()
+  let gameManager = GameManager()
   var patternMenuModel: PatternMenuModel
 
   init() {

@@ -4,4 +4,13 @@ ignore/
 .trae/
 
 Packages/RealityKitContent/.build/
+Packages/RealityKitContent/build/
 .build/
+build/
+
+buildServer.json
+
+resources/
+
+# DynamicBox shader logs
+vr-dive/Demos/DynamicBox/*.log

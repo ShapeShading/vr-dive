@@ -4,6 +4,23 @@
 // rounded cylinder) inside the bounding box with dynamic colors.
 //
 // The function MUST be named `dynamicBoxFragment`.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 经典 SDF 布尔运算演示：球体 + 圆环(torus) + 圆角方块用
+//       `opSmoothUnion` 平滑合并，再用一个运动的球体做
+//       `opSmoothSubtraction` 挖出一个空腔，三者的局部旋转/位移均由
+//       时间函数驱动。
+// 关键参数:
+//   - opSmoothUnion 的 k=0.15/0.12：控制球体-圆环-方块之间融合的圆润度。
+//   - opSmoothSubtraction 的 k=0.08：挖空腔时的过渡圆滑度，越大挖出的
+//     洞边缘越柔和。
+// 性能特征: map() 只需 4 次基础 SDF 求值 + 2 次布尔运算，法线 6 次；
+//           march 80 步/maxD=25，属于轻量级 shader，适合作为入门参考
+//           模板。
+// 已知限制/优化方向:
+//   - 该文件的主要定位是「最小可运行示例」，新增 shader 时可直接复制此
+//     文件的骨架（primitives + opSmooth* + map + 标准 march 循环）来
+//     起步。
 
 // ─── Basic SDF primitives ─────────────────────────────────────────────────────
 static float sdSphere(float3 p, float r) {

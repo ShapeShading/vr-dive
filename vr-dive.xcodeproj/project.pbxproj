@@ -20,21 +20,44 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Demos/DynamicBox/shaders/apollonian.metal,
+				Demos/DynamicBox/shaders/coral-folds.metal,
 				Demos/DynamicBox/shaders/default.metal,
+				"Demos/DynamicBox/shaders/fibers-coral.metal",
+				"Demos/DynamicBox/shaders/fibers-vortex.metal",
+				"Demos/DynamicBox/shaders/fibers-wave.metal",
 				Demos/DynamicBox/shaders/fractree.metal,
 				Demos/DynamicBox/shaders/gyroid.metal,
+				"Demos/DynamicBox/shaders/hopf-weave.metal",
+				"Demos/DynamicBox/shaders/hyper-menger.metal",
 				Demos/DynamicBox/shaders/hyper4d.metal,
 				Demos/DynamicBox/shaders/infinity.metal,
+				"Demos/DynamicBox/shaders/kaleido-bloom.metal",
+				"Demos/DynamicBox/shaders/kaleido-crystal.metal",
+				"Demos/DynamicBox/shaders/kaleido-ribbons.metal",
 				Demos/DynamicBox/shaders/kaleidoscope.metal,
 				Demos/DynamicBox/shaders/knots.metal,
+				Demos/DynamicBox/shaders/fiber-pleats.metal,
 				Demos/DynamicBox/shaders/liquids.metal,
+				Demos/DynamicBox/shaders/liquid-contours.metal,
+				"Demos/DynamicBox/shaders/mandelbox-cavern.metal",
+				"Demos/DynamicBox/shaders/mandelbox-fast.metal",
+				"Demos/DynamicBox/shaders/mandelbox-fold.metal",
 				Demos/DynamicBox/shaders/mandelbulb.metal,
 				Demos/DynamicBox/shaders/maze3d.metal,
 				Demos/DynamicBox/shaders/menger.metal,
 				Demos/DynamicBox/shaders/metaballs.metal,
 				Demos/DynamicBox/shaders/nebula.metal,
+				"Demos/DynamicBox/shaders/newton-basins-3d.metal",
+				"Demos/DynamicBox/shaders/petal-particles.metal",
+				"Demos/DynamicBox/shaders/quaternion-julia-slice.metal",
+				"Demos/DynamicBox/shaders/quaternion-julia.metal",
 				"Demos/DynamicBox/shaders/sdf-shapes.metal",
+				Demos/DynamicBox/shaders/sierpinski5cell.metal,
 				Demos/DynamicBox/shaders/waves.metal,
+				Demos/DynamicBox/shaders/pleated-marble.metal,
+				Demos/DynamicBox/shaders/radial-gills.metal,
+				Demos/DynamicBox/shaders/sediment-ribbons.metal,
+				Demos/DynamicBox/shaders/topographic-velvet.metal,
 				Info.plist,
 			);
 			target = 9A9B19C32ECF8284003DA309 /* vr-dive */;
@@ -96,6 +119,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9A9B19DD2ECF8286003DA309 /* Build configuration list for PBXNativeTarget "vr-dive" */;
 			buildPhases = (
+				9A9B19E22ECF8284003DA309 /* Check DynamicBox Shaders */,
 				9A9B19C02ECF8284003DA309 /* Sources */,
 				9A9B19C12ECF8284003DA309 /* Frameworks */,
 				9A9B19C22ECF8284003DA309 /* Resources */,
@@ -159,6 +183,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		9A9B19E22ECF8284003DA309 /* Check DynamicBox Shaders */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Check DynamicBox Shaders";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "SHADER_DIR=\"${SRCROOT}/vr-dive/Demos/DynamicBox\"\nif ! command -v node >/dev/null 2>&1; then\n  echo \"warning: node not found in PATH; skipping DynamicBox shader type-check (see $SHADER_DIR/check-shaders.js)\"\n  exit 0\nfi\necho \"Running DynamicBox shader type-check (node check-shaders.js)...\"\ncd \"$SHADER_DIR\" && node check-shaders.js\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		9A9B19C02ECF8284003DA309 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -179,6 +225,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 29T757U3Y2;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -208,6 +255,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 29T757U3Y2;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (

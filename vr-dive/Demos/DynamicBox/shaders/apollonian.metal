@@ -6,32 +6,51 @@
 //
 // Based on the standard Apollonian fractal DE popularized by
 // Syntopia / FractalForums.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 经典「domain-repeat Apollonian」DE：每次迭代先把点折回
+//       [-1,1]³ 的周期性瓦片 (q = -1+2*fract(0.5q+0.5))，再做一次
+//       「钳位球面反演」(k = max(fixedRadius2/r², 1.0); q*=k; scale*=k)。
+//       周期折叠保证 q 永远不会跑飞，钳位反演保证 scale 单调增长，最终
+//       用 length(q)/scale 作为距离场，能稳定生成"球中球"的无限堆叠。
+// 关键参数:
+//   - fixedRadius2 = 1.0：球面反演的触发半径平方，越大单次反演放大倍数
+//     越强，细节越密。
+//   - 迭代次数 10：domain-repeat 变体收敛快，不需要像早期实现那样堆到
+//     14 次也能出丰富细节。
+//   - 末尾 -0.02 是"球体半径"，决定每个小球的粗细/棱角锐度。
+// 性能特征: 单点 DE 迭代 10 次（每次 1 次 fract + 1 次 max + 2 次乘法），
+//           法线额外 6 次 DE 调用；march 120 步/maxD=25，中等开销。
+// 已知限制/优化方向（⚠️ 曾踩坑记录）:
+//   - 最初的实现每次迭代无条件做 `q = q/dot(q,q)`（无周期折叠、无钳位），
+//     导致 q 在若干次迭代后要么迅速发散到极大值、要么塌缩到 0，且额外的
+//     `scale *= 3` 与位移叠加会进一步放大这种不稳定性。结果是距离场在
+//     摄像机所在的盒子尺度内几乎处处远离 0，march 命中率极低，画面看起来
+//     「几乎是空的」。改用带周期折叠 + 钳位反演的经典写法后问题解决。
+//   - 目前没有做「orbit trap」之类按迭代轨迹着色，只用 palette(length(p))，
+//     细节层次的色彩变化有限，可尝试引入 orbit trap 提升可读性。
 
 // ─── Apollonian DE ────────────────────────────────────────────────────────────
-// Standard Apollonian gasket: iterative sphere inversion + fold + scale.
+// Domain-repeat Apollonian gasket: fold space into a periodic tile, then
+// apply a clamped sphere inversion each iteration. This variant is numerically
+// stable (bounded q, monotonically growing scale) and reliably fills space.
 static float apollonianDE(float3 p, float t) {
     float3 q = p;
-    float  dr = 1.0f;
-    float  scale = 3.0f;
+    float  scale = 1.0f;
+    const float fixedRadius2 = 1.0f;
 
-    for (int i = 0; i < 14; i++) {
-        // Sphere inversion: reflect across unit sphere
-        float m = dot(q, q);
-        if (m < 1e-8f) break;
+    for (int i = 0; i < 10; i++) {
+        // Domain repeat: fold space back into a [-1,1]^3 tile.
+        q = -1.0f + 2.0f * fract(0.5f * q + 0.5f);
 
-        q = q / m;
-        dr = dr / m * 2.0f + 1.0f;
-
-        // Symmetry fold
-        q = abs(q);
-
-        // Offset then scale
-        q = q + float3(0.5f, 0.5f, 0.5f);
-        q = q * scale;
-        dr = dr * scale + 1.0f;
+        // Clamped sphere inversion (only ever grows scale, keeps q bounded).
+        float r2 = dot(q, q);
+        float k = max(fixedRadius2 / max(r2, 1e-6f), 1.0f);
+        q *= k;
+        scale *= k;
     }
 
-    return length(q) / dr - 0.05f;
+    return length(q) / scale - 0.02f;
 }
 
 // ─── Normal ───────────────────────────────────────────────────────────────────

@@ -711,9 +711,6 @@ final class PatternMenuModel {
         originCellInspectionEnabled = false
       }
       coordinator.setPattern(selectedPattern)
-      if selectedPattern == .dynamicBox {
-        refreshShaderList()
-      }
     }
   }
 
@@ -757,16 +754,11 @@ final class PatternMenuModel {
   }
 
   // ─── DynamicBox ──────────────────────────────────────────────────────────
-  /// Shader server URL. Change this to your Mac's local IP if the device can't connect.
   static let shaderServerBaseURL = "http://192.168.31.49:8888"
-  /// Available shader names fetched from the server.
   var dynamicBoxAvailableShaders: [String] = ["default"]
-  /// Currently selected shader in the Picker.
   var dynamicBoxSelectedShader: String = "default" {
     didSet {
-      if dynamicBoxSelectedShader != oldValue {
-        loadDynamicBoxShader()
-      }
+      if dynamicBoxSelectedShader != oldValue { loadDynamicBoxShader() }
     }
   }
   /// Displayed status: current shader name, "Loading…", or error text.
@@ -779,36 +771,43 @@ final class PatternMenuModel {
     coordinator.loadDynamicBoxShader(named: name)
   }
 
+  /// Entering the DynamicBox controls immediately renders the current choice.
+  /// The list refresh remains asynchronous and does not block hot loading.
+  func activateDynamicBoxShaderPanel() {
+    refreshShaderList()
+    loadDynamicBoxShader()
+  }
+
+  func nextDynamicBoxShader() {
+    guard !dynamicBoxAvailableShaders.isEmpty else { return }
+    guard let index = dynamicBoxAvailableShaders.firstIndex(of: dynamicBoxSelectedShader) else {
+      dynamicBoxSelectedShader = dynamicBoxAvailableShaders[0]
+      return
+    }
+    dynamicBoxSelectedShader = dynamicBoxAvailableShaders[(index + 1) % dynamicBoxAvailableShaders.count]
+  }
+
   func refreshShaderList() {
-    Task {
-      let url = URL(string: "\(Self.shaderServerBaseURL)/shaders")!
-      guard let (data, response) = try? await URLSession.shared.data(from: url),
-        let httpResp = response as? HTTPURLResponse,
-        httpResp.statusCode == 200,
-        let names = try? JSONDecoder().decode([String].self, from: data),
-        !names.isEmpty
-      else {
-        print(
-          "[DynamicBox] refreshShaderList: server at \(Self.shaderServerBaseURL) unreachable."
-        )
-        if dynamicBoxAvailableShaders.count <= 1 {
-          dynamicBoxStatus = "服务器不可达 (\(Self.shaderServerBaseURL))"
-        }
-        return
-      }
-      // "default" is always available (embedded in app)
-      var allNames = names
-      if !allNames.contains("default") {
-        allNames.insert("default", at: 0)
-      }
-      print("[DynamicBox] Shaders available: \(allNames)")
-      dynamicBoxAvailableShaders = allNames
-      if dynamicBoxAvailableShaders.count > 1 && dynamicBoxStatus.hasPrefix("服务器") {
-        dynamicBoxStatus = "default"
-      }
-      // Ensure selected shader still exists; if not, fall back to first available
-      if !allNames.contains(dynamicBoxSelectedShader) {
-        dynamicBoxSelectedShader = allNames[0]
+    Task { @MainActor in
+      let base = Self.shaderServerBaseURL
+      do {
+        let url = URL(string: "\(base)/shaders")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard http.statusCode == 200 else { throw URLError(.badServerResponse) }
+        let names = try JSONDecoder().decode([String].self, from: data)
+        var all = names
+        if !all.contains("default") { all.insert("default", at: 0) }
+        dynamicBoxAvailableShaders = all
+        print("[DynamicBox] Shaders available: \(all)")
+        if !all.contains(dynamicBoxSelectedShader) { dynamicBoxSelectedShader = all[0] }
+      } catch {
+        let ns = error as NSError
+        let msg = "服务器不可达 (\(base), \(ns.domain):\(ns.code) \(error.localizedDescription))"
+        print("[DynamicBox] refreshShaderList failed: \(msg)")
+        if dynamicBoxAvailableShaders.count <= 1 { dynamicBoxStatus = msg }
       }
     }
   }

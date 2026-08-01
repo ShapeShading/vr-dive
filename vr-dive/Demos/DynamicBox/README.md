@@ -13,7 +13,8 @@ vr-dive/Demos/DynamicBox/
 │   ├── waves.metal               # 示例：彩色波形干涉
 │   └── sdf-shapes.metal          # 示例：复杂 SDF 几何体
 ├── server.log                    # 服务运行日志（已 gitignore）
-└── shader-compiling-error.log    # Metal 编译错误日志（已 gitignore）
+├── shader-compiling-error.log    # Metal 编译错误/成功日志（已 gitignore）
+└── shader-performance.log        # 抽样性能日志（已 gitignore）
 ```
 
 > **关键原则**：所有与 DynamicBox 相关的资源（着色器、服务脚本、日志）都放在本目录下，不扩散到顶层。
@@ -74,9 +75,50 @@ ipconfig getifaddr en0
 | 文件 | 用途 | 格式 |
 |------|------|------|
 | `server.log` | 服务运行日志（启动、请求摘要、错误摘要） | `[ISO时间] 消息` |
-| `shader-compiling-error.log` | Metal 编译失败详情（由 visionOS app 通过 POST /report-error 上报） | `=== ISO时间 ===\n错误详情\n` |
+| `shader-compiling-error.log` | Metal 编译失败/成功详情（由 visionOS app 通过 POST /report-error 上报） | `=== ISO时间 [ERR\|OK] ===\n详情\n` |
+| `shader-performance.log` | 抽样性能报告（由 visionOS app 通过 POST /report-perf 上报） | `[ISO时间] 消息` |
 
-两个日志文件均被 `.gitignore` 忽略（规则：`vr-dive/Demos/DynamicBox/*.log`）。
+三个日志文件均被 `.gitignore` 忽略（规则：`vr-dive/Demos/DynamicBox/*.log`）。
+
+### 性能抽样机制
+
+`DynamicBoxRenderer` 每帧使用真实的墙钟时间差（未被 1/20s 上限裁剪的原始 delta）判断该帧是否明显偏慢：
+
+- 阈值：单帧耗时 > 30ms（约低于 33fps）视为「明显较慢」。
+- 抽样：满足阈值的帧中，只有 20% 概率会真正上报，避免连续卡顿时日志刷屏。
+- 配额：**每次加载一个 shader（无论成功与否）都会重置为最多 10 条**上报配额；用完即停止上报，直到下一次切换/重新加载 shader。
+- 上报内容包含：当前 shader 名、帧耗时（ms）、估算 fps、以及第几条抽样（如 `sample 3/10`）。
+
+```bash
+# 查看抽样性能日志
+tail -f vr-dive/Demos/DynamicBox/shader-performance.log
+```
+
+---
+
+## 构建时类型检查
+
+`shaders/` 目录下的 `.metal` 文件不会被 Xcode 打包进 app（见下方 `membershipExceptions`
+配置），但每次构建 `vr-dive` target 时，会自动执行一个 Run Script Build Phase
+（`Check DynamicBox Shaders`），调用 [`check-shaders.js`](./check-shaders.js)：
+
+- 用与 `DynamicBoxRenderer.wrapShaderSource()` **完全一致**的前置代码（结构体 /
+  宏 / `db_boxHit` 辅助函数）包装每个 `.metal` 文件，然后用真实的
+  `xcrun metal -c` 编译器做完整的类型检查。
+- 编译输出（含 warning/error）会直接打印在 Xcode 的 Build Log 里。
+- **任意一个 shader 编译失败都会导致整个 app 构建失败**，从而保证仓库里的
+  runtime shader 始终是类型正确的。
+- 若本机没有 `node`，脚本会打印一条 warning 并跳过检查（不会阻塞构建）。
+
+也可以脱离 Xcode 手动运行：
+
+```bash
+cd vr-dive/Demos/DynamicBox && node check-shaders.js          # 检查全部
+cd vr-dive/Demos/DynamicBox && node check-shaders.js waves     # 只检查指定文件
+```
+
+> 修改 `DynamicBoxRenderer.wrapShaderSource()` 里的前置代码时，务必同步更新
+> `check-shaders.js` 里的 `PRELUDE` 常量，两者必须保持一致。
 
 ### 查看日志
 

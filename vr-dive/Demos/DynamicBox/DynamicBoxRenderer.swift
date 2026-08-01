@@ -8,12 +8,12 @@ import simd
 //
 // Architecture:
 //   - Embedded default shader ("3D grid of light points") ships in DynamicBoxShaders.metal
-//   - A companion Node.js server (vr-dive/Demos/DynamicBox/shader-server.js) serves .metal
-//     files from its shaders/ subdirectory on port 8888
+//   - A companion Node.js server (scripts/shader-server.js) serves .metal files from
+//     scripts/shaders/ on port 8888
 //   - The "Load Shader" button fetches a named shader, compiles it with Metal, and
 //     swaps the fragment function in the render pipeline
 //   - Compilation errors are POSTed back to the server and written to
-//     shader-compiling-error.log in the DynamicBox directory
+//     scripts/shader-compiling-error.log
 
 final class DynamicBoxRenderer: VisualPatternController {
   let identifier: VisualPatternKind = .dynamicBox
@@ -37,7 +37,7 @@ final class DynamicBoxRenderer: VisualPatternController {
   private var animationTime: Float = 0
   private var lastSimulationTime: Float?
 
-  /// Base URL of the shader server. Keep in sync with PatternMenuModel.shaderServerBaseURL.
+  /// Base URL of the shader server.
   private let serverBaseURL = "http://192.168.31.49:8888"
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
@@ -88,34 +88,13 @@ final class DynamicBoxRenderer: VisualPatternController {
   /// - Parameter name: shader file name (without `.metal` extension), e.g. `"waves"`
   /// - Returns: `nil` on success, or an error description string on failure.
   func reloadShader(named name: String) async -> String? {
-    // "default" uses the embedded shader compiled into the app – no server fetch.
-    if name == "default" {
-      guard let vertFn = library.makeFunction(name: "dynamicBoxVertex"),
-        let fragFn = library.makeFunction(name: "dynamicBoxFragment")
-      else {
-        let msg = "Embedded default shader functions not found."
-        await reportToServer(msg)
-        return msg
-      }
-      do {
-        pipelineState = try DynamicBoxRenderer.makePipeline(
-          device: device, vertexFn: vertFn, fragmentFn: fragFn,
-          maxViewCount: maxViewCount)
-        currentShaderName = "default"
-        return nil
-      } catch {
-        let msg = "Pipeline creation error: \(error.localizedDescription)"
-        await reportToServer(msg)
-        return msg
-      }
-    }
-
     let rawSource: String
     do {
       rawSource = try await fetchShaderSource(named: name)
     } catch {
-      let msg = "Failed to fetch shader \"\(name)\": \(error.localizedDescription)"
-      await reportToServer(msg)
+      let msg = "Shader fetch failed [\(name)] URL=\(serverBaseURL)/shaders/\(name).metal — \(Self.describeNetworkError(error))"
+      print("[DynamicBox] \(msg)")
+      await reportErrorToServer(msg)
       return msg
     }
 
@@ -128,13 +107,13 @@ final class DynamicBoxRenderer: VisualPatternController {
       newLibrary = try await device.makeLibrary(source: wrappedSource, options: nil)
     } catch {
       let msg = "Metal compilation error: \(error.localizedDescription)"
-      await reportToServer("[\(name)] \(msg)")
+      await reportErrorToServer("[\(name)] \(msg)")
       return msg
     }
 
     guard let newFragFn = newLibrary.makeFunction(name: "dynamicBoxFragment") else {
       let msg = "Compiled library is missing \"dynamicBoxFragment\" function."
-      await reportToServer("[\(name)] \(msg)")
+      await reportErrorToServer("[\(name)] \(msg)")
       return msg
     }
 
@@ -147,14 +126,13 @@ final class DynamicBoxRenderer: VisualPatternController {
         maxViewCount: maxViewCount)
     } catch {
       let msg = "Pipeline creation error: \(error.localizedDescription)"
-      await reportToServer("[\(name)] \(msg)")
+      await reportErrorToServer("[\(name)] \(msg)")
       return msg
     }
 
     // Swap
     pipelineState = newPS
     currentShaderName = name
-    await reportToServer("[\(name)] Shader compiled and loaded successfully.")
     return nil  // success
   }
 
@@ -214,9 +192,15 @@ final class DynamicBoxRenderer: VisualPatternController {
 
   private func fetchShaderSource(named name: String) async throws -> String {
     let url = URL(string: "\(serverBaseURL)/shaders/\(name).metal")!
-    let (data, response) = try await URLSession.shared.data(from: url)
-    guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 8
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let httpResp = response as? HTTPURLResponse else {
       throw URLError(.badServerResponse)
+    }
+    guard httpResp.statusCode == 200 else {
+      let body = String(data: data, encoding: .utf8) ?? "<non-UTF8 body>"
+      throw DynamicBoxHTTPError(statusCode: httpResp.statusCode, body: body)
     }
     guard let source = String(data: data, encoding: .utf8) else {
       throw URLError(.cannotDecodeContentData)
@@ -224,7 +208,22 @@ final class DynamicBoxRenderer: VisualPatternController {
     return source
   }
 
-  private func reportToServer(_ message: String) async {
+  private struct DynamicBoxHTTPError: LocalizedError {
+    let statusCode: Int
+    let body: String
+    var errorDescription: String? { "HTTP \(statusCode): \(body.prefix(180))" }
+  }
+
+  private static func describeNetworkError(_ error: Error) -> String {
+    let ns = error as NSError
+    var text = "\(error.localizedDescription) (domain=\(ns.domain), code=\(ns.code))"
+    if let urlError = error as? URLError, let underlying = urlError.userInfo[NSUnderlyingErrorKey] as? NSError {
+      text += "; underlying=\(underlying.domain):\(underlying.code) \(underlying.localizedDescription)"
+    }
+    return text
+  }
+
+  private func reportErrorToServer(_ message: String) async {
     let url = URL(string: "\(serverBaseURL)/report-error")!
     var req = URLRequest(url: url)
     req.httpMethod = "POST"

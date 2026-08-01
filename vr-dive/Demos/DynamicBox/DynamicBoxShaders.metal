@@ -102,12 +102,13 @@ fragment float4 dynamicBoxFragment(
     // Box entry test
     bool insideBox = all(abs(boxEye) < (DB_BOXDIMS - 1e-3f));
     float3 marchOrigin;
-    float3 bgColor = float3(0.0f, 0.0f, 0.015f);
+    float3 bgColor = float3(0.02f, 0.02f, 0.05f);
 
     if (!insideBox) {
         float3 entryNormal;
         float  tEnter = db_boxHit(boxEye, boxRd, DB_BOXDIMS, entryNormal, true);
         if (tEnter < 0.0f) {
+            // Missed the box entirely – render dark background with subtle grid glow
             return float4(bgColor, 1.0f);
         }
         marchOrigin = boxEye + boxRd * (tEnter + 1e-3f);
@@ -123,55 +124,56 @@ fragment float4 dynamicBoxFragment(
     float3 eye = (uniforms.patternTransform * float4(marchOrigin, 1.0f)).xyz;
     float3 rd  = normalize(float3(uniforms.patternTransform * float4(boxRd, 0.0f)));
 
-    // ─── 3D Grid Spheres ───────────────────────────────────────────────────
-    // Tiny spheres at integer grid positions, visible beyond the box boundary.
-    float gridSpacing = 0.18f;
-    float sphereR     = 0.006f;
-    float maxMarch    = max(tExit * 2.0f, 30.0f); // 20+ meters beyond box
+    // ─── 3D Grid Point Rendering ───────────────────────────────────────────
+    float gridSpacing = 0.12f;                     // distance between grid points
+    float pointRadius = 0.025f;                    // visual radius of each point
+    float glowFalloff = 120.0f;                    // sharpness of glow
+    float maxMarch    = tExit + 0.5f;              // march a bit past exit for edge glow
 
+    float3 pos    = eye;
     float  accumA = 0.0f;
     float3 accumC = float3(0.0f);
 
+    // Ray-march through the grid in steps of gridSpacing/2
     float stepSize = gridSpacing * 0.5f;
-    int   maxSteps = int(maxMarch / stepSize) + 4;
+    int   maxSteps = int(maxMarch / stepSize) + 2;
 
-    for (int i = 0; i < min(maxSteps, 512); i++) {
+    for (int i = 0; i < min(maxSteps, 128); i++) {
         float t = (float(i) + 0.5f) * stepSize;
         if (t > maxMarch) break;
         float3 p = eye + rd * t;
 
+        // Snap to nearest grid point
         float3 gp = round(p / gridSpacing) * gridSpacing;
-        float3 oc = eye - gp;
+        float  dist = length(p - gp);
 
-        float b  = dot(oc, rd);
-        float c2 = dot(oc, oc);
-        float disc = b * b - (c2 - sphereR * sphereR);
+        if (dist < pointRadius * 2.5f) {
+            // Glow intensity – Gaussian-ish falloff
+            float glow = exp(-dist * dist * glowFalloff);
+            // Pulse animation
+            float pulse = 0.7f + 0.3f * sin(uniforms.time * 2.0f + dot(gp, float3(3.7f, 5.1f, 7.3f)));
+            glow *= pulse;
 
-        if (disc > 0.0f) {
-            float sqrtD = sqrt(disc);
-            float tHit  = -b - sqrtD;
-            if (tHit < 0.001f) tHit = -b + sqrtD;
-            if (tHit > 0.0f && tHit < t + stepSize && tHit < maxMarch) {
-                float3 hitPos = eye + rd * tHit;
-                float3 n      = normalize(hitPos - gp);
+            // Color based on grid position
+            float hue = fract(dot(gp, float3(0.373f, 0.617f, 0.819f)) * 0.4f + uniforms.time * 0.05f);
+            float3 rgb = db_hsv2rgb(float3(hue, 0.7f, 1.0f));
 
-                float dif = max(0.0f, dot(n, rd));
-                float amb = 0.4f + 0.6f * abs(n.y);
-                float rim = 1.0f - max(dot(-rd, n), 0.0f);
-                rim = pow(rim, 4.0f) * 0.5f;
+            // Alpha compositing (front-to-back with emission)
+            float alpha = glow * 0.35f;
+            accumC += rgb * alpha * (1.0f - accumA);
+            accumA += alpha * (1.0f - accumA);
 
-                float hue = fract(dot(gp, float3(0.271f, 0.583f, 0.791f)) * 0.25f + uniforms.time * 0.02f);
-                float3 albedo = db_hsv2rgb(float3(hue, 0.8f, 1.2f));
-
-                float3 col = albedo * (dif * 0.9f + amb * 0.5f) + float3(0.3f, 0.5f, 1.0f) * rim;
-                float alpha = 1.0f;
-                accumC += col * alpha * (1.0f - accumA);
-                accumA += alpha * (1.0f - accumA);
-                if (accumA > 0.99f) break;
-            }
+            if (accumA > 0.98f) break;
         }
     }
 
-    float3 finalColor = mix(bgColor, accumC, accumA);
+    // Fade box edges
+    float3 absPos  = abs(pos);
+    float  edgeDist = min(min(DB_BOXDIMS.x - absPos.x,
+                               DB_BOXDIMS.y - absPos.y),
+                               DB_BOXDIMS.z - absPos.z);
+    float edgeFade = smoothstep(0.0f, 0.08f, edgeDist);
+
+    float3 finalColor = mix(bgColor, accumC, accumA) * edgeFade;
     return float4(finalColor, 1.0f);
 }

@@ -214,12 +214,23 @@ struct ControlButtonsView: View {
             .pickerStyle(.menu)
             .frame(width: 180)
 
-            Button(action: {
-              model.refreshShaderList()
-            }) {
-              Label("刷新", systemImage: "arrow.clockwise")
+            Button(action: { model.nextDynamicBoxShader() }) {
+              Image(systemName: "arrow.right.circle.fill")
+                .font(.title3)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderless)
+            .accessibilityLabel("下一个着色器")
+            .help("切换到下一个着色器")
+            .frame(width: 44, height: 36)
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+            .disabled(model.dynamicBoxAvailableShaders.count <= 1)
+
+            Button(action: { model.refreshShaderList() }) {
+              Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("刷新着色器列表")
           }
 
           Text("状态: \(model.dynamicBoxStatus)")
@@ -228,15 +239,12 @@ struct ControlButtonsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task {
-          model.refreshShaderList()
-          var listRefreshCount = 0
+          model.activateDynamicBoxShaderPanel()
+          var refreshCount = 1
           while !Task.isCancelled {
             model.refreshDynamicBoxStatus()
-            // Refresh shader list every 5 seconds until we get results
-            if listRefreshCount % 25 == 0 {
-              model.refreshShaderList()
-            }
-            listRefreshCount += 1
+            if refreshCount % 25 == 0 { model.refreshShaderList() }
+            refreshCount += 1
             try? await Task.sleep(for: .milliseconds(200))
           }
         }

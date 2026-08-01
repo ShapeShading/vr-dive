@@ -6,6 +6,26 @@
 //
 // This creates morphing 3D shapes that smoothly transform as 4D rotation
 // brings different cross-sections into view.
+//
+// ─── 设计方案 ────────────────────────────────────────────────────────────
+// 思路: 在 4D 空间构建两个隐式几何体 (4D 超环面 sdHyperTorus + 4D 球
+//       格点 sdSpherePack4D)，实际在 fragment 主循环中依次应用 rotXY→
+//       rotZW→rotXW→rotYZ 四个旋转平面让 4D 坐标随时间旋转，再把当前
+//       3D march 采样点通过透视投影公式 (w 分量由 3D 距离反推) 映射回
+//       4D，取 4D distance field 当作 3D 等效距离场使用（并乘以投影
+//       Jacobian `1/(1+p.w*fov)` 修正步长）。
+// 关键参数:
+//   - fov = 0.4：4D→3D 透视投影的强度，越大 W 轴形变越明显。
+//   - 四个旋转的角速度各自独立 (0.17/0.23/0.11/0.13)，避免所有旋转同步
+//     导致画面呆板。
+//   - sdHyperTorus 的 R1/R2/r 决定超环面「粗细/半径比」；
+//     sdSpherePack4D 的格点间距 0.5 决定球体阵列密度。
+// 性能特征: 每次法线计算需要额外 3 次 4D map 求值（比 3D 版本略贵），
+//           march 100 步/maxD=25。整体是本目录概念最复杂的 shader。
+// 已知限制/优化方向:
+//   - w 分量目前由透视投影反推而非独立自由度，效果上偏「伪 4D」，若要
+//     更真实的 4D 旋转体验可以让 w 与 3D 位置解耦（例如引入独立的 w
+//     uniform 或时间驱动的 w 偏移）。
 
 // ─── 4D rotation helpers ──────────────────────────────────────────────────────
 static float4 rotXY(float4 p, float a) {

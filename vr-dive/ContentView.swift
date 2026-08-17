@@ -212,7 +212,7 @@ struct ControlButtonsView: View {
               }
             }
             .pickerStyle(.menu)
-            .frame(width: 180)
+            .frame(width: 288)
 
             Button(action: { model.nextDynamicBoxShader() }) {
               Image(systemName: "arrow.right.circle.fill")
@@ -221,7 +221,7 @@ struct ControlButtonsView: View {
             .buttonStyle(.borderless)
             .accessibilityLabel("下一个着色器")
             .help("切换到下一个着色器")
-            .frame(width: 44, height: 36)
+            .frame(width: 60, height: 36)
             .padding(.horizontal, 6)
             .contentShape(Rectangle())
             .disabled(model.dynamicBoxAvailableShaders.count <= 1)

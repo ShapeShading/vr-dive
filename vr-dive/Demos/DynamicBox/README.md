@@ -9,7 +9,14 @@ vr-dive/Demos/DynamicBox/
 ├── DynamicBoxTypes.swift         # Uniforms 结构体
 ├── shader-server.js              # Node.js 后端服务
 ├── shaders/                      # 可动态加载的 .metal 着色器
-│   ├── default.metal             # 默认：三维网格光点
+│   ├── inversion-menger.metal    # 球面反演 + Menger 折叠发光图案
+│   ├── subdivided-cubes.metal    # 随机递归细分立方体发光图案
+│   ├── cosine-cross-orbit.metal  # 余弦扰动与叉积轨道发光图案
+│   ├── dispersive-gem.metal      # 光谱色散折射宝石图案
+│   ├── holofoil-dice.metal       # Holofoil Dice 全息骰子图案
+│   ├── space-station-bokeh.metal # Space Station 单 pass Bokeh 图案
+│   ├── galaxy.metal              # Worley + FBM 旋臂星系图案
+│   ├── warped-mushroom.metal     # Warped sphere 蘑菇形体图案
 │   ├── waves.metal               # 示例：彩色波形干涉
 │   └── sdf-shapes.metal          # 示例：复杂 SDF 几何体
 ├── server.log                    # 服务运行日志（已 gitignore）

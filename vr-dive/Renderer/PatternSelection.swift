@@ -107,6 +107,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case neonShells
   case lunarSurface
   case dynamicBox
+  case infiniteMandelbulbZoom
 
   var id: String { rawValue }
 
@@ -183,6 +184,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Wavey spheres"
     case .fractalFlythrough:
       return "Fractal Flythrough"
+    case .infiniteMandelbulbZoom:
+      return "Infinite Mandelbulb Zoom"
     case .apollonianIIv4:
       return "Apollonian-II-v4"
     case .magnetar:
@@ -597,7 +600,7 @@ final class PatternCoordinator {
   }
 
   private let queue = DispatchQueue(label: "vr-dive.pattern.coordinator", attributes: .concurrent)
-  private var _current: VisualPatternKind = .lunarSurface
+  private var _current: VisualPatternKind = .infiniteMandelbulbZoom
   private var _isPaused: Bool = false
   private var _shouldReset: Bool = false
   private var _speedMultiplier: Float = 1.0
@@ -605,6 +608,9 @@ final class PatternCoordinator {
   private var _rayMarchingProbeDimTarget: RayMarchingProbeDimTarget = .none
   private var _huashanSampleRatio: Float = PatternCoordinator.defaultHuashanSampleRatio
   private var _simoneOrbit3DPreset: SimoneOrbit3DPreset = .preset01
+  private var _infiniteZoomRate: Float = 0.12
+  private var _infiniteZoomDirection: Float = 1.0
+  private var _infiniteZoomQuality: InfiniteZoomQuality = .balanced
 
   func currentPattern() -> VisualPatternKind {
     queue.sync { _current }
@@ -673,6 +679,30 @@ final class PatternCoordinator {
 
   func setSimoneOrbit3DPreset(_ preset: SimoneOrbit3DPreset) {
     queue.async(flags: .barrier) { self._simoneOrbit3DPreset = preset }
+  }
+
+  func infiniteZoomRate() -> Float {
+    queue.sync { _infiniteZoomRate }
+  }
+
+  func setInfiniteZoomRate(_ rate: Float) {
+    queue.async(flags: .barrier) { self._infiniteZoomRate = min(max(rate, 0.02), 0.32) }
+  }
+
+  func infiniteZoomDirection() -> Float {
+    queue.sync { _infiniteZoomDirection }
+  }
+
+  func setInfiniteZoomDirection(_ direction: Float) {
+    queue.async(flags: .barrier) { self._infiniteZoomDirection = direction < 0 ? -1 : 1 }
+  }
+
+  func infiniteZoomQuality() -> InfiniteZoomQuality {
+    queue.sync { _infiniteZoomQuality }
+  }
+
+  func setInfiniteZoomQuality(_ quality: InfiniteZoomQuality) {
+    queue.async(flags: .barrier) { self._infiniteZoomQuality = quality }
   }
 
   // ─── DynamicBox shader loading ────────────────────────────────────────────
@@ -753,6 +783,18 @@ final class PatternMenuModel {
     }
   }
 
+  var infiniteZoomRate: Float = 0.12 {
+    didSet { coordinator.setInfiniteZoomRate(infiniteZoomRate) }
+  }
+
+  var infiniteZoomDirection: Float = 1.0 {
+    didSet { coordinator.setInfiniteZoomDirection(infiniteZoomDirection) }
+  }
+
+  var infiniteZoomQuality: InfiniteZoomQuality = .balanced {
+    didSet { coordinator.setInfiniteZoomQuality(infiniteZoomQuality) }
+  }
+
   // ─── DynamicBox ──────────────────────────────────────────────────────────
   static let shaderServerBaseURL = "http://192.168.31.49:8888"
   var dynamicBoxAvailableShaders: [String] = ["default"]
@@ -830,6 +872,9 @@ final class PatternMenuModel {
     self.rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
     self.huashanSampleRatio = coordinator.huashanSampleRatio()
     self.simoneOrbit3DPreset = coordinator.simoneOrbit3DPreset()
+    self.infiniteZoomRate = coordinator.infiniteZoomRate()
+    self.infiniteZoomDirection = coordinator.infiniteZoomDirection()
+    self.infiniteZoomQuality = coordinator.infiniteZoomQuality()
   }
 
   func refreshFromCoordinator() {
@@ -839,6 +884,9 @@ final class PatternMenuModel {
     rayMarchingProbeDimTarget = coordinator.rayMarchingProbeDimTarget()
     huashanSampleRatio = coordinator.huashanSampleRatio()
     simoneOrbit3DPreset = coordinator.simoneOrbit3DPreset()
+    infiniteZoomRate = coordinator.infiniteZoomRate()
+    infiniteZoomDirection = coordinator.infiniteZoomDirection()
+    infiniteZoomQuality = coordinator.infiniteZoomQuality()
   }
 
   func reset() {
@@ -863,5 +911,37 @@ final class PatternMenuModel {
 
   var simoneOrbit3DPrincipleText: String {
     "离线脚本现在优先筛选 filament 型 3D 轨道: x'=sin(x²-y²-z²+a), y'=cos(2xy+b), z'=sin(2xz+c)。面板里的预设更偏向可见曲线骨架，而不是高密度云团。"
+  }
+}
+
+enum InfiniteZoomQuality: String, CaseIterable, Identifiable {
+  case performance
+  case balanced
+  case detailed
+
+  var id: String { rawValue }
+
+  var displayName: String {
+    switch self {
+    case .performance: return "流畅"
+    case .balanced: return "平衡"
+    case .detailed: return "细致"
+    }
+  }
+
+  var raySteps: UInt32 {
+    switch self {
+    case .performance: return 48
+    case .balanced: return 64
+    case .detailed: return 80
+    }
+  }
+
+  var fractalIterations: UInt32 {
+    switch self {
+    case .performance: return 6
+    case .balanced: return 8
+    case .detailed: return 10
+    }
   }
 }

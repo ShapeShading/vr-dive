@@ -145,9 +145,17 @@ class Renderer {
     warmupPipelines()
 
     Task {
+      let requiredAuthorizations = WorldTrackingProvider.requiredAuthorizations
+      let authorization = await arSession.requestAuthorization(for: requiredAuthorizations)
+      let denied = authorization.filter { $0.value != .allowed }
+      guard denied.isEmpty else {
+        print("[Renderer] World tracking authorization was not granted: \(authorization)")
+        return
+      }
+
       do {
         try await arSession.run([worldTracking])
-        print("[Renderer] ARSession started successfully")
+        print("[Renderer] ARSession started successfully (provider state: \(worldTracking.state))")
       } catch {
         print("[Renderer] Failed to start ARSession: \(error)")
       }
@@ -316,7 +324,10 @@ class Renderer {
           originCellInspectionEnabled: patternCoordinator.originCellInspectionEnabled(),
           rayMarchingProbeDimTarget: patternCoordinator.rayMarchingProbeDimTarget(),
           huashanSampleRatio: patternCoordinator.huashanSampleRatio(),
-          simoneOrbit3DPreset: patternCoordinator.simoneOrbit3DPreset()
+          simoneOrbit3DPreset: patternCoordinator.simoneOrbit3DPreset(),
+          infiniteZoomRate: patternCoordinator.infiniteZoomRate(),
+          infiniteZoomDirection: patternCoordinator.infiniteZoomDirection(),
+          infiniteZoomQuality: patternCoordinator.infiniteZoomQuality()
         )
         pattern?.synchronizeState(simulationContext)
 
@@ -1034,6 +1045,16 @@ class Renderer {
       controllers[.fractalFlythrough] = fractalFlythrough
     } else {
       print("[Renderer] Fractal Flythrough pattern unavailable.")
+    }
+
+    if let infiniteMandelbulbZoom = try? InfiniteMandelbulbZoomRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.infiniteMandelbulbZoom] = infiniteMandelbulbZoom
+    } else {
+      print("[Renderer] Infinite Mandelbulb Zoom pattern unavailable.")
     }
 
     if let apollonianIIv4 = try? ApollonianIIv4Renderer(

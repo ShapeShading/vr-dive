@@ -31,6 +31,9 @@ struct PatternSimulationContext {
   let rayMarchingProbeDimTarget: RayMarchingProbeDimTarget
   let huashanSampleRatio: Float
   let simoneOrbit3DPreset: SimoneOrbit3DPreset
+  let infiniteZoomRate: Float
+  let infiniteZoomDirection: Float
+  let infiniteZoomQuality: InfiniteZoomQuality
 }
 
 struct PatternRenderContext {

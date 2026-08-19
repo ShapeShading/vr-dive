@@ -119,6 +119,48 @@ struct ControlButtonsView: View {
         .buttonStyle(.bordered)
       }
 
+      if model.selectedPattern == .infiniteMandelbulbZoom {
+        VStack(alignment: .leading, spacing: 10) {
+          HStack {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("无限 Mandelbulb 缩放")
+                .font(.headline)
+              Text("每一层都会重定位局部坐标，避免极深缩放时丢失浮点精度")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+              model.infiniteZoomDirection *= -1
+            } label: {
+              Label(
+                model.infiniteZoomDirection > 0 ? "Zoom In" : "Zoom Out",
+                systemImage: model.infiniteZoomDirection > 0
+                  ? "arrow.down.right.and.arrow.up.left"
+                  : "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.bordered)
+          }
+
+          HStack(spacing: 14) {
+            Text("速度")
+            Slider(value: $model.infiniteZoomRate, in: 0.02...0.32)
+            Text(String(format: "%.2f", model.infiniteZoomRate))
+              .font(.system(.caption, design: .monospaced))
+              .frame(width: 36, alignment: .trailing)
+
+            Picker("画质", selection: $model.infiniteZoomQuality) {
+              ForEach(InfiniteZoomQuality.allCases) { quality in
+                Text(quality.displayName).tag(quality)
+              }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 230)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+
       if model.selectedPattern == .huashan {
         VStack(alignment: .leading, spacing: 8) {
           Text("华山点比例")

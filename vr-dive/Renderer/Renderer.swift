@@ -144,7 +144,9 @@ class Renderer {
     // preventing compositor watchdog timeouts caused by slow first-frame compilation.
     warmupPipelines()
 
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
+
       let requiredAuthorizations = WorldTrackingProvider.requiredAuthorizations
       let authorization = await arSession.requestAuthorization(for: requiredAuthorizations)
       let denied = authorization.filter { $0.value != .allowed }
@@ -156,11 +158,14 @@ class Renderer {
       do {
         try await arSession.run([worldTracking])
         print("[Renderer] ARSession started successfully (provider state: \(worldTracking.state))")
+        startRenderThread()
       } catch {
         print("[Renderer] Failed to start ARSession: \(error)")
       }
     }
+  }
 
+  private func startRenderThread() {
     let renderThread = Thread {
       self.renderLoop()
     }

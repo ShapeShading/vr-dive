@@ -9,7 +9,6 @@ vr-dive/Demos/DynamicBox/
 ├── DynamicBoxTypes.swift         # Uniforms 结构体
 ├── shader-server.js              # Node.js 后端服务
 ├── shaders/                      # 可动态加载的 .metal 着色器
-│   ├── default.metal             # 默认：三维网格光点
 │   ├── inversion-menger.metal    # 球面反演 + Menger 折叠发光图案
 │   ├── subdivided-cubes.metal    # 随机递归细分立方体发光图案
 │   ├── cosine-cross-orbit.metal  # 余弦扰动与叉积轨道发光图案

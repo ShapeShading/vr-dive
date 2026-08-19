@@ -43,16 +43,33 @@ fragment float4 dynamicBoxFragment(
     float3 boxRay = normalize(in.worldPos - cameraWorld);
     float3 background = float3(0.001f, 0.003f, 0.012f);
 
+    // Start at the actual DynamicBox entry point. Using boxEye directly would
+    // spend the fixed march budget outside the box when the camera is outside.
+    bool insideBox = all(abs(boxEye) < (DB_BOXDIMS - 1e-3f));
+    float3 rayOrigin;
+    if (!insideBox) {
+        float3 entryNormal;
+        float entry = db_boxHit(boxEye, boxRay, DB_BOXDIMS, entryNormal, true);
+        if (entry < 0.0f) return float4(background, 1.0f);
+        rayOrigin = boxEye + boxRay * (entry + 1e-3f);
+    } else {
+        rayOrigin = boxEye;
+    }
+
+    float3 exitNormal;
+    float exitDistance = db_boxHit(rayOrigin, boxRay, DB_BOXDIMS, exitNormal, false);
+    if (exitDistance <= 0.0f) return float4(background, 1.0f);
+
     // Keep the warped object inside the DynamicBox while preserving its
     // original proportions and camera-facing raymarch behavior.
     const float mushroomScale = 0.24f;
-    float3 ro = (uniforms.patternTransform * float4(boxEye, 1.0f)).xyz
+    float3 ro = (uniforms.patternTransform * float4(rayOrigin, 1.0f)).xyz
         / mushroomScale;
     float3 rd = normalize(float3(uniforms.patternTransform
         * float4(boxRay, 0.0f)));
 
     float travel = 0.0f;
-    float maxTravel = 5.0f;
+    float maxTravel = (exitDistance + 0.6f) / mushroomScale;
     float time = uniforms.time;
 
     for (int i = 0; i < 140; i++) {

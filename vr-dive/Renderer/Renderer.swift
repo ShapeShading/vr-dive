@@ -156,11 +156,14 @@ class Renderer {
       do {
         try await arSession.run([worldTracking])
         print("[Renderer] ARSession started successfully (provider state: \(worldTracking.state))")
+        startRenderThread()
       } catch {
         print("[Renderer] Failed to start ARSession: \(error)")
       }
     }
+  }
 
+  private func startRenderThread() {
     let renderThread = Thread {
       self.renderLoop()
     }

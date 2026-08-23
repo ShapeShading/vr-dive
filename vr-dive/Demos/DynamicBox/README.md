@@ -15,6 +15,7 @@ vr-dive/Demos/DynamicBox/
 │   ├── dispersive-gem.metal      # 光谱色散折射宝石图案
 │   ├── holofoil-dice.metal       # Holofoil Dice 全息骰子图案
 │   ├── space-station-bokeh.metal # Space Station 单 pass Bokeh 图案
+│   ├── spherical-harmonic-shell.metal # 动态球谐多瓣薄壳图案
 │   ├── galaxy.metal              # Worley + FBM 旋臂星系图案
 │   ├── warped-mushroom.metal     # Warped sphere 蘑菇形体图案
 │   ├── waves.metal               # 示例：彩色波形干涉

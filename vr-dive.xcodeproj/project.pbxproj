@@ -58,6 +58,7 @@
 				"Demos/DynamicBox/shaders/sdf-shapes.metal",
 				Demos/DynamicBox/shaders/sierpinski5cell.metal,
 				"Demos/DynamicBox/shaders/space-station-bokeh.metal",
+				"Demos/DynamicBox/shaders/spherical-harmonic-shell.metal",
 				"Demos/DynamicBox/shaders/subdivided-cubes.metal",
 				Demos/DynamicBox/shaders/waves.metal,
 				Demos/DynamicBox/shaders/pleated-marble.metal,

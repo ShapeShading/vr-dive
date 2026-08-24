@@ -152,7 +152,10 @@ static float3 imzNormal(float3 p, constant InfiniteMandelbulbZoomUniforms &u) {
   float gradient2 = dot(gradient, gradient);
   // Interior DE samples can all clamp to the same epsilon. Avoid normalize(0),
   // which produces NaNs and commonly appears as a completely black surface.
-  return gradient2 > 1.0e-12f ? gradient * rsqrt(gradient2) : normalize(p);
+  float position2 = dot(p, p);
+  float3 fallback = position2 > 1.0e-12f
+    ? p * rsqrt(position2) : float3(0.0f, 0.0f, 1.0f);
+  return gradient2 > 1.0e-12f ? gradient * rsqrt(gradient2) : fallback;
 }
 
 static bool imzSphereHit(float3 ro, float3 rd, thread float &nearT, thread float &farT) {

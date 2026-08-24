@@ -172,14 +172,11 @@ static float3 imzPalette(float orbit) {
   return 0.48f + 0.48f * cos(6.2831853f * phase);
 }
 
-fragment float4 infiniteMandelbulbZoomFragment(
-  InfiniteMandelbulbZoomVertexOut in [[stage_in]],
-  constant InfiniteMandelbulbZoomUniforms &u [[buffer(0)]],
-  constant InfiniteMandelbulbZoomViewUniform *views [[buffer(1)]])
+static float4 imzRender(
+  float2 ndc,
+  constant InfiniteMandelbulbZoomUniforms &u,
+  InfiniteMandelbulbZoomViewUniform view)
 {
-  uint vi = min(in.viewIndex, max(u.viewCount, 1u) - 1u);
-  InfiniteMandelbulbZoomViewUniform view = views[vi];
-  float2 ndc = in.uv * 2.0f - 1.0f;
   float4 viewTarget = view.projectionInverse * float4(ndc, 1.0f, 1.0f);
   float safeW = abs(viewTarget.w) < 1.0e-6f ? 1.0e-6f : viewTarget.w;
   viewTarget /= safeW;
@@ -241,4 +238,30 @@ fragment float4 infiniteMandelbulbZoomFragment(
   color = color / (1.0f + color);
   color = pow(max(color, 0.0f), float3(0.82f));
   return float4(color, 1.0f);
+}
+
+/// The fractal is intentionally evaluated into a modest offscreen texture.
+/// Running this DE directly at the compositor's full stereo resolution can
+/// enqueue frames much faster than the GPU completes them, leaving only the
+/// black clear color visible and eventually risking a watchdog reset.
+kernel void infiniteMandelbulbZoomCompute(
+  constant InfiniteMandelbulbZoomUniforms &u [[buffer(0)]],
+  constant InfiniteMandelbulbZoomViewUniform *views [[buffer(1)]],
+  texture2d_array<float, access::write> output [[texture(0)]],
+  uint3 gid [[thread_position_in_grid]])
+{
+  if (gid.x >= output.get_width() || gid.y >= output.get_height()
+      || gid.z >= min(u.viewCount, output.get_array_size())) return;
+  float2 uv = (float2(gid.xy) + 0.5f) / float2(output.get_width(), output.get_height());
+  float2 ndc = uv * 2.0f - 1.0f;
+  output.write(imzRender(ndc, u, views[gid.z]), gid.xy, gid.z);
+}
+
+fragment float4 infiniteMandelbulbZoomFragment(
+  InfiniteMandelbulbZoomVertexOut in [[stage_in]],
+  texture2d_array<float, access::sample> raymarchTexture [[texture(0)]])
+{
+  constexpr sampler linearSampler(
+    coord::normalized, address::clamp_to_edge, filter::linear);
+  return raymarchTexture.sample(linearSampler, in.uv, in.viewIndex);
 }

@@ -10,7 +10,9 @@ struct InfiniteMandelbulbZoomUniforms {
   var fractalIterations: UInt32
   var surfaceEpsilon: Float
   var padding: Float = 0
-  var objectCenterAndScale: SIMD4<Float>
+  /// Canonical view-space camera position and fractal scale. Keeping the scene
+  /// view-relative prevents navigation/world-origin changes from moving it off-screen.
+  var cameraAndScale: SIMD4<Float>
 }
 
 struct InfiniteMandelbulbZoomViewUniform {

@@ -76,7 +76,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
       maxRaySteps: quality.raySteps,
       fractalIterations: quality.fractalIterations,
       surfaceEpsilon: quality == .detailed ? 0.00065 : 0.001,
-      objectCenterAndScale: SIMD4<Float>(0, 0, -2.35, 1.18))
+      cameraAndScale: SIMD4<Float>(0, 0, 2.75, 1.0))
 
     context.applyViewConfiguration(on: encoder)
     encoder.setRenderPipelineState(pipelineState)

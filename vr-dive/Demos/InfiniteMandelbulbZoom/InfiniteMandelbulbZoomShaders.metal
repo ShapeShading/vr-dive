@@ -10,7 +10,7 @@ struct InfiniteMandelbulbZoomUniforms {
   uint fractalIterations;
   float surfaceEpsilon;
   float padding;
-  float4 objectCenterAndScale;
+  float4 cameraAndScale;
 };
 
 struct InfiniteMandelbulbZoomViewUniform {
@@ -78,7 +78,9 @@ static IMZSample imzBulb(float3 p, uint iterations) {
     r = max(r, 1.0e-6f);
     float theta = acos(clamp(z.z / r, -1.0f, 1.0f));
     float phi = atan2(z.y, z.x);
-    float r7 = pow(r, 7.0f);
+    float r2 = r * r;
+    float r4 = r2 * r2;
+    float r7 = r4 * r2 * r;
     float zr = r7 * r;
     dr = max(8.0f * r7 * dr + 1.0f, 1.0e-5f);
     theta *= 8.0f;
@@ -88,15 +90,16 @@ static IMZSample imzBulb(float3 p, uint iterations) {
 
   r = max(length(z), 1.0e-6f);
   IMZSample result;
-  result.distance = max(0.5f * log(r) * r / dr, 1.0e-6f);
+  float distance = 0.5f * log(r) * r / dr;
+  result.distance = isfinite(distance) ? max(distance, 1.0e-6f) : 0.05f;
   result.orbit = clamp(trap * 1.8f + float(escapedAt) / max(float(iterations), 1.0f), 0.0f, 1.0f);
   result.level = 0.0f;
   return result;
 }
 
 /// A Mandelbulb whose selected surface feature contains a smaller, rotated copy
-/// of the entire construction. Three local levels are enough because the CPU
-/// rebases onto the child after every zoom cycle, making depth independent of time.
+/// of the entire construction. One parent and one child are sufficient because
+/// the CPU rebases onto that child after every zoom cycle.
 static IMZSample imzHierarchy(float3 p, uint iterations) {
   const float childScale = 0.215f;
   const float3 anchor = float3(0.70f, 0.44f, 0.50f);
@@ -104,7 +107,7 @@ static IMZSample imzHierarchy(float3 p, uint iterations) {
   float accumulatedScale = 1.0f;
   float3 q = p;
 
-  for (uint level = 1; level < 3; ++level) {
+  for (uint level = 1; level < 2; ++level) {
     // A cheap bound skips most expensive bulb iterations away from the branch.
     float bound = length(q - anchor) - childScale * 1.28f;
     if (bound > best.distance / accumulatedScale + 0.08f) {
@@ -141,24 +144,25 @@ static IMZSample imzMap(float3 p, constant InfiniteMandelbulbZoomUniforms &u) {
 static float3 imzNormal(float3 p, constant InfiniteMandelbulbZoomUniforms &u) {
   float e = max(u.surfaceEpsilon * 1.8f, 0.0012f);
   const float2 k = float2(1.0f, -1.0f);
-  return normalize(
+  float3 gradient =
     k.xyy * imzMap(p + k.xyy * e, u).distance +
     k.yyx * imzMap(p + k.yyx * e, u).distance +
     k.yxy * imzMap(p + k.yxy * e, u).distance +
-    k.xxx * imzMap(p + k.xxx * e, u).distance);
+    k.xxx * imzMap(p + k.xxx * e, u).distance;
+  float gradient2 = dot(gradient, gradient);
+  // Interior DE samples can all clamp to the same epsilon. Avoid normalize(0),
+  // which produces NaNs and commonly appears as a completely black surface.
+  return gradient2 > 1.0e-12f ? gradient * rsqrt(gradient2) : normalize(p);
 }
 
-static bool imzBoxHit(float3 ro, float3 rd, thread float &nearT, thread float &farT) {
-  const float3 halfSize = float3(1.46f);
-  float3 safeRD = float3(
-    abs(rd.x) < 1.0e-6f ? copysign(1.0e-6f, rd.x) : rd.x,
-    abs(rd.y) < 1.0e-6f ? copysign(1.0e-6f, rd.y) : rd.y,
-    abs(rd.z) < 1.0e-6f ? copysign(1.0e-6f, rd.z) : rd.z);
-  float3 a = (-halfSize - ro) / safeRD;
-  float3 b = ( halfSize - ro) / safeRD;
-  float3 lo = min(a, b), hi = max(a, b);
-  nearT = max(max(lo.x, lo.y), lo.z);
-  farT = min(min(hi.x, hi.y), hi.z);
+static bool imzSphereHit(float3 ro, float3 rd, thread float &nearT, thread float &farT) {
+  const float radius = 1.48f;
+  float b = dot(ro, rd);
+  float h = b * b - (dot(ro, ro) - radius * radius);
+  if (h < 0.0f) return false;
+  h = sqrt(h);
+  nearT = -b - h;
+  farT = -b + h;
   return farT >= max(nearT, 0.0f);
 }
 
@@ -179,17 +183,19 @@ fragment float4 infiniteMandelbulbZoomFragment(
   float4 viewTarget = view.projectionInverse * float4(ndc, 1.0f, 1.0f);
   float safeW = abs(viewTarget.w) < 1.0e-6f ? 1.0e-6f : viewTarget.w;
   viewTarget /= safeW;
-  float3 cameraWorld = view.viewToWorld[3].xyz;
-  float3 targetWorld = (view.viewToWorld * float4(viewTarget.xyz, 1.0f)).xyz;
-
-  float3 center = u.objectCenterAndScale.xyz;
-  float worldScale = u.objectCenterAndScale.w;
-  float3 ro = (cameraWorld - center) / worldScale;
-  float3 rd = normalize(targetWorld - cameraWorld);
+  // This is a full-screen zoom rather than a world-anchored object. March in
+  // canonical view space so rig navigation or a changed AR world origin cannot
+  // leave the Mandelbulb behind the viewer. The projection still preserves each
+  // eye's asymmetric frustum.
+  float scale = max(u.cameraAndScale.w, 0.01f);
+  float3 ro = u.cameraAndScale.xyz / scale;
+  float3 rd = normalize(viewTarget.xyz);
+  rd.z = -abs(rd.z);
 
   float nearT, farT;
-  if (!imzBoxHit(ro, rd, nearT, farT)) {
-    return float4(0.001f, 0.003f, 0.01f, 1.0f);
+  if (!imzSphereHit(ro, rd, nearT, farT)) {
+    float vignette = pow(max(0.0f, 1.0f - length(ndc) * 0.52f), 3.0f);
+    return float4(float3(0.006f, 0.012f, 0.03f) + vignette * float3(0.025f, 0.035f, 0.07f), 1.0f);
   }
 
   float travel = max(nearT, 0.0f);
@@ -209,13 +215,13 @@ fragment float4 infiniteMandelbulbZoomFragment(
       hit = true;
       break;
     }
-    travel += max(sample.distance * 0.72f, epsilon * 0.55f);
+    travel += max(sample.distance * 0.82f, epsilon * 0.6f);
     if (travel > farT) break;
   }
 
   float rayGlow = exp(-minDistance * 22.0f);
-  float3 background = float3(0.002f, 0.005f, 0.016f)
-    + float3(0.018f, 0.028f, 0.055f) * pow(max(0.0f, 1.0f - length(ndc) * 0.58f), 3.0f);
+  float3 background = float3(0.006f, 0.012f, 0.03f)
+    + float3(0.025f, 0.035f, 0.07f) * pow(max(0.0f, 1.0f - length(ndc) * 0.52f), 3.0f);
   if (!hit) {
     return float4(background + rayGlow * float3(0.025f, 0.045f, 0.09f), 1.0f);
   }

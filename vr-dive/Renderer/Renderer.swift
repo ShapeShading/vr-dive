@@ -530,6 +530,8 @@ class Renderer {
     let clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
     // ── Compute pre-pass (before render encoder is created) ──────────────────
+    var encodedPattern: VisualPatternController?
+    var encodedContext: PatternRenderContext?
     if let activePattern = pattern, let anchor = anchorToUse {
       let viewData = makeViewRenderingData(
         drawable: drawable,
@@ -571,9 +573,17 @@ class Renderer {
         patternNavigationTransform: gameManager.patternNavTransform
       )
       activePattern.encodeFrame(encoder: sceneEncoder, context: sceneContext)
+      encodedPattern = activePattern
+      encodedContext = sceneContext
     }
 
     sceneEncoder.endEncoding()
+    if let encodedPattern, let encodedContext {
+      encodedPattern.encodePostpass(
+        commandBuffer: commandBuffer,
+        context: encodedContext,
+        colorTexture: colorTexture)
+    }
     return commandBuffer
   }
 

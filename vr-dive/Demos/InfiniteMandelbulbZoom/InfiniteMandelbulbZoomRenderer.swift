@@ -21,6 +21,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   private let computePipelineState: MTLComputePipelineState
   private let depthStencilState: MTLDepthStencilState
   private let raymarchTexture: MTLTexture
+  private let fragmentCoverageBuffer: MTLBuffer
   private let maxViewCount: Int
 
   private var zoomPhase: Float = 0
@@ -32,6 +33,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   private var hasRaymarchContent = false
   private var prepassFrameIndex: UInt32 = 0
   private var computeDispatchCount: UInt64 = 0
+  private var postpassFrameCount: UInt64 = 0
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
@@ -55,6 +57,17 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     }
     texture.label = "Infinite Mandelbulb Zoom Raymarch"
     raymarchTexture = texture
+
+    guard
+      let coverageBuffer = device.makeBuffer(
+        length: MemoryLayout<UInt32>.stride,
+        options: .storageModeShared)
+    else {
+      throw InfiniteMandelbulbZoomRendererError.diagnosticBufferAllocationFailed
+    }
+    coverageBuffer.label = "Infinite Mandelbulb Zoom Fragment Coverage"
+    coverageBuffer.contents().storeBytes(of: UInt32(0), as: UInt32.self)
+    fragmentCoverageBuffer = coverageBuffer
   }
 
   func synchronizeState(_ context: PatternSimulationContext) {
@@ -142,6 +155,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     encoder.setVertexBytes(
       &uniforms, length: MemoryLayout<InfiniteMandelbulbZoomUniforms>.stride, index: 0)
     encoder.setFragmentTexture(raymarchTexture, index: 0)
+    encoder.setFragmentBuffer(fragmentCoverageBuffer, offset: 0, index: 0)
     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
     if !didLogCompositeConfiguration {
@@ -152,6 +166,72 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
       print(
         "[InfiniteMandelbulbZoom] Composite encoded: views=\(viewCount), vertexAmplification=\(context.viewData.supportsVertexAmplification), layers=\(context.viewData.renderTargetLayers), viewports=[\(viewportSummary)]"
       )
+    }
+  }
+
+  func encodePostpass(
+    commandBuffer: MTLCommandBuffer,
+    context: PatternRenderContext,
+    colorTexture: MTLTexture
+  ) {
+    postpassFrameCount &+= 1
+    let frameID = postpassFrameCount
+    guard frameID <= 3 || frameID.isMultiple(of: 360) else { return }
+
+    let viewCount = min(
+      max(context.viewData.viewCount, 1),
+      max(min(colorTexture.arrayLength, maxViewCount), 1))
+    let width = colorTexture.width
+    let height = colorTexture.height
+    let samplePoints: [(String, MTLOrigin)] = [
+      ("C", MTLOrigin(x: width / 2, y: height / 2, z: 0)),
+      ("L", MTLOrigin(x: width / 4, y: height / 2, z: 0)),
+      ("R", MTLOrigin(x: width * 3 / 4, y: height / 2, z: 0)),
+      ("B", MTLOrigin(x: width / 2, y: height / 4, z: 0)),
+      ("T", MTLOrigin(x: width / 2, y: height * 3 / 4, z: 0)),
+    ]
+    let sampleCount = samplePoints.count * viewCount
+    guard
+      let readbackBuffer = colorTexture.device.makeBuffer(
+        length: sampleCount * Self.diagnosticBytesPerSample,
+        options: .storageModeShared),
+      let blitEncoder = commandBuffer.makeBlitCommandEncoder()
+    else {
+      print("[InfiniteMandelbulbZoom] Drawable #\(frameID) could not allocate readback")
+      return
+    }
+
+    readbackBuffer.label = "Infinite Mandelbulb Zoom Drawable #\(frameID)"
+    blitEncoder.label = "Infinite Mandelbulb Zoom Drawable Readback"
+    for slice in 0..<viewCount {
+      for (pointIndex, sample) in samplePoints.enumerated() {
+        let offset = (slice * samplePoints.count + pointIndex)
+          * Self.diagnosticBytesPerSample
+        blitEncoder.copy(
+          from: colorTexture,
+          sourceSlice: slice,
+          sourceLevel: 0,
+          sourceOrigin: sample.1,
+          sourceSize: MTLSize(width: 1, height: 1, depth: 1),
+          to: readbackBuffer,
+          destinationOffset: offset,
+          destinationBytesPerRow: Self.diagnosticBytesPerSample,
+          destinationBytesPerImage: Self.diagnosticBytesPerSample)
+      }
+    }
+    blitEncoder.endEncoding()
+
+    let textureSummary = "\(width)x\(height)x\(viewCount), format=\(colorTexture.pixelFormat.rawValue), storage=\(colorTexture.storageMode.rawValue)"
+    commandBuffer.addCompletedHandler { [fragmentCoverageBuffer] buffer in
+      let coverage = fragmentCoverageBuffer.contents().load(as: UInt32.self)
+      let texelSummary = Self.makeTexelSummary(
+        buffer: readbackBuffer,
+        viewCount: viewCount,
+        sampleNames: samplePoints.map(\.0))
+      print(
+        "[InfiniteMandelbulbZoom] Drawable #\(frameID) completed: status=\(buffer.status.rawValue), fragmentCoverage=\(coverage), target=\(textureSummary)"
+      )
+      print("[InfiniteMandelbulbZoom] Drawable #\(frameID) texels: \(texelSummary)")
     }
   }
 
@@ -261,6 +341,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
 
 private enum InfiniteMandelbulbZoomRendererError: Error {
   case textureAllocationFailed
+  case diagnosticBufferAllocationFailed
 }
 
 extension InfiniteMandelbulbZoomRenderer {

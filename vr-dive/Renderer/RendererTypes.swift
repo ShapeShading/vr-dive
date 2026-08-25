@@ -83,6 +83,12 @@ protocol VisualPatternController: AnyObject {
   /// Use this to dispatch compute kernels that produce data consumed by encodeFrame.
   func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext)
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext)
+  /// Optional post-pass (runs after the render encoder ends).
+  /// Intended for low-frequency diagnostics that need to inspect the final color target.
+  func encodePostpass(
+    commandBuffer: MTLCommandBuffer,
+    context: PatternRenderContext,
+    colorTexture: MTLTexture)
   func resetToInitialState()
 
   /// Optional pre-warm hook. Called once at startup on the CPU thread to force
@@ -94,5 +100,10 @@ protocol VisualPatternController: AnyObject {
 extension VisualPatternController {
   func synchronizeState(_ context: PatternSimulationContext) {}
   func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext) {}
+  func encodePostpass(
+    commandBuffer: MTLCommandBuffer,
+    context: PatternRenderContext,
+    colorTexture: MTLTexture
+  ) {}
   func warmupPipeline(device: MTLDevice, commandQueue: MTLCommandQueue) {}
 }

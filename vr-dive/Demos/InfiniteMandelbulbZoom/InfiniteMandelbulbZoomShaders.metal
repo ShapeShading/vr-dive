@@ -251,8 +251,13 @@ kernel void infiniteMandelbulbZoomCompute(
 
 fragment float4 infiniteMandelbulbZoomFragment(
   InfiniteMandelbulbZoomVertexOut in [[stage_in]],
-  texture2d_array<float, access::sample> raymarchTexture [[texture(0)]])
+  texture2d_array<float, access::sample> raymarchTexture [[texture(0)]],
+  device atomic_uint *fragmentCoverage [[buffer(0)]])
 {
+  uint2 pixel = uint2(in.position.xy);
+  if ((pixel.x & 255u) == 0u && (pixel.y & 255u) == 0u) {
+    atomic_fetch_add_explicit(fragmentCoverage, 1u, memory_order_relaxed);
+  }
   constexpr sampler linearSampler(
     coord::normalized, address::clamp_to_edge, filter::linear);
   return raymarchTexture.sample(linearSampler, in.uv, in.viewIndex);

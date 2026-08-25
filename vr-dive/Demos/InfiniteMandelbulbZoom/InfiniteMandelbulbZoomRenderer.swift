@@ -1,3 +1,4 @@
+import Foundation
 import Metal
 import simd
 
@@ -14,6 +15,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   private static let raymarchWidth = 256
   private static let raymarchHeight = 200
   private static let raymarchUpdateInterval: UInt32 = 3
+  private static let diagnosticBytesPerSample = 256
 
   private let pipelineState: MTLRenderPipelineState
   private let computePipelineState: MTLComputePipelineState
@@ -26,9 +28,10 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   private var lastSimulationTime: Float?
   private var latestContext: PatternSimulationContext?
   private var didLogRaymarchConfiguration = false
-  private var didLogFirstCompletion = false
+  private var didLogCompositeConfiguration = false
   private var hasRaymarchContent = false
   private var prepassFrameIndex: UInt32 = 0
+  private var computeDispatchCount: UInt64 = 0
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
@@ -108,24 +111,21 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
       threadsPerThreadgroup: MTLSize(width: threadWidth, height: threadHeight, depth: 1))
     encoder.endEncoding()
     hasRaymarchContent = true
+    computeDispatchCount &+= 1
 
-    if !didLogFirstCompletion {
-      didLogFirstCompletion = true
-      commandBuffer.addCompletedHandler { buffer in
-        if buffer.status == .completed {
-          print("[InfiniteMandelbulbZoom] First offscreen frame completed on GPU")
-        } else {
-          print(
-            "[InfiniteMandelbulbZoom] First offscreen frame failed: status=\(buffer.status.rawValue) error=\(String(describing: buffer.error))"
-          )
-        }
-      }
+    let dispatchID = computeDispatchCount
+    if dispatchID <= 3 || dispatchID.isMultiple(of: 120) {
+      encodeDiagnostics(
+        commandBuffer: commandBuffer,
+        dispatchID: dispatchID,
+        viewCount: viewCount,
+        uniforms: uniforms)
     }
 
     if !didLogRaymarchConfiguration {
       didLogRaymarchConfiguration = true
       print(
-        "[InfiniteMandelbulbZoom] Offscreen raymarch active: \(Self.raymarchWidth)x\(Self.raymarchHeight)x\(viewCount), updating every \(Self.raymarchUpdateInterval) frames"
+        "[InfiniteMandelbulbZoom] Offscreen raymarch active: \(Self.raymarchWidth)x\(Self.raymarchHeight)x\(viewCount), updating every \(Self.raymarchUpdateInterval) frames, texture=\(raymarchTexture.pixelFormat.rawValue)/storage=\(raymarchTexture.storageMode.rawValue)/hazard=\(raymarchTexture.hazardTrackingMode.rawValue)"
       )
     }
   }
@@ -143,6 +143,104 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
       &uniforms, length: MemoryLayout<InfiniteMandelbulbZoomUniforms>.stride, index: 0)
     encoder.setFragmentTexture(raymarchTexture, index: 0)
     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+
+    if !didLogCompositeConfiguration {
+      didLogCompositeConfiguration = true
+      let viewportSummary = context.viewData.viewports.enumerated().map { index, viewport in
+        "v\(index)=\(Int(viewport.width))x\(Int(viewport.height))"
+      }.joined(separator: ",")
+      print(
+        "[InfiniteMandelbulbZoom] Composite encoded: views=\(viewCount), vertexAmplification=\(context.viewData.supportsVertexAmplification), layers=\(context.viewData.renderTargetLayers), viewports=[\(viewportSummary)]"
+      )
+    }
+  }
+
+  private func encodeDiagnostics(
+    commandBuffer: MTLCommandBuffer,
+    dispatchID: UInt64,
+    viewCount: Int,
+    uniforms: InfiniteMandelbulbZoomUniforms
+  ) {
+    let samplePoints: [(String, MTLOrigin)] = [
+      ("C", MTLOrigin(x: Self.raymarchWidth / 2, y: Self.raymarchHeight / 2, z: 0)),
+      ("L", MTLOrigin(x: Self.raymarchWidth / 4, y: Self.raymarchHeight / 2, z: 0)),
+      ("R", MTLOrigin(x: Self.raymarchWidth * 3 / 4, y: Self.raymarchHeight / 2, z: 0)),
+      ("B", MTLOrigin(x: Self.raymarchWidth / 2, y: Self.raymarchHeight / 4, z: 0)),
+      ("T", MTLOrigin(x: Self.raymarchWidth / 2, y: Self.raymarchHeight * 3 / 4, z: 0)),
+    ]
+    let sampleCount = samplePoints.count * viewCount
+    guard
+      let readbackBuffer = raymarchTexture.device.makeBuffer(
+        length: sampleCount * Self.diagnosticBytesPerSample,
+        options: .storageModeShared),
+      let blitEncoder = commandBuffer.makeBlitCommandEncoder()
+    else {
+      print("[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) could not allocate readback")
+      return
+    }
+
+    readbackBuffer.label = "Infinite Mandelbulb Zoom Diagnostic #\(dispatchID)"
+    blitEncoder.label = "Infinite Mandelbulb Zoom Diagnostic Readback"
+    for slice in 0..<viewCount {
+      for (pointIndex, sample) in samplePoints.enumerated() {
+        let offset = (slice * samplePoints.count + pointIndex)
+          * Self.diagnosticBytesPerSample
+        blitEncoder.copy(
+          from: raymarchTexture,
+          sourceSlice: slice,
+          sourceLevel: 0,
+          sourceOrigin: sample.1,
+          sourceSize: MTLSize(width: 1, height: 1, depth: 1),
+          to: readbackBuffer,
+          destinationOffset: offset,
+          destinationBytesPerRow: Self.diagnosticBytesPerSample,
+          destinationBytesPerImage: Self.diagnosticBytesPerSample)
+      }
+    }
+    blitEncoder.endEncoding()
+
+    let encodedAt = ProcessInfo.processInfo.systemUptime
+    let qualitySummary = "steps=\(uniforms.maxRaySteps),iterations=\(uniforms.fractalIterations),phase=\(String(format: "%.4f", uniforms.zoomPhase))"
+    commandBuffer.addScheduledHandler { buffer in
+      let delayMilliseconds = (ProcessInfo.processInfo.systemUptime - encodedAt) * 1_000
+      print(
+        "[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) scheduled: status=\(buffer.status.rawValue), queueDelayMs=\(String(format: "%.2f", delayMilliseconds)), \(qualitySummary)"
+      )
+    }
+    commandBuffer.addCompletedHandler { buffer in
+      let wallMilliseconds = (ProcessInfo.processInfo.systemUptime - encodedAt) * 1_000
+      let gpuMilliseconds = max(0, buffer.gpuEndTime - buffer.gpuStartTime) * 1_000
+      let errorSummary = buffer.error.map {
+        "\(($0 as NSError).domain)(\(($0 as NSError).code)): \($0.localizedDescription)"
+      } ?? "none"
+      let texelSummary = Self.makeTexelSummary(
+        buffer: readbackBuffer,
+        viewCount: viewCount,
+        sampleNames: samplePoints.map(\.0))
+      print(
+        "[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) completed: status=\(buffer.status.rawValue), wallMs=\(String(format: "%.2f", wallMilliseconds)), gpuMs=\(String(format: "%.2f", gpuMilliseconds)), error=\(errorSummary)"
+      )
+      print("[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) texels: \(texelSummary)")
+    }
+  }
+
+  private static func makeTexelSummary(
+    buffer: MTLBuffer,
+    viewCount: Int,
+    sampleNames: [String]
+  ) -> String {
+    (0..<viewCount).map { slice in
+      let samples = sampleNames.enumerated().map { sampleIndex, name in
+        let offset = (slice * sampleNames.count + sampleIndex) * diagnosticBytesPerSample
+        let values = buffer.contents().advanced(by: offset)
+          .bindMemory(to: UInt16.self, capacity: 4)
+        let rgba = (0..<4).map { component in
+          Float(Float16(bitPattern: values[component]))
+        }
+        return "\(name)=(\(rgba.map { String(format: "%.4f", $0) }.joined(separator: ",")))"
+      }.joined(separator: " ")
+      return "eye\(slice){\(samples)}"
+    }.joined(separator: "; ")
   }
 
   private func makeUniforms(viewCount: Int) -> InfiniteMandelbulbZoomUniforms {

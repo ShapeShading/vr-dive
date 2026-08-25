@@ -9,7 +9,7 @@ struct InfiniteMandelbulbZoomUniforms {
   uint maxRaySteps;
   uint fractalIterations;
   float surfaceEpsilon;
-  float padding;
+  float compositeDepth;
   float4 cameraAndScale;
 };
 
@@ -34,7 +34,10 @@ vertex InfiniteMandelbulbZoomVertexOut infiniteMandelbulbZoomVertex(
     float2(-1.0f, -1.0f), float2(3.0f, -1.0f), float2(-1.0f, 3.0f)
   };
   InfiniteMandelbulbZoomVertexOut out;
-  out.position = float4(positions[vertexID], 0.0f, 1.0f);
+  // CompositorServices consumes the depth attachment on physical hardware for
+  // reprojection. Zero is the reverse-Z far-plane clear value, so a full-screen
+  // triangle at zero can have colored drawable texels yet remain unpresentable.
+  out.position = float4(positions[vertexID], uniforms.compositeDepth, 1.0f);
   out.uv = out.position.xy * 0.5f + 0.5f;
   out.viewIndex = min((uint)amplificationID, max(uniforms.viewCount, 1u) - 1u);
   return out;

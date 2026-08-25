@@ -582,7 +582,8 @@ class Renderer {
       encodedPattern.encodePostpass(
         commandBuffer: commandBuffer,
         context: encodedContext,
-        colorTexture: colorTexture)
+        colorTexture: colorTexture,
+        depthTexture: drawable.depthTextures.first)
     }
     return commandBuffer
   }
@@ -706,6 +707,7 @@ class Renderer {
       viewports: Array(viewports.prefix(desiredViewCount)),
       renderTargetLayers: Array(renderTargetLayers.prefix(desiredViewCount)),
       viewToWorldTransforms: Array(viewToWorldTransforms.prefix(desiredViewCount)),
+      depthRange: drawable.depthRange,
       viewCount: desiredViewCount,
       supportsVertexAmplification: supportsVertexAmplification
     )

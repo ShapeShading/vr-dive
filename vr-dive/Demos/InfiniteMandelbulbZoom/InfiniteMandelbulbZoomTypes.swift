@@ -9,7 +9,10 @@ struct InfiniteMandelbulbZoomUniforms {
   var maxRaySteps: UInt32
   var fractalIterations: UInt32
   var surfaceEpsilon: Float
-  var padding: Float = 0
+  /// Reverse-Z depth written by the screen-space composite pass. A value of
+  /// exactly zero is the far-plane clear value and is not valid presentation
+  /// geometry for CompositorServices reprojection on device.
+  var compositeDepth: Float
   /// Canonical view-space camera position and fractal scale. Keeping the scene
   /// view-relative prevents navigation/world-origin changes from moving it off-screen.
   var cameraAndScale: SIMD4<Float>

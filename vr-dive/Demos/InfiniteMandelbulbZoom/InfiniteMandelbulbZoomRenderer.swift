@@ -107,7 +107,9 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     prepassFrameIndex &+= 1
     guard shouldUpdate else { return }
 
-    var uniforms = makeUniforms(viewCount: viewCount)
+    var uniforms = makeUniforms(
+      viewCount: viewCount,
+      depthRange: context.viewData.depthRange)
 
     guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
     encoder.label = "Infinite Mandelbulb Zoom Raymarch"
@@ -145,7 +147,9 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
     let viewCount = min(max(context.viewData.viewCount, 1), maxViewCount)
-    var uniforms = makeUniforms(viewCount: viewCount)
+    var uniforms = makeUniforms(
+      viewCount: viewCount,
+      depthRange: context.viewData.depthRange)
 
     context.applyViewConfiguration(on: encoder)
     encoder.setRenderPipelineState(pipelineState)
@@ -164,7 +168,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
         "v\(index)=\(Int(viewport.width))x\(Int(viewport.height))"
       }.joined(separator: ",")
       print(
-        "[InfiniteMandelbulbZoom] Composite encoded: views=\(viewCount), vertexAmplification=\(context.viewData.supportsVertexAmplification), layers=\(context.viewData.renderTargetLayers), viewports=[\(viewportSummary)]"
+        "[InfiniteMandelbulbZoom] Composite encoded: views=\(viewCount), vertexAmplification=\(context.viewData.supportsVertexAmplification), layers=\(context.viewData.renderTargetLayers), viewports=[\(viewportSummary)], depthRange=\(context.viewData.depthRange), compositeDepth=\(String(format: "%.6f", uniforms.compositeDepth))"
       )
     }
   }
@@ -172,7 +176,8 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   func encodePostpass(
     commandBuffer: MTLCommandBuffer,
     context: PatternRenderContext,
-    colorTexture: MTLTexture
+    colorTexture: MTLTexture,
+    depthTexture: MTLTexture?
   ) {
     postpassFrameCount &+= 1
     let frameID = postpassFrameCount
@@ -192,16 +197,26 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     ]
     let sampleCount = samplePoints.count * viewCount
     guard
-      let readbackBuffer = colorTexture.device.makeBuffer(
+      let colorReadbackBuffer = colorTexture.device.makeBuffer(
         length: sampleCount * Self.diagnosticBytesPerSample,
-        options: .storageModeShared),
-      let blitEncoder = commandBuffer.makeBlitCommandEncoder()
+        options: .storageModeShared)
     else {
       print("[InfiniteMandelbulbZoom] Drawable #\(frameID) could not allocate readback")
       return
     }
 
-    readbackBuffer.label = "Infinite Mandelbulb Zoom Drawable #\(frameID)"
+    let depthReadbackBuffer = depthTexture.flatMap {
+      $0.device.makeBuffer(
+        length: sampleCount * Self.diagnosticBytesPerSample,
+        options: .storageModeShared)
+    }
+    guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else {
+      print("[InfiniteMandelbulbZoom] Drawable #\(frameID) could not create blit encoder")
+      return
+    }
+
+    colorReadbackBuffer.label = "Infinite Mandelbulb Zoom Drawable Color #\(frameID)"
+    depthReadbackBuffer?.label = "Infinite Mandelbulb Zoom Drawable Depth #\(frameID)"
     blitEncoder.label = "Infinite Mandelbulb Zoom Drawable Readback"
     for slice in 0..<viewCount {
       for (pointIndex, sample) in samplePoints.enumerated() {
@@ -213,10 +228,22 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
           sourceLevel: 0,
           sourceOrigin: sample.1,
           sourceSize: MTLSize(width: 1, height: 1, depth: 1),
-          to: readbackBuffer,
+          to: colorReadbackBuffer,
           destinationOffset: offset,
           destinationBytesPerRow: Self.diagnosticBytesPerSample,
           destinationBytesPerImage: Self.diagnosticBytesPerSample)
+        if let depthTexture, let depthReadbackBuffer {
+          blitEncoder.copy(
+            from: depthTexture,
+            sourceSlice: slice,
+            sourceLevel: 0,
+            sourceOrigin: sample.1,
+            sourceSize: MTLSize(width: 1, height: 1, depth: 1),
+            to: depthReadbackBuffer,
+            destinationOffset: offset,
+            destinationBytesPerRow: Self.diagnosticBytesPerSample,
+            destinationBytesPerImage: Self.diagnosticBytesPerSample)
+        }
       }
     }
     blitEncoder.endEncoding()
@@ -225,13 +252,22 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     commandBuffer.addCompletedHandler { [fragmentCoverageBuffer] buffer in
       let coverage = fragmentCoverageBuffer.contents().load(as: UInt32.self)
       let texelSummary = Self.makeTexelSummary(
-        buffer: readbackBuffer,
+        buffer: colorReadbackBuffer,
         viewCount: viewCount,
         sampleNames: samplePoints.map(\.0))
       print(
         "[InfiniteMandelbulbZoom] Drawable #\(frameID) completed: status=\(buffer.status.rawValue), fragmentCoverage=\(coverage), target=\(textureSummary)"
       )
       print("[InfiniteMandelbulbZoom] Drawable #\(frameID) texels: \(texelSummary)")
+      if let depthReadbackBuffer {
+        let depthSummary = Self.makeDepthSummary(
+          buffer: depthReadbackBuffer,
+          viewCount: viewCount,
+          sampleNames: samplePoints.map(\.0))
+        print("[InfiniteMandelbulbZoom] Drawable #\(frameID) depths: \(depthSummary)")
+      } else {
+        print("[InfiniteMandelbulbZoom] Drawable #\(frameID) depths: unavailable")
+      }
     }
   }
 
@@ -323,7 +359,25 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     }.joined(separator: "; ")
   }
 
-  private func makeUniforms(viewCount: Int) -> InfiniteMandelbulbZoomUniforms {
+  private static func makeDepthSummary(
+    buffer: MTLBuffer,
+    viewCount: Int,
+    sampleNames: [String]
+  ) -> String {
+    (0..<viewCount).map { slice in
+      let samples = sampleNames.enumerated().map { sampleIndex, name in
+        let offset = (slice * sampleNames.count + sampleIndex) * diagnosticBytesPerSample
+        let depth = buffer.contents().advanced(by: offset).load(as: Float.self)
+        return "\(name)=\(String(format: "%.6f", depth))"
+      }.joined(separator: " ")
+      return "eye\(slice){\(samples)}"
+    }.joined(separator: "; ")
+  }
+
+  private func makeUniforms(
+    viewCount: Int,
+    depthRange: SIMD2<Float>
+  ) -> InfiniteMandelbulbZoomUniforms {
     let settings = latestContext
     let quality = settings?.infiniteZoomQuality ?? .balanced
     return InfiniteMandelbulbZoomUniforms(
@@ -334,7 +388,24 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
       maxRaySteps: quality.raySteps,
       fractalIterations: quality.fractalIterations,
       surfaceEpsilon: quality == .detailed ? 0.0009 : 0.0013,
+      compositeDepth: Self.reverseZDepth(
+        distance: 2.75,
+        far: depthRange.x,
+        near: depthRange.y),
       cameraAndScale: SIMD4<Float>(0, 0, 2.75, 1.0))
+  }
+
+  /// Maps a view-space distance to Metal's [0, 1] reverse-Z depth range.
+  /// Keeping the composite plane away from exact zero lets the device
+  /// compositor reconstruct valid geometry for late-stage reprojection.
+  private static func reverseZDepth(distance: Float, far: Float, near: Float) -> Float {
+    guard distance.isFinite, far.isFinite, near.isFinite,
+      distance > 0, far > near, near > 0
+    else {
+      return 0.02
+    }
+    let depth = near * (far / distance - 1) / (far - near)
+    return min(max(depth, 0.001), 0.999)
   }
 
 }
@@ -360,11 +431,12 @@ extension InfiniteMandelbulbZoomRenderer {
 
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
-    // This is a full-screen ray-marching pass: its triangle lies at depth zero,
-    // the same as the reverse-Z clear value. A greater test would reject every
-    // fragment and present a black immersive view.
+    // The physical Vision Pro compositor uses this depth texture for late-stage
+    // reprojection. Leaving the full-screen pass at the reverse-Z clear value
+    // (zero/far plane) produces valid color texels that are discarded at
+    // presentation. Always accept the pass and store its valid plane depth.
     descriptor.depthCompareFunction = .always
-    descriptor.isDepthWriteEnabled = false
+    descriptor.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: descriptor)!
   }
 }

@@ -18,6 +18,8 @@ struct ViewRenderingData {
   var viewports: [MTLViewport]
   var renderTargetLayers: [UInt32]
   var viewToWorldTransforms: [simd_float4x4]
+  /// Compositor clipping distances in reverse-Z order: far, then near.
+  var depthRange: SIMD2<Float>
   var viewCount: Int
   var supportsVertexAmplification: Bool
 }
@@ -88,7 +90,8 @@ protocol VisualPatternController: AnyObject {
   func encodePostpass(
     commandBuffer: MTLCommandBuffer,
     context: PatternRenderContext,
-    colorTexture: MTLTexture)
+    colorTexture: MTLTexture,
+    depthTexture: MTLTexture?)
   func resetToInitialState()
 
   /// Optional pre-warm hook. Called once at startup on the CPU thread to force
@@ -103,7 +106,8 @@ extension VisualPatternController {
   func encodePostpass(
     commandBuffer: MTLCommandBuffer,
     context: PatternRenderContext,
-    colorTexture: MTLTexture
+    colorTexture: MTLTexture,
+    depthTexture: MTLTexture?
   ) {}
   func warmupPipeline(device: MTLDevice, commandQueue: MTLCommandQueue) {}
 }

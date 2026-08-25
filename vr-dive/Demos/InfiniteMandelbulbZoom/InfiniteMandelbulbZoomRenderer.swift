@@ -129,7 +129,7 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
       generation: generation,
       maxRaySteps: quality.raySteps,
       fractalIterations: quality.fractalIterations,
-      surfaceEpsilon: quality == .detailed ? 0.0010 : 0.0015,
+      surfaceEpsilon: quality.surfaceEpsilon,
       boxScale: boxScale,
       padding: 0,
       objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0),

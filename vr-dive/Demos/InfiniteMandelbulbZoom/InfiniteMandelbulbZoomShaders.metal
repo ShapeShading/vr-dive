@@ -193,7 +193,9 @@ static float3 imzNormal(
   float3 p,
   constant InfiniteMandelbulbZoomUniforms &uniforms)
 {
-  float epsilon = max(uniforms.surfaceEpsilon * 1.7f, 0.0012f);
+  // Preserve the extra surface detail selected by the quality preset. The old
+  // 0.0012 floor made Balanced and Detailed normals almost indistinguishable.
+  float epsilon = max(uniforms.surfaceEpsilon * 1.35f, 0.00045f);
   const float2 k = float2(1.0f, -1.0f);
   float3 gradient =
     k.xyy * imzMap(p + k.xyy * epsilon, uniforms).distance

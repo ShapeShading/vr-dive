@@ -14,8 +14,3 @@ struct InfiniteMandelbulbZoomUniforms {
   /// view-relative prevents navigation/world-origin changes from moving it off-screen.
   var cameraAndScale: SIMD4<Float>
 }
-
-struct InfiniteMandelbulbZoomViewUniform {
-  var viewToWorld: simd_float4x4
-  var projectionInverse: simd_float4x4
-}

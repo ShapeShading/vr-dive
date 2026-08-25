@@ -13,11 +13,6 @@ struct InfiniteMandelbulbZoomUniforms {
   float4 cameraAndScale;
 };
 
-struct InfiniteMandelbulbZoomViewUniform {
-  float4x4 viewToWorld;
-  float4x4 projectionInverse;
-};
-
 struct InfiniteMandelbulbZoomVertexOut {
   float4 position [[position]];
   float2 uv;
@@ -177,20 +172,15 @@ static float3 imzPalette(float orbit) {
 
 static float4 imzRender(
   float2 ndc,
-  constant InfiniteMandelbulbZoomUniforms &u,
-  InfiniteMandelbulbZoomViewUniform view)
+  constant InfiniteMandelbulbZoomUniforms &u)
 {
-  float4 viewTarget = view.projectionInverse * float4(ndc, 1.0f, 1.0f);
-  float safeW = abs(viewTarget.w) < 1.0e-6f ? 1.0e-6f : viewTarget.w;
-  viewTarget /= safeW;
-  // This is a full-screen zoom rather than a world-anchored object. March in
-  // canonical view space so rig navigation or a changed AR world origin cannot
-  // leave the Mandelbulb behind the viewer. The projection still preserves each
-  // eye's asymmetric frustum.
+  // This pattern is a full-screen zoom rather than a world-anchored object. Use
+  // a canonical screen-space camera instead of unprojecting a compositor matrix:
+  // reverse-Z/infinite-far projections can produce w == 0 on device and turn the
+  // entire image into near-black sphere misses even though the compute pass ran.
   float scale = max(u.cameraAndScale.w, 0.01f);
   float3 ro = u.cameraAndScale.xyz / scale;
-  float3 rd = normalize(viewTarget.xyz);
-  rd.z = -abs(rd.z);
+  float3 rd = normalize(float3(ndc.x * 0.80f, ndc.y * 0.70f, -1.0f));
 
   float nearT, farT;
   if (!imzSphereHit(ro, rd, nearT, farT)) {
@@ -249,7 +239,6 @@ static float4 imzRender(
 /// black clear color visible and eventually risking a watchdog reset.
 kernel void infiniteMandelbulbZoomCompute(
   constant InfiniteMandelbulbZoomUniforms &u [[buffer(0)]],
-  constant InfiniteMandelbulbZoomViewUniform *views [[buffer(1)]],
   texture2d_array<float, access::write> output [[texture(0)]],
   uint3 gid [[thread_position_in_grid]])
 {
@@ -257,7 +246,7 @@ kernel void infiniteMandelbulbZoomCompute(
       || gid.z >= min(u.viewCount, output.get_array_size())) return;
   float2 uv = (float2(gid.xy) + 0.5f) / float2(output.get_width(), output.get_height());
   float2 ndc = uv * 2.0f - 1.0f;
-  output.write(imzRender(ndc, u, views[gid.z]), gid.xy, gid.z);
+  output.write(imzRender(ndc, u), gid.xy, gid.z);
 }
 
 fragment float4 infiniteMandelbulbZoomFragment(

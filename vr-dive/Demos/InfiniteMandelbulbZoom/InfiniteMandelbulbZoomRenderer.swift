@@ -11,8 +11,9 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   let identifier: VisualPatternKind = .infiniteMandelbulbZoom
   let preferredClearColor = MTLClearColor(red: 0.002, green: 0.004, blue: 0.012, alpha: 1)
 
-  private static let raymarchWidth = 384
-  private static let raymarchHeight = 304
+  private static let raymarchWidth = 256
+  private static let raymarchHeight = 200
+  private static let raymarchUpdateInterval: UInt32 = 3
 
   private let pipelineState: MTLRenderPipelineState
   private let computePipelineState: MTLComputePipelineState
@@ -25,6 +26,9 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   private var lastSimulationTime: Float?
   private var latestContext: PatternSimulationContext?
   private var didLogRaymarchConfiguration = false
+  private var didLogFirstCompletion = false
+  private var hasRaymarchContent = false
+  private var prepassFrameIndex: UInt32 = 0
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
     self.maxViewCount = max(1, maxViewCount)
@@ -77,57 +81,58 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     zoomPhase = 0
     generation = 0
     lastSimulationTime = nil
+    hasRaymarchContent = false
   }
 
   func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext) {
-    var views = makeViewUniforms(context: context)
-    if views.isEmpty {
-      views = [
-        InfiniteMandelbulbZoomViewUniform(
-          viewToWorld: matrix_identity_float4x4,
-          projectionInverse: matrix_identity_float4x4)
-      ]
-    }
-    var uniforms = makeUniforms(viewCount: views.count)
+    let viewCount = min(max(context.viewData.viewCount, 1), maxViewCount)
+    let shouldUpdate = !hasRaymarchContent
+      || prepassFrameIndex.isMultiple(of: Self.raymarchUpdateInterval)
+    prepassFrameIndex &+= 1
+    guard shouldUpdate else { return }
+
+    var uniforms = makeUniforms(viewCount: viewCount)
 
     guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
     encoder.label = "Infinite Mandelbulb Zoom Raymarch"
     encoder.setComputePipelineState(computePipelineState)
     encoder.setBytes(
       &uniforms, length: MemoryLayout<InfiniteMandelbulbZoomUniforms>.stride, index: 0)
-    views.withUnsafeBytes { bytes in
-      guard let base = bytes.baseAddress else { return }
-      encoder.setBytes(base, length: bytes.count, index: 1)
-    }
     encoder.setTexture(raymarchTexture, index: 0)
 
     let threadWidth = computePipelineState.threadExecutionWidth
     let threadHeight = max(
       1, min(8, computePipelineState.maxTotalThreadsPerThreadgroup / threadWidth))
     encoder.dispatchThreads(
-      MTLSize(width: Self.raymarchWidth, height: Self.raymarchHeight, depth: views.count),
+      MTLSize(width: Self.raymarchWidth, height: Self.raymarchHeight, depth: viewCount),
       threadsPerThreadgroup: MTLSize(width: threadWidth, height: threadHeight, depth: 1))
     encoder.endEncoding()
+    hasRaymarchContent = true
+
+    if !didLogFirstCompletion {
+      didLogFirstCompletion = true
+      commandBuffer.addCompletedHandler { buffer in
+        if buffer.status == .completed {
+          print("[InfiniteMandelbulbZoom] First offscreen frame completed on GPU")
+        } else {
+          print(
+            "[InfiniteMandelbulbZoom] First offscreen frame failed: status=\(buffer.status.rawValue) error=\(String(describing: buffer.error))"
+          )
+        }
+      }
+    }
 
     if !didLogRaymarchConfiguration {
       didLogRaymarchConfiguration = true
       print(
-        "[InfiniteMandelbulbZoom] Offscreen raymarch active: \(Self.raymarchWidth)x\(Self.raymarchHeight)x\(views.count)"
+        "[InfiniteMandelbulbZoom] Offscreen raymarch active: \(Self.raymarchWidth)x\(Self.raymarchHeight)x\(viewCount), updating every \(Self.raymarchUpdateInterval) frames"
       )
     }
   }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
-    var views = makeViewUniforms(context: context)
-    if views.isEmpty {
-      views = [
-        InfiniteMandelbulbZoomViewUniform(
-          viewToWorld: matrix_identity_float4x4,
-          projectionInverse: matrix_identity_float4x4)
-      ]
-    }
-
-    var uniforms = makeUniforms(viewCount: views.count)
+    let viewCount = min(max(context.viewData.viewCount, 1), maxViewCount)
+    var uniforms = makeUniforms(viewCount: viewCount)
 
     context.applyViewConfiguration(on: encoder)
     encoder.setRenderPipelineState(pipelineState)
@@ -154,21 +159,6 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
       cameraAndScale: SIMD4<Float>(0, 0, 2.75, 1.0))
   }
 
-  private func makeViewUniforms(context: PatternRenderContext) -> [InfiniteMandelbulbZoomViewUniform] {
-    let count = min(context.viewData.viewCount, maxViewCount)
-    guard count > 0 else { return [] }
-    return (0..<count).map { index in
-      let viewToWorld = context.viewData.viewToWorldTransforms.indices.contains(index)
-        ? context.viewData.viewToWorldTransforms[index] : matrix_identity_float4x4
-      let viewProjection = context.viewData.viewProjectionMatrices.indices.contains(index)
-        ? context.viewData.viewProjectionMatrices[index] : matrix_identity_float4x4
-      let projection = viewProjection * viewToWorld
-      let determinant = simd_determinant(projection)
-      return InfiniteMandelbulbZoomViewUniform(
-        viewToWorld: viewToWorld,
-        projectionInverse: abs(determinant) > 1e-6 ? simd_inverse(projection) : matrix_identity_float4x4)
-    }
-  }
 }
 
 private enum InfiniteMandelbulbZoomRendererError: Error {

@@ -931,17 +931,17 @@ enum InfiniteZoomQuality: String, CaseIterable, Identifiable {
 
   var raySteps: UInt32 {
     switch self {
-    case .performance: return 32
-    case .balanced: return 44
-    case .detailed: return 56
+    case .performance: return 24
+    case .balanced: return 32
+    case .detailed: return 44
     }
   }
 
   var fractalIterations: UInt32 {
     switch self {
-    case .performance: return 5
-    case .balanced: return 6
-    case .detailed: return 8
+    case .performance: return 4
+    case .balanced: return 5
+    case .detailed: return 6
     }
   }
 }

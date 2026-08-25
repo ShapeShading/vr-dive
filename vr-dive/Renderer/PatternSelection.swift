@@ -931,17 +931,25 @@ enum InfiniteZoomQuality: String, CaseIterable, Identifiable {
 
   var raySteps: UInt32 {
     switch self {
-    case .performance: return 48
-    case .balanced: return 64
+    case .performance: return 28
+    case .balanced: return 48
     case .detailed: return 80
     }
   }
 
   var fractalIterations: UInt32 {
     switch self {
-    case .performance: return 6
-    case .balanced: return 8
+    case .performance: return 5
+    case .balanced: return 7
     case .detailed: return 10
+    }
+  }
+
+  var surfaceEpsilon: Float {
+    switch self {
+    case .performance: return 0.0016
+    case .balanced: return 0.0009
+    case .detailed: return 0.00045
     }
   }
 }

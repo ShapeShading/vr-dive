@@ -1,73 +1,43 @@
-import Foundation
 import Metal
 import simd
 
-/// An endlessly rebased zoom into a deliberately self-similar Mandelbulb hierarchy.
-///
-/// `zoomPhase` never grows beyond one. At a layer boundary the renderer increments a
-/// wrapping generation counter and returns the GPU to canonical local coordinates.
-/// Consequently shader arithmetic retains the same precision at layer one and at a
-/// conceptually unlimited depth.
+/// A world-space Dynamic Box whose interior contains an endlessly rebased
+/// Mandelbulb hierarchy. The box remains fixed in the scene while the shared
+/// pattern-navigation transform lets the controller move through its contents.
 final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
   let identifier: VisualPatternKind = .infiniteMandelbulbZoom
-  let preferredClearColor = MTLClearColor(red: 0.002, green: 0.004, blue: 0.012, alpha: 1)
-
-  private static let raymarchWidth = 256
-  private static let raymarchHeight = 200
-  private static let raymarchUpdateInterval: UInt32 = 3
-  private static let diagnosticBytesPerSample = 256
+  let preferredClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
   private let pipelineState: MTLRenderPipelineState
-  private let computePipelineState: MTLComputePipelineState
   private let depthStencilState: MTLDepthStencilState
-  private let raymarchTexture: MTLTexture
-  private let fragmentCoverageBuffer: MTLBuffer
-  private let maxViewCount: Int
+  private let vertexBuffer: MTLBuffer
+  private let indexBuffer: MTLBuffer
+  private let indexCount: Int
+
+  // Match Dynamic Box so this pattern has the same placement, scale and
+  // controller-navigation behavior as the other box-contained demos.
+  private let boxScale: Float = 0.84
+  private let objectCenter = SIMD3<Float>(0, -0.05, -1.1)
 
   private var zoomPhase: Float = 0
   private var generation: UInt32 = 0
   private var lastSimulationTime: Float?
   private var latestContext: PatternSimulationContext?
-  private var didLogRaymarchConfiguration = false
-  private var didLogCompositeConfiguration = false
-  private var hasRaymarchContent = false
-  private var prepassFrameIndex: UInt32 = 0
-  private var computeDispatchCount: UInt64 = 0
-  private var postpassFrameCount: UInt64 = 0
+  private var didLogConfiguration = false
 
   init(device: MTLDevice, library: MTLLibrary, maxViewCount: Int) throws {
-    self.maxViewCount = max(1, maxViewCount)
+    let geometry = Self.makeBox(
+      device: device,
+      localHalfExtents: SIMD3<Float>(0.95, 0.95, 1.25) * 1.02)
+    vertexBuffer = geometry.vertexBuffer
+    indexBuffer = geometry.indexBuffer
+    indexCount = geometry.indexCount
+
     pipelineState = try Self.makePipelineState(
-      device: device, library: library, maxViewCount: self.maxViewCount)
-    computePipelineState = try device.makeComputePipelineState(
-      function: library.makeFunction(name: "infiniteMandelbulbZoomCompute")!)
+      device: device,
+      library: library,
+      maxViewCount: max(1, maxViewCount))
     depthStencilState = Self.makeDepthStencilState(device: device)
-
-    let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-      pixelFormat: .rgba16Float,
-      width: Self.raymarchWidth,
-      height: Self.raymarchHeight,
-      mipmapped: false)
-    textureDescriptor.textureType = .type2DArray
-    textureDescriptor.arrayLength = self.maxViewCount
-    textureDescriptor.storageMode = .private
-    textureDescriptor.usage = [.shaderRead, .shaderWrite]
-    guard let texture = device.makeTexture(descriptor: textureDescriptor) else {
-      throw InfiniteMandelbulbZoomRendererError.textureAllocationFailed
-    }
-    texture.label = "Infinite Mandelbulb Zoom Raymarch"
-    raymarchTexture = texture
-
-    guard
-      let coverageBuffer = device.makeBuffer(
-        length: MemoryLayout<UInt32>.stride,
-        options: .storageModeShared)
-    else {
-      throw InfiniteMandelbulbZoomRendererError.diagnosticBufferAllocationFailed
-    }
-    coverageBuffer.label = "Infinite Mandelbulb Zoom Fragment Coverage"
-    coverageBuffer.contents().storeBytes(of: UInt32(0), as: UInt32.self)
-    fragmentCoverageBuffer = coverageBuffer
   }
 
   func synchronizeState(_ context: PatternSimulationContext) {
@@ -79,9 +49,8 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     guard let lastSimulationTime else { return }
 
     let deltaTime = max(0, min(context.time - lastSimulationTime, 1.0 / 20.0))
-    let delta = deltaTime * context.infiniteZoomRate * max(context.speedMultiplier, 0)
-      * context.infiniteZoomDirection
-    zoomPhase += delta
+    zoomPhase += deltaTime * context.infiniteZoomRate
+      * max(context.speedMultiplier, 0) * context.infiniteZoomDirection
 
     while zoomPhase >= 1 {
       zoomPhase -= 1
@@ -97,345 +66,143 @@ final class InfiniteMandelbulbZoomRenderer: VisualPatternController {
     zoomPhase = 0
     generation = 0
     lastSimulationTime = nil
-    hasRaymarchContent = false
-  }
-
-  func encodeComputePrepass(commandBuffer: MTLCommandBuffer, context: PatternRenderContext) {
-    let viewCount = min(max(context.viewData.viewCount, 1), maxViewCount)
-    let shouldUpdate = !hasRaymarchContent
-      || prepassFrameIndex.isMultiple(of: Self.raymarchUpdateInterval)
-    prepassFrameIndex &+= 1
-    guard shouldUpdate else { return }
-
-    var uniforms = makeUniforms(
-      viewCount: viewCount,
-      depthRange: context.viewData.depthRange)
-
-    guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
-    encoder.label = "Infinite Mandelbulb Zoom Raymarch"
-    encoder.setComputePipelineState(computePipelineState)
-    encoder.setBytes(
-      &uniforms, length: MemoryLayout<InfiniteMandelbulbZoomUniforms>.stride, index: 0)
-    encoder.setTexture(raymarchTexture, index: 0)
-
-    let threadWidth = computePipelineState.threadExecutionWidth
-    let threadHeight = max(
-      1, min(8, computePipelineState.maxTotalThreadsPerThreadgroup / threadWidth))
-    encoder.dispatchThreads(
-      MTLSize(width: Self.raymarchWidth, height: Self.raymarchHeight, depth: viewCount),
-      threadsPerThreadgroup: MTLSize(width: threadWidth, height: threadHeight, depth: 1))
-    encoder.endEncoding()
-    hasRaymarchContent = true
-    computeDispatchCount &+= 1
-
-    let dispatchID = computeDispatchCount
-    if dispatchID <= 3 || dispatchID.isMultiple(of: 120) {
-      encodeDiagnostics(
-        commandBuffer: commandBuffer,
-        dispatchID: dispatchID,
-        viewCount: viewCount,
-        uniforms: uniforms)
-    }
-
-    if !didLogRaymarchConfiguration {
-      didLogRaymarchConfiguration = true
-      print(
-        "[InfiniteMandelbulbZoom] Offscreen raymarch active: \(Self.raymarchWidth)x\(Self.raymarchHeight)x\(viewCount), updating every \(Self.raymarchUpdateInterval) frames, texture=\(raymarchTexture.pixelFormat.rawValue)/storage=\(raymarchTexture.storageMode.rawValue)/hazard=\(raymarchTexture.hazardTrackingMode.rawValue)"
-      )
-    }
   }
 
   func encodeFrame(encoder: MTLRenderCommandEncoder, context: PatternRenderContext) {
-    let viewCount = min(max(context.viewData.viewCount, 1), maxViewCount)
-    var uniforms = makeUniforms(
-      viewCount: viewCount,
-      depthRange: context.viewData.depthRange)
-
-    context.applyViewConfiguration(on: encoder)
     encoder.setRenderPipelineState(pipelineState)
     encoder.setDepthStencilState(depthStencilState)
     encoder.setCullMode(.none)
+    context.applyViewConfiguration(on: encoder)
 
+    var uniforms = makeUniforms(context: context)
+    encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
     encoder.setVertexBytes(
-      &uniforms, length: MemoryLayout<InfiniteMandelbulbZoomUniforms>.stride, index: 0)
-    encoder.setFragmentTexture(raymarchTexture, index: 0)
-    encoder.setFragmentBuffer(fragmentCoverageBuffer, offset: 0, index: 0)
-    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+      &uniforms,
+      length: MemoryLayout<InfiniteMandelbulbZoomUniforms>.stride,
+      index: 1)
 
-    if !didLogCompositeConfiguration {
-      didLogCompositeConfiguration = true
-      let viewportSummary = context.viewData.viewports.enumerated().map { index, viewport in
-        "v\(index)=\(Int(viewport.width))x\(Int(viewport.height))"
-      }.joined(separator: ",")
-      print(
-        "[InfiniteMandelbulbZoom] Composite encoded: views=\(viewCount), vertexAmplification=\(context.viewData.supportsVertexAmplification), layers=\(context.viewData.renderTargetLayers), viewports=[\(viewportSummary)], depthRange=\(context.viewData.depthRange), compositeDepth=\(String(format: "%.6f", uniforms.compositeDepth))"
-      )
+    var viewProjectionMatrices = context.viewData.viewProjectionMatrices
+    if viewProjectionMatrices.isEmpty {
+      viewProjectionMatrices = [matrix_identity_float4x4]
     }
-  }
-
-  func encodePostpass(
-    commandBuffer: MTLCommandBuffer,
-    context: PatternRenderContext,
-    colorTexture: MTLTexture,
-    depthTexture: MTLTexture?
-  ) {
-    postpassFrameCount &+= 1
-    let frameID = postpassFrameCount
-    guard frameID <= 3 || frameID.isMultiple(of: 360) else { return }
-
-    let viewCount = min(
-      max(context.viewData.viewCount, 1),
-      max(min(colorTexture.arrayLength, maxViewCount), 1))
-    let width = colorTexture.width
-    let height = colorTexture.height
-    let samplePoints: [(String, MTLOrigin)] = [
-      ("C", MTLOrigin(x: width / 2, y: height / 2, z: 0)),
-      ("L", MTLOrigin(x: width / 4, y: height / 2, z: 0)),
-      ("R", MTLOrigin(x: width * 3 / 4, y: height / 2, z: 0)),
-      ("B", MTLOrigin(x: width / 2, y: height / 4, z: 0)),
-      ("T", MTLOrigin(x: width / 2, y: height * 3 / 4, z: 0)),
-    ]
-    let sampleCount = samplePoints.count * viewCount
-    guard
-      let colorReadbackBuffer = colorTexture.device.makeBuffer(
-        length: sampleCount * Self.diagnosticBytesPerSample,
-        options: .storageModeShared)
-    else {
-      print("[InfiniteMandelbulbZoom] Drawable #\(frameID) could not allocate readback")
-      return
-    }
-
-    let depthReadbackBuffer = depthTexture.flatMap {
-      $0.device.makeBuffer(
-        length: sampleCount * Self.diagnosticBytesPerSample,
-        options: .storageModeShared)
-    }
-    guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else {
-      print("[InfiniteMandelbulbZoom] Drawable #\(frameID) could not create blit encoder")
-      return
-    }
-
-    colorReadbackBuffer.label = "Infinite Mandelbulb Zoom Drawable Color #\(frameID)"
-    depthReadbackBuffer?.label = "Infinite Mandelbulb Zoom Drawable Depth #\(frameID)"
-    blitEncoder.label = "Infinite Mandelbulb Zoom Drawable Readback"
-    for slice in 0..<viewCount {
-      for (pointIndex, sample) in samplePoints.enumerated() {
-        let offset = (slice * samplePoints.count + pointIndex)
-          * Self.diagnosticBytesPerSample
-        blitEncoder.copy(
-          from: colorTexture,
-          sourceSlice: slice,
-          sourceLevel: 0,
-          sourceOrigin: sample.1,
-          sourceSize: MTLSize(width: 1, height: 1, depth: 1),
-          to: colorReadbackBuffer,
-          destinationOffset: offset,
-          destinationBytesPerRow: Self.diagnosticBytesPerSample,
-          destinationBytesPerImage: Self.diagnosticBytesPerSample)
-        if let depthTexture, let depthReadbackBuffer {
-          blitEncoder.copy(
-            from: depthTexture,
-            sourceSlice: slice,
-            sourceLevel: 0,
-            sourceOrigin: sample.1,
-            sourceSize: MTLSize(width: 1, height: 1, depth: 1),
-            to: depthReadbackBuffer,
-            destinationOffset: offset,
-            destinationBytesPerRow: Self.diagnosticBytesPerSample,
-            destinationBytesPerImage: Self.diagnosticBytesPerSample)
-        }
+    viewProjectionMatrices.withUnsafeBytes { bytes in
+      if let baseAddress = bytes.baseAddress, bytes.count > 0 {
+        encoder.setVertexBytes(baseAddress, length: bytes.count, index: 2)
       }
     }
-    blitEncoder.endEncoding()
 
-    let textureSummary = "\(width)x\(height)x\(viewCount), format=\(colorTexture.pixelFormat.rawValue), storage=\(colorTexture.storageMode.rawValue)"
-    commandBuffer.addCompletedHandler { [fragmentCoverageBuffer] buffer in
-      let coverage = fragmentCoverageBuffer.contents().load(as: UInt32.self)
-      let texelSummary = Self.makeTexelSummary(
-        buffer: colorReadbackBuffer,
-        viewCount: viewCount,
-        sampleNames: samplePoints.map(\.0))
-      print(
-        "[InfiniteMandelbulbZoom] Drawable #\(frameID) completed: status=\(buffer.status.rawValue), fragmentCoverage=\(coverage), target=\(textureSummary)"
-      )
-      print("[InfiniteMandelbulbZoom] Drawable #\(frameID) texels: \(texelSummary)")
-      if let depthReadbackBuffer {
-        let depthSummary = Self.makeDepthSummary(
-          buffer: depthReadbackBuffer,
-          viewCount: viewCount,
-          sampleNames: samplePoints.map(\.0))
-        print("[InfiniteMandelbulbZoom] Drawable #\(frameID) depths: \(depthSummary)")
-      } else {
-        print("[InfiniteMandelbulbZoom] Drawable #\(frameID) depths: unavailable")
+    encoder.setFragmentBytes(
+      &uniforms,
+      length: MemoryLayout<InfiniteMandelbulbZoomUniforms>.stride,
+      index: 0)
+
+    var viewToWorldTransforms = context.viewData.viewToWorldTransforms
+    if viewToWorldTransforms.isEmpty {
+      viewToWorldTransforms = [matrix_identity_float4x4]
+    }
+    viewToWorldTransforms.withUnsafeBytes { bytes in
+      if let baseAddress = bytes.baseAddress, bytes.count > 0 {
+        encoder.setFragmentBytes(baseAddress, length: bytes.count, index: 1)
       }
     }
-  }
 
-  private func encodeDiagnostics(
-    commandBuffer: MTLCommandBuffer,
-    dispatchID: UInt64,
-    viewCount: Int,
-    uniforms: InfiniteMandelbulbZoomUniforms
-  ) {
-    let samplePoints: [(String, MTLOrigin)] = [
-      ("C", MTLOrigin(x: Self.raymarchWidth / 2, y: Self.raymarchHeight / 2, z: 0)),
-      ("L", MTLOrigin(x: Self.raymarchWidth / 4, y: Self.raymarchHeight / 2, z: 0)),
-      ("R", MTLOrigin(x: Self.raymarchWidth * 3 / 4, y: Self.raymarchHeight / 2, z: 0)),
-      ("B", MTLOrigin(x: Self.raymarchWidth / 2, y: Self.raymarchHeight / 4, z: 0)),
-      ("T", MTLOrigin(x: Self.raymarchWidth / 2, y: Self.raymarchHeight * 3 / 4, z: 0)),
-    ]
-    let sampleCount = samplePoints.count * viewCount
-    guard
-      let readbackBuffer = raymarchTexture.device.makeBuffer(
-        length: sampleCount * Self.diagnosticBytesPerSample,
-        options: .storageModeShared),
-      let blitEncoder = commandBuffer.makeBlitCommandEncoder()
-    else {
-      print("[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) could not allocate readback")
-      return
-    }
+    encoder.drawIndexedPrimitives(
+      type: .triangle,
+      indexCount: indexCount,
+      indexType: .uint16,
+      indexBuffer: indexBuffer,
+      indexBufferOffset: 0)
 
-    readbackBuffer.label = "Infinite Mandelbulb Zoom Diagnostic #\(dispatchID)"
-    blitEncoder.label = "Infinite Mandelbulb Zoom Diagnostic Readback"
-    for slice in 0..<viewCount {
-      for (pointIndex, sample) in samplePoints.enumerated() {
-        let offset = (slice * samplePoints.count + pointIndex)
-          * Self.diagnosticBytesPerSample
-        blitEncoder.copy(
-          from: raymarchTexture,
-          sourceSlice: slice,
-          sourceLevel: 0,
-          sourceOrigin: sample.1,
-          sourceSize: MTLSize(width: 1, height: 1, depth: 1),
-          to: readbackBuffer,
-          destinationOffset: offset,
-          destinationBytesPerRow: Self.diagnosticBytesPerSample,
-          destinationBytesPerImage: Self.diagnosticBytesPerSample)
-      }
-    }
-    blitEncoder.endEncoding()
-
-    let encodedAt = ProcessInfo.processInfo.systemUptime
-    let qualitySummary = "steps=\(uniforms.maxRaySteps),iterations=\(uniforms.fractalIterations),phase=\(String(format: "%.4f", uniforms.zoomPhase))"
-    commandBuffer.addScheduledHandler { buffer in
-      let delayMilliseconds = (ProcessInfo.processInfo.systemUptime - encodedAt) * 1_000
+    if !didLogConfiguration {
+      didLogConfiguration = true
       print(
-        "[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) scheduled: status=\(buffer.status.rawValue), queueDelayMs=\(String(format: "%.2f", delayMilliseconds)), \(qualitySummary)"
+        "[InfiniteMandelbulbZoom] World-space box active: center=\(objectCenter), scale=\(boxScale), views=\(context.viewData.viewCount), controllerNavigation=true"
       )
     }
-    commandBuffer.addCompletedHandler { buffer in
-      let wallMilliseconds = (ProcessInfo.processInfo.systemUptime - encodedAt) * 1_000
-      let gpuMilliseconds = max(0, buffer.gpuEndTime - buffer.gpuStartTime) * 1_000
-      let errorSummary = buffer.error.map {
-        "\(($0 as NSError).domain)(\(($0 as NSError).code)): \($0.localizedDescription)"
-      } ?? "none"
-      let texelSummary = Self.makeTexelSummary(
-        buffer: readbackBuffer,
-        viewCount: viewCount,
-        sampleNames: samplePoints.map(\.0))
-      print(
-        "[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) completed: status=\(buffer.status.rawValue), wallMs=\(String(format: "%.2f", wallMilliseconds)), gpuMs=\(String(format: "%.2f", gpuMilliseconds)), error=\(errorSummary)"
-      )
-      print("[InfiniteMandelbulbZoom] Diagnostic #\(dispatchID) texels: \(texelSummary)")
-    }
   }
 
-  private static func makeTexelSummary(
-    buffer: MTLBuffer,
-    viewCount: Int,
-    sampleNames: [String]
-  ) -> String {
-    (0..<viewCount).map { slice in
-      let samples = sampleNames.enumerated().map { sampleIndex, name in
-        let offset = (slice * sampleNames.count + sampleIndex) * diagnosticBytesPerSample
-        let values = buffer.contents().advanced(by: offset)
-          .bindMemory(to: UInt16.self, capacity: 4)
-        let rgba = (0..<4).map { component in
-          Float(Float16(bitPattern: values[component]))
-        }
-        return "\(name)=(\(rgba.map { String(format: "%.4f", $0) }.joined(separator: ",")))"
-      }.joined(separator: " ")
-      return "eye\(slice){\(samples)}"
-    }.joined(separator: "; ")
-  }
-
-  private static func makeDepthSummary(
-    buffer: MTLBuffer,
-    viewCount: Int,
-    sampleNames: [String]
-  ) -> String {
-    (0..<viewCount).map { slice in
-      let samples = sampleNames.enumerated().map { sampleIndex, name in
-        let offset = (slice * sampleNames.count + sampleIndex) * diagnosticBytesPerSample
-        let depth = buffer.contents().advanced(by: offset).load(as: Float.self)
-        return "\(name)=\(String(format: "%.6f", depth))"
-      }.joined(separator: " ")
-      return "eye\(slice){\(samples)}"
-    }.joined(separator: "; ")
-  }
-
-  private func makeUniforms(
-    viewCount: Int,
-    depthRange: SIMD2<Float>
-  ) -> InfiniteMandelbulbZoomUniforms {
-    let settings = latestContext
-    let quality = settings?.infiniteZoomQuality ?? .balanced
+  private func makeUniforms(context: PatternRenderContext) -> InfiniteMandelbulbZoomUniforms {
+    let quality = latestContext?.infiniteZoomQuality ?? .balanced
     return InfiniteMandelbulbZoomUniforms(
       zoomPhase: zoomPhase,
-      zoomDirection: settings?.infiniteZoomDirection ?? 1,
-      viewCount: UInt32(viewCount),
+      viewCount: UInt32(max(context.viewData.viewCount, 1)),
       generation: generation,
       maxRaySteps: quality.raySteps,
       fractalIterations: quality.fractalIterations,
-      surfaceEpsilon: quality == .detailed ? 0.0009 : 0.0013,
-      compositeDepth: Self.reverseZDepth(
-        distance: 2.75,
-        far: depthRange.x,
-        near: depthRange.y),
-      cameraAndScale: SIMD4<Float>(0, 0, 2.75, 1.0))
+      surfaceEpsilon: quality == .detailed ? 0.0010 : 0.0015,
+      boxScale: boxScale,
+      padding: 0,
+      objectCenter: SIMD4<Float>(objectCenter.x, objectCenter.y, objectCenter.z, 0),
+      patternTransform: context.patternNavigationTransform)
   }
-
-  /// Maps a view-space distance to Metal's [0, 1] reverse-Z depth range.
-  /// Keeping the composite plane away from exact zero lets the device
-  /// compositor reconstruct valid geometry for late-stage reprojection.
-  private static func reverseZDepth(distance: Float, far: Float, near: Float) -> Float {
-    guard distance.isFinite, far.isFinite, near.isFinite,
-      distance > 0, far > near, near > 0
-    else {
-      return 0.02
-    }
-    let depth = near * (far / distance - 1) / (far - near)
-    return min(max(depth, 0.001), 0.999)
-  }
-
-}
-
-private enum InfiniteMandelbulbZoomRendererError: Error {
-  case textureAllocationFailed
-  case diagnosticBufferAllocationFailed
 }
 
 extension InfiniteMandelbulbZoomRenderer {
+  fileprivate static func makeBox(
+    device: MTLDevice,
+    localHalfExtents e: SIMD3<Float>
+  ) -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
+    typealias Vertex = MeshVertex
+    let (x, y, z) = (e.x, e.y, e.z)
+    let faces: [(positions: [SIMD3<Float>], normal: SIMD3<Float>)] = [
+      ([[-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]], [0, 0, 1]),
+      ([[x, -y, -z], [-x, -y, -z], [-x, y, -z], [x, y, -z]], [0, 0, -1]),
+      ([[x, -y, z], [x, -y, -z], [x, y, -z], [x, y, z]], [1, 0, 0]),
+      ([[-x, -y, -z], [-x, -y, z], [-x, y, z], [-x, y, -z]], [-1, 0, 0]),
+      ([[-x, y, z], [x, y, z], [x, y, -z], [-x, y, -z]], [0, 1, 0]),
+      ([[-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z]], [0, -1, 0]),
+    ]
+
+    var vertices: [Vertex] = []
+    vertices.reserveCapacity(24)
+    var indices: [UInt16] = []
+    indices.reserveCapacity(36)
+    for face in faces {
+      let base = UInt16(vertices.count)
+      for position in face.positions {
+        vertices.append(Vertex(position: position, normal: face.normal))
+      }
+      indices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
+    }
+
+    let vertexBuffer = device.makeBuffer(
+      bytes: vertices,
+      length: MemoryLayout<Vertex>.stride * vertices.count,
+      options: .storageModeShared)!
+    let indexBuffer = device.makeBuffer(
+      bytes: indices,
+      length: MemoryLayout<UInt16>.stride * indices.count,
+      options: .storageModeShared)!
+    return (vertexBuffer, indexBuffer, indices.count)
+  }
+
   fileprivate static func makePipelineState(
-    device: MTLDevice, library: MTLLibrary, maxViewCount: Int
+    device: MTLDevice,
+    library: MTLLibrary,
+    maxViewCount: Int
   ) throws -> MTLRenderPipelineState {
     let descriptor = MTLRenderPipelineDescriptor()
     descriptor.vertexFunction = library.makeFunction(name: "infiniteMandelbulbZoomVertex")
     descriptor.fragmentFunction = library.makeFunction(name: "infiniteMandelbulbZoomFragment")
     descriptor.colorAttachments[0].pixelFormat = .rgba16Float
     descriptor.depthAttachmentPixelFormat = .depth32Float
-    descriptor.inputPrimitiveTopology = .triangle
-    descriptor.maxVertexAmplificationCount = max(1, maxViewCount)
+
+    let vertexDescriptor = MTLVertexDescriptor()
+    vertexDescriptor.attributes[0].format = .float3
+    vertexDescriptor.attributes[0].offset = 0
+    vertexDescriptor.attributes[0].bufferIndex = 0
+    vertexDescriptor.attributes[1].format = .float3
+    vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
+    vertexDescriptor.attributes[1].bufferIndex = 0
+    vertexDescriptor.layouts[0].stride = MemoryLayout<MeshVertex>.stride
+    descriptor.vertexDescriptor = vertexDescriptor
+    descriptor.maxVertexAmplificationCount = max(maxViewCount, 1)
     return try device.makeRenderPipelineState(descriptor: descriptor)
   }
 
   fileprivate static func makeDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
-    // The physical Vision Pro compositor uses this depth texture for late-stage
-    // reprojection. Leaving the full-screen pass at the reverse-Z clear value
-    // (zero/far plane) produces valid color texels that are discarded at
-    // presentation. Always accept the pass and store its valid plane depth.
-    descriptor.depthCompareFunction = .always
+    descriptor.depthCompareFunction = .greater
     descriptor.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: descriptor)!
   }

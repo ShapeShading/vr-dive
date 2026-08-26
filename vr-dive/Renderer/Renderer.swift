@@ -749,7 +749,9 @@ class Renderer {
     let delta = min(max(0, currentTime - lastRigUpdateTime), 1.0 / 20.0)
     guard delta > 0 else { return }
     rigTransform = gameManager.updateRigState(
-      deltaTime: delta, headTransform: deviceAnchorTransform)
+      deltaTime: delta,
+      headTransform: deviceAnchorTransform,
+      usesLargeWorldBoost: patternCoordinator.currentPattern() == .gyirongDebrisFlow)
     lastRigUpdateTime = currentTime
   }
 
@@ -958,6 +960,17 @@ class Renderer {
       controllers[.lunarSurface] = lunarSurface
     } else {
       print("[Renderer] LunarSurface pattern unavailable (missing textures?).")
+    }
+
+    if let gyirongDebrisFlow = try? GyirongDebrisFlowRenderer(
+      device: device,
+      library: library,
+      maxViewCount: maxViewCount
+    ) {
+      controllers[.gyirongDebrisFlow] = gyirongDebrisFlow
+      print("[Renderer] Gyirong debris-flow reconstruction pattern added.")
+    } else {
+      print("[Renderer] Gyirong debris-flow reconstruction unavailable (missing data?).")
     }
 
     if let tunnel = try? TunnelRenderer(

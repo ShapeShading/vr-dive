@@ -74,6 +74,9 @@ struct ControlButtonsView: View {
     VStack(spacing: 18) {
       HStack(spacing: 18) {
         Button(action: {
+          if model.selectedPattern == .gyirongDebrisFlow {
+            gameManager.resetNavigation()
+          }
           model.reset()
         }) {
           Label("Reset", systemImage: "arrow.counterclockwise")
@@ -238,6 +241,20 @@ struct ControlButtonsView: View {
               .fixedSize(horizontal: false, vertical: true)
           }
           .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+
+      if model.selectedPattern == .gyirongDebrisFlow {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("2026-08-26 吉隆—热索瓦河谷初步重建")
+            .font(.headline)
+          Text("1:1 米制地形与建筑；源点 28.281051°N, 85.545404°E；7 m 为早期监测值。中央推算情景为峰值 15,000 m³/s、总量 1,730 万 m³，并非官方测量。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("初始视点位于口岸上空。重置会恢复视点并从雪崩重放，浪头约 68 秒后抵达口岸。按 □ 切换河谷巡航：基础 250×；L1 或 R1 单键为 4,000×；同时按住为 64,000×。场景尺寸始终保持 1:1。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }

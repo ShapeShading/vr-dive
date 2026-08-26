@@ -106,6 +106,7 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
   case weirdSurface
   case neonShells
   case lunarSurface
+  case gyirongDebrisFlow
   case dynamicBox
   case infiniteMandelbulbZoom
 
@@ -248,6 +249,8 @@ enum VisualPatternKind: String, CaseIterable, Identifiable {
       return "Neon Shells"
     case .lunarSurface:
       return "月面日出"
+    case .gyirongDebrisFlow:
+      return "吉隆口岸泥石流（初步重建）"
     case .dynamicBox:
       return "动态着色器"
     case .magneticLinesThatDrawInGold:

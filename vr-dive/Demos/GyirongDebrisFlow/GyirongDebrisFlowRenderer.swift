@@ -2048,6 +2048,12 @@ extension GyirongDebrisFlowRenderer {
   }
 
   fileprivate static func makeSkyDepthState(device: MTLDevice) -> MTLDepthStencilState {
+    // IMPORTANT: Do not disable sky depth writes. Compositor Services presents
+    // an opaque color pixel on Vision Pro only when the matching depth pixel is
+    // a valid perspective reverse-Z value. Leaving the sky at the 0.0 clear
+    // depth makes the simulator look correct but produces black foveation tiles
+    // on device. The dome is drawn first at 200 km; its tiny positive depth
+    // passes `.greater`, and all closer scene geometry safely replaces it.
     let descriptor = MTLDepthStencilDescriptor()
     descriptor.depthCompareFunction = .greater
     descriptor.isDepthWriteEnabled = true

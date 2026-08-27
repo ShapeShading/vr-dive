@@ -186,5 +186,6 @@ available.
 - https://www.globaltimes.cn/galleries/2587.html
 - https://www.rainews.it/video/2026/08/londa-di-fango-travolge-tutto-le-drammatiche-immagini-al-confine-tra-tibet-e-nepal-dbb66c2d-9ba3-4fe6-ba16-80cc7c3cc97c.html
 - https://www.jiemian.com/article/14999118.html
+- https://developer.apple.com/videos/play/wwdc2024/10092/
 - https://nhess.copernicus.org/articles/24/4179/2024/nhess-24-4179-2024.html
 - https://www.hec.usace.army.mil/confluence/rasdocs/ras1dtechref/6.6/performing-a-dam-break-study-with-hec-ras/estimating-dam-breach-parameters/estimating-breach-parameters

@@ -92,8 +92,8 @@ fragment float4 gyirongSkyFragment(GyirongSkyOut in [[stage_in]]) {
   float3 direction = normalize(in.direction);
   float vertical = clamp(direction.y * 0.5f + 0.5f, 0.0f, 1.0f);
   float azimuth = atan2(direction.z, direction.x);
-  float3 horizon = float3(0.57f, 0.59f, 0.60f);
-  float3 zenith = float3(0.34f, 0.37f, 0.40f);
+  float3 horizon = float3(0.49f, 0.50f, 0.51f);
+  float3 zenith = float3(0.34f, 0.35f, 0.36f);
   float cloudBand = sin(azimuth * 3.0f + vertical * 5.0f) * 0.014f
     + sin(azimuth * 7.0f - vertical * 9.0f) * 0.008f
     + sin((direction.x + direction.z) * 17.0f) * 0.005f;

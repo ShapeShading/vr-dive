@@ -115,10 +115,10 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
       metadata: scene.metadata,
       heights: conditionedHeights)
 
-    let skyBox = try Self.makeSkyBox(device: device)
-    skyVertexBuffer = skyBox.vertexBuffer
-    skyIndexBuffer = skyBox.indexBuffer
-    skyIndexCount = skyBox.indexCount
+    let skyDome = try Self.makeSkyDome(device: device)
+    skyVertexBuffer = skyDome.vertexBuffer
+    skyIndexBuffer = skyDome.indexBuffer
+    skyIndexCount = skyDome.indexCount
 
     let buildings = try Self.makeBuildings(
       device: device,
@@ -239,11 +239,28 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
     if viewProjectionMatrices.isEmpty {
       viewProjectionMatrices = [matrix_identity_float4x4]
     }
-    var viewToWorldTransforms = context.viewData.viewToWorldTransforms
-    if viewToWorldTransforms.isEmpty {
-      viewToWorldTransforms = [matrix_identity_float4x4]
-    }
     let cameraScene = sceneCameraPosition(context: context, navigationTransform: navigation)
+    // Draw a real, highly tessellated world-space dome before the scene. It
+    // follows exactly the same presentation/navigation and stereo projection
+    // path as the terrain, but never writes depth. This avoids relying on the
+    // drawable's untouched reverse-Z depth or on an eye-local sky transform.
+    encoder.pushDebugGroup("Gyirong overcast world dome")
+    encoder.setRenderPipelineState(skyPipelineState)
+    encoder.setDepthStencilState(skyDepthState)
+    encoder.setCullMode(.none)
+    encoder.setVertexBuffer(skyVertexBuffer, offset: 0, index: 0)
+    setVertexSharedData(
+      encoder: encoder,
+      uniforms: &uniforms,
+      viewProjectionMatrices: viewProjectionMatrices)
+    encoder.drawIndexedPrimitives(
+      type: .triangle,
+      indexCount: skyIndexCount,
+      indexType: .uint16,
+      indexBuffer: skyIndexBuffer,
+      indexBufferOffset: 0)
+    encoder.popDebugGroup()
+
     encoder.pushDebugGroup("Gyirong terrain and buildings")
     encoder.setRenderPipelineState(meshPipelineState)
     encoder.setDepthStencilState(opaqueDepthState)
@@ -327,36 +344,11 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
         * Self.particleVerticesPerReplica)
     encoder.popDebugGroup()
 
-    // Draw the physical sky enclosure last at reverse-Z far depth. It fills
-    // only pixels whose depth is still the 0.0 clear value, so terrain and
-    // debris cannot overwrite it and it cannot cover any scene geometry.
-    encoder.pushDebugGroup("Gyirong overcast sky enclosure")
-    encoder.setRenderPipelineState(skyPipelineState)
-    encoder.setDepthStencilState(skyDepthState)
-    encoder.setCullMode(.none)
-    encoder.setVertexBuffer(skyVertexBuffer, offset: 0, index: 0)
-    setVertexSharedData(
-      encoder: encoder,
-      uniforms: &uniforms,
-      viewProjectionMatrices: viewProjectionMatrices)
-    viewToWorldTransforms.withUnsafeBytes { bytes in
-      if let baseAddress = bytes.baseAddress, bytes.count > 0 {
-        encoder.setVertexBytes(baseAddress, length: bytes.count, index: 3)
-      }
-    }
-    encoder.drawIndexedPrimitives(
-      type: .triangle,
-      indexCount: skyIndexCount,
-      indexType: .uint16,
-      indexBuffer: skyIndexBuffer,
-      indexBufferOffset: 0)
-    encoder.popDebugGroup()
-
     if !didLogConfiguration {
       didLogConfiguration = true
       let event = metadata.event
       print(
-        "[GyirongDebrisFlow] 1:1 aerial scene active: terrain=\(metadata.terrain.width)x\(metadata.terrain.height) in \(terrainTiles.count) tiled LODs + outer apron, continuousPortGround=true, terrainSkirts=4m, physicalSkyEnclosure=2m-per-eye-far-depth-last, gateAlignedChineseApproach=true, gateFacadeBearing=70.47deg, OSMBuildings=\(metadata.buildings.count), calibratedGateOSM904894059=true, scalePeople=52, flowPathPoints=\(flowPathPointCount), mappedLendeCenterline=true, riverTerrainConditioned=true, portFloodBranches=right62-left26-portal12, waterFiniteGuard=true, physicalParticles=\(Self.particleCount), visibleClasts=\(Self.particleCount * Self.particleVisualReplicaCount), avalanche≈0-6s, breach≈13s, routedFloodArrival≈79s, peakScenario=\(Int(event.scenarioPeakDischargeCubicMetersPerSecond))m3/s, volumeScenario=\(String(format: "%.1f", event.scenarioReleasedVolumeCubicMeters / 1_000_000))Mm3, source=(\(event.sourceLatitude),\(event.sourceLongitude)), port=(\(event.portLatitude),\(event.portLongitude)), gaugeScenario=\(event.reportedMonitoringWaterLevelMeters)m, navigation=\(Int(Self.navigationSpeedScale))x base / 4000x single / 64000x both"
+        "[GyirongDebrisFlow] 1:1 aerial scene active: terrain=\(metadata.terrain.width)x\(metadata.terrain.height) in \(terrainTiles.count) tiled LODs + outer apron, continuousPortGround=true, terrainSkirts=4m, physicalSkyDome=200km-48x24-world-space-depth-first, gateAlignedChineseApproach=true, gateFacadeBearing=70.47deg, OSMBuildings=\(metadata.buildings.count), calibratedGateOSM904894059=true, scalePeople=52, flowPathPoints=\(flowPathPointCount), mappedLendeCenterline=true, riverTerrainConditioned=true, portFloodBranches=right62-left26-portal12, waterFiniteGuard=true, physicalParticles=\(Self.particleCount), visibleClasts=\(Self.particleCount * Self.particleVisualReplicaCount), avalanche≈0-6s, breach≈13s, routedFloodArrival≈79s, peakScenario=\(Int(event.scenarioPeakDischargeCubicMetersPerSecond))m3/s, volumeScenario=\(String(format: "%.1f", event.scenarioReleasedVolumeCubicMeters / 1_000_000))Mm3, source=(\(event.sourceLatitude),\(event.sourceLongitude)), port=(\(event.portLatitude),\(event.portLongitude)), gaugeScenario=\(event.reportedMonitoringWaterLevelMeters)m, navigation=\(Int(Self.navigationSpeedScale))x base / 4000x single / 64000x both"
       )
     }
   }
@@ -687,35 +679,43 @@ extension GyirongDebrisFlowRenderer {
     return (metadata, heights)
   }
 
-  /// A real, closed scene object used as the sky background. Each eye places
-  /// this cube around its camera in the vertex shader, so ordinary triangles
-  /// cover the complete rasterization-rate map without relying on clear color
-  /// or a clip-space fullscreen primitive.
-  fileprivate static func makeSkyBox(
+  /// A real, closed scene object used as the sky background. The dome is
+  /// intentionally tessellated instead of using six enormous cube faces, so
+  /// it follows the same variable-rate rasterization path as normal geometry.
+  fileprivate static func makeSkyDome(
     device: MTLDevice
   ) throws -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
-    // Keep the enclosure comfortably inside visionOS' drawable-specific far
-    // plane. It is re-centred on each eye in the vertex shader, so two metres
-    // covers every view direction without parallax or far-plane clipping.
-    let radius: Float = 2
-    let vertices: [SIMD3<Float>] = [
-      SIMD3<Float>(-radius, -radius, -radius),
-      SIMD3<Float>( radius, -radius, -radius),
-      SIMD3<Float>( radius,  radius, -radius),
-      SIMD3<Float>(-radius,  radius, -radius),
-      SIMD3<Float>(-radius, -radius,  radius),
-      SIMD3<Float>( radius, -radius,  radius),
-      SIMD3<Float>( radius,  radius,  radius),
-      SIMD3<Float>(-radius,  radius,  radius),
-    ]
-    let indices: [UInt16] = [
-      0, 1, 2, 0, 2, 3,
-      5, 4, 7, 5, 7, 6,
-      4, 0, 3, 4, 3, 7,
-      1, 5, 6, 1, 6, 2,
-      3, 2, 6, 3, 6, 7,
-      4, 5, 1, 4, 1, 0,
-    ]
+    let longitudeSegments = 48
+    let latitudeSegments = 24
+    var vertices: [SIMD3<Float>] = []
+    vertices.reserveCapacity((longitudeSegments + 1) * (latitudeSegments + 1))
+    for latitude in 0...latitudeSegments {
+      let latitudeAngle = -Float.pi / 2
+        + Float(latitude) / Float(latitudeSegments) * Float.pi
+      let ringRadius = cos(latitudeAngle)
+      let y = sin(latitudeAngle)
+      for longitude in 0...longitudeSegments {
+        let longitudeAngle = Float(longitude) / Float(longitudeSegments) * 2 * Float.pi
+        vertices.append(
+          SIMD3<Float>(
+            ringRadius * cos(longitudeAngle),
+            y,
+            ringRadius * sin(longitudeAngle)))
+      }
+    }
+
+    var indices: [UInt16] = []
+    indices.reserveCapacity(longitudeSegments * latitudeSegments * 6)
+    let rowStride = longitudeSegments + 1
+    for latitude in 0..<latitudeSegments {
+      for longitude in 0..<longitudeSegments {
+        let a = UInt16(latitude * rowStride + longitude)
+        let b = a + 1
+        let c = UInt16((latitude + 1) * rowStride + longitude)
+        let d = c + 1
+        indices.append(contentsOf: [a, c, b, b, c, d])
+      }
+    }
     guard
       let vertexBuffer = device.makeBuffer(
         bytes: vertices,
@@ -726,10 +726,10 @@ extension GyirongDebrisFlowRenderer {
         length: indices.count * MemoryLayout<UInt16>.stride,
         options: .storageModeShared)
     else {
-      throw GyirongDebrisFlowError.resourceAllocationFailed("physical sky enclosure")
+      throw GyirongDebrisFlowError.resourceAllocationFailed("physical sky dome")
     }
-    vertexBuffer.label = "Gyirong physical sky enclosure vertices"
-    indexBuffer.label = "Gyirong physical sky enclosure indices"
+    vertexBuffer.label = "Gyirong physical sky dome vertices"
+    indexBuffer.label = "Gyirong physical sky dome indices"
     return (vertexBuffer, indexBuffer, indices.count)
   }
 
@@ -2048,7 +2048,7 @@ extension GyirongDebrisFlowRenderer {
 
   fileprivate static func makeSkyDepthState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
-    descriptor.depthCompareFunction = .greaterEqual
+    descriptor.depthCompareFunction = .always
     descriptor.isDepthWriteEnabled = false
     return device.makeDepthStencilState(descriptor: descriptor)!
   }

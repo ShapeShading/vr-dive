@@ -523,8 +523,20 @@ class Renderer {
       }
       let depthRange = drawable.depthRange
       print(
-        "[Renderer]  reverse-Z depthRange near=\(depthRange.x) far=\(depthRange.y)"
+        "[Renderer]  reverse-Z depthRange far=\(depthRange.x) near=\(depthRange.y)"
       )
+      print(
+        "[Renderer]  vertexAmplification requested=\(viewCount) supported=\(device.supportsVertexAmplificationCount(viewCount))"
+      )
+      for (index, rateMap) in drawable.rasterizationRateMaps.enumerated() {
+        let physicalSizes = (0..<rateMap.layerCount).map { layer in
+          let size = rateMap.physicalSize(layer: layer)
+          return "\(size.width)x\(size.height)"
+        }.joined(separator: ",")
+        print(
+          "[Renderer]  rateMap[\(index)] screen=\(rateMap.screenSize.width)x\(rateMap.screenSize.height) layers=\(rateMap.layerCount) physical=[\(physicalSizes)]"
+        )
+      }
     }
 
     // ⚠️ clearColor 必须是纯黑，不得改为读取 pattern?.preferredClearColor。

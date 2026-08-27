@@ -75,21 +75,18 @@ vertex GyirongSkyOut gyirongSkyVertex(
   const device float3 *vertices [[buffer(0)]],
   constant GyirongDebrisFlowUniforms &uniforms [[buffer(1)]],
   constant float4x4 *viewProjectionMatrices [[buffer(2)]],
-  constant float4x4 *viewToWorldTransforms [[buffer(3)]],
   uint vertexID [[vertex_id]])
 {
   uint viewIndex = min((uint)amplificationID, max(uniforms.viewCount, 1u) - 1u);
-  float3 skyOffset = vertices[vertexID];
-  // Transform the enclosure from eye-local space so camera translation and
-  // rotation cancel exactly against the matching view-projection matrix.
+  float3 skyDirection = vertices[vertexID];
+  // A 200 km physical dome encloses the complete 33 km terrain and uses the
+  // exact same scene presentation/navigation path as the visible mountain
+  // mesh. The drawable reports an infinite far plane on device.
   float3 worldPosition = (
-    viewToWorldTransforms[viewIndex] * float4(skyOffset, 1.0f)).xyz;
+    uniforms.navigationInverse * float4(skyDirection * 200000.0f, 1.0f)).xyz;
   GyirongSkyOut out;
   out.clipPosition = viewProjectionMatrices[viewIndex] * float4(worldPosition, 1.0f);
-  // visionOS uses reverse-Z (clear depth 0). Pin the sky to the far plane and
-  // draw it last with greaterEqual so it fills only untouched background.
-  out.clipPosition.z = 0.0f;
-  out.direction = skyOffset;
+  out.direction = skyDirection;
   return out;
 }
 

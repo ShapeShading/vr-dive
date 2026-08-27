@@ -47,17 +47,15 @@ forecasting or forensic attribution.
   mottling continuously across tile boundaries instead of assigning one flat
   colour to each coarse terrain triangle. A finer procedural normal field adds
   metre-scale surface relief without increasing the distant triangle budget.
-- A closed 12-triangle sky enclosure is drawn as ordinary world geometry around
-  each eye, with a grey overcast horizon-to-zenith gradient. It does not depend
-  on clear color or a clip-space fullscreen primitive, so every foveated render
-  tile is covered by actual scene triangles without exposing black tile edges.
-  Its vertices are transformed from eye-local space and pinned to the reverse-Z
-  far depth. The enclosure is drawn last with a greater-or-equal depth test, so
-  it fills only pixels still holding the zero clear depth and cannot cover
-  terrain or buildings. Its two-metre half-extent also stays inside the
-  drawable-specific visionOS clipping range; the former 240 m enclosure was
-  almost entirely clipped and only left block-shaped fragments near the
-  terrain horizon.
+- A closed 48 × 24-segment, 200 km physical sky dome is drawn as ordinary
+  world-space geometry with a grey overcast horizon-to-zenith gradient. It uses
+  exactly the same scene presentation, navigation and stereo projection path
+  as the terrain. The dome is rendered first with depth writes disabled, so it
+  does not depend on clear color, untouched reverse-Z depth, an eye-local
+  transform, or a clip-space fullscreen primitive. The device reports an
+  infinite far plane and a 0.1 m near plane; the previous diagnostic labelled
+  those two values backwards. The higher tessellation also avoids asking six
+  enormous cube-face triangles to cover the nonuniform foveated viewport.
 - 144 OpenStreetMap building footprints near the port are extruded using tagged
   heights/levels when available and conservative defaults otherwise.
 - The Chinese border gate is anchored to OpenStreetMap way 904894059 at

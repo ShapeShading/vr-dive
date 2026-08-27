@@ -242,8 +242,9 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
     let cameraScene = sceneCameraPosition(context: context, navigationTransform: navigation)
     // Draw a real, highly tessellated world-space dome before the scene. It
     // follows exactly the same presentation/navigation and stereo projection
-    // path as the terrain, but never writes depth. This avoids relying on the
-    // drawable's untouched reverse-Z depth or on an eye-local sky transform.
+    // path as the terrain. It writes a finite, very distant reverse-Z depth so
+    // Compositor Services can reproject every opaque sky pixel on device;
+    // closer terrain then replaces that depth normally.
     encoder.pushDebugGroup("Gyirong overcast world dome")
     encoder.setRenderPipelineState(skyPipelineState)
     encoder.setDepthStencilState(skyDepthState)
@@ -348,7 +349,7 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
       didLogConfiguration = true
       let event = metadata.event
       print(
-        "[GyirongDebrisFlow] 1:1 aerial scene active: terrain=\(metadata.terrain.width)x\(metadata.terrain.height) in \(terrainTiles.count) tiled LODs + outer apron, continuousPortGround=true, terrainSkirts=4m, physicalSkyDome=200km-48x24-world-space-depth-first, gateAlignedChineseApproach=true, gateFacadeBearing=70.47deg, OSMBuildings=\(metadata.buildings.count), calibratedGateOSM904894059=true, scalePeople=52, flowPathPoints=\(flowPathPointCount), mappedLendeCenterline=true, riverTerrainConditioned=true, portFloodBranches=right62-left26-portal12, waterFiniteGuard=true, physicalParticles=\(Self.particleCount), visibleClasts=\(Self.particleCount * Self.particleVisualReplicaCount), avalanche≈0-6s, breach≈13s, routedFloodArrival≈79s, peakScenario=\(Int(event.scenarioPeakDischargeCubicMetersPerSecond))m3/s, volumeScenario=\(String(format: "%.1f", event.scenarioReleasedVolumeCubicMeters / 1_000_000))Mm3, source=(\(event.sourceLatitude),\(event.sourceLongitude)), port=(\(event.portLatitude),\(event.portLongitude)), gaugeScenario=\(event.reportedMonitoringWaterLevelMeters)m, navigation=\(Int(Self.navigationSpeedScale))x base / 4000x single / 64000x both"
+        "[GyirongDebrisFlow] 1:1 aerial scene active: terrain=\(metadata.terrain.width)x\(metadata.terrain.height) in \(terrainTiles.count) tiled LODs + outer apron, continuousPortGround=true, terrainSkirts=4m, physicalSkyDome=200km-48x24-world-space-depth-writing-first, gateAlignedChineseApproach=true, gateFacadeBearing=70.47deg, OSMBuildings=\(metadata.buildings.count), calibratedGateOSM904894059=true, scalePeople=52, flowPathPoints=\(flowPathPointCount), mappedLendeCenterline=true, riverTerrainConditioned=true, portFloodBranches=right62-left26-portal12, waterFiniteGuard=true, physicalParticles=\(Self.particleCount), visibleClasts=\(Self.particleCount * Self.particleVisualReplicaCount), avalanche≈0-6s, breach≈13s, routedFloodArrival≈79s, peakScenario=\(Int(event.scenarioPeakDischargeCubicMetersPerSecond))m3/s, volumeScenario=\(String(format: "%.1f", event.scenarioReleasedVolumeCubicMeters / 1_000_000))Mm3, source=(\(event.sourceLatitude),\(event.sourceLongitude)), port=(\(event.portLatitude),\(event.portLongitude)), gaugeScenario=\(event.reportedMonitoringWaterLevelMeters)m, navigation=\(Int(Self.navigationSpeedScale))x base / 4000x single / 64000x both"
       )
     }
   }
@@ -2048,8 +2049,8 @@ extension GyirongDebrisFlowRenderer {
 
   fileprivate static func makeSkyDepthState(device: MTLDevice) -> MTLDepthStencilState {
     let descriptor = MTLDepthStencilDescriptor()
-    descriptor.depthCompareFunction = .always
-    descriptor.isDepthWriteEnabled = false
+    descriptor.depthCompareFunction = .greater
+    descriptor.isDepthWriteEnabled = true
     return device.makeDepthStencilState(descriptor: descriptor)!
   }
 

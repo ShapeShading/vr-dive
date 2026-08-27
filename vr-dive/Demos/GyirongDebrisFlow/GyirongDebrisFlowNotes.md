@@ -50,12 +50,19 @@ forecasting or forensic attribution.
 - A closed 48 × 24-segment, 200 km physical sky dome is drawn as ordinary
   world-space geometry with a grey overcast horizon-to-zenith gradient. It uses
   exactly the same scene presentation, navigation and stereo projection path
-  as the terrain. The dome is rendered first with depth writes disabled, so it
-  does not depend on clear color, untouched reverse-Z depth, an eye-local
-  transform, or a clip-space fullscreen primitive. The device reports an
-  infinite far plane and a 0.1 m near plane; the previous diagnostic labelled
-  those two values backwards. The higher tessellation also avoids asking six
-  enormous cube-face triangles to cover the nonuniform foveated viewport.
+  as the terrain. The dome is rendered first and writes its finite 200 km
+  reverse-Z depth across every opaque sky pixel; closer terrain and structures
+  then replace it through the normal greater-depth test. This is required on
+  device because Compositor Services presents an opaque color pixel only when
+  it also has a valid perspective depth for reprojection. Earlier versions
+  wrote grey color but deliberately left the sky depth at the zero clear value,
+  which the simulator tolerated but the device exposed as black foveation
+  tiles. The dome does not depend on clear color, untouched reverse-Z depth, an
+  eye-local transform, or a clip-space fullscreen primitive. The device reports
+  an infinite far plane and a 0.1 m near plane; the previous diagnostic
+  labelled those two values backwards. The higher tessellation also avoids
+  asking six enormous cube-face triangles to cover the nonuniform foveated
+  viewport.
 - 144 OpenStreetMap building footprints near the port are extruded using tagged
   heights/levels when available and conservative defaults otherwise.
 - The Chinese border gate is anchored to OpenStreetMap way 904894059 at

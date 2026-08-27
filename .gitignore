@@ -14,3 +14,4 @@ resources/
 
 # DynamicBox log files (runtime shader compilation & performance)
 vr-dive/Demos/DynamicBox/*.log
+.DS_Store

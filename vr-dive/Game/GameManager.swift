@@ -56,6 +56,10 @@ class GameManager {
   // regular single-shoulder boost, for covering huge distances quickly
   // (e.g. the space elevator's ~25km shaft).
   private let superBoostMovementMultiplier: Float = 32.0
+  // Large-world profile used by metre-scale terrain demos. Either shoulder
+  // applies one boost; holding both intentionally stacks the same multiplier
+  // twice, so the combined tier is the square of the single-button tier.
+  private let largeWorldShoulderMovementMultiplier: Float = 16.0
 
   private(set) var playerOffset: SIMD3<Float> = .zero
   private(set) var yawAngle: Float = 0
@@ -224,16 +228,47 @@ class GameManager {
     }
   }
 
-  func updateRigState(deltaTime: Float, headTransform: simd_float4x4) -> simd_float4x4 {
+  /// Restore both physical-rig and virtual-pattern navigation to their origin.
+  /// The selected renderer remains responsible for its own initial scene
+  /// offset (for example, the Gyirong aerial observation point).
+  func resetNavigation() {
+    controllerQueue.sync {
+      playerOffset = .zero
+      yawAngle = 0
+      rigTransform = matrix_identity_float4x4
+      patternNavOffset = .zero
+      patternNavYaw = 0
+      patternNavTransform = matrix_identity_float4x4
+      isPatternNavigationActive = false
+      controllerState.squareJustPressedCount = 0
+    }
+    print("[GameManager] Rig and pattern navigation reset to origin")
+  }
+
+  func updateRigState(
+    deltaTime: Float,
+    headTransform: simd_float4x4,
+    usesLargeWorldBoost: Bool = false
+  ) -> simd_float4x4 {
     controllerQueue.sync {
       let primaryStickInput = applyDeadZone(controllerState.leftStick)
       let secondaryStickInput = applyDeadZone(controllerState.rightStick)
-      // L1 + R1 held together stacks an extra 10x on top of the normal boost
-      // (useful for quickly traversing the space elevator's huge shaft).
       let superBoostActive = controllerState.leftShoulder && controllerState.rightShoulder
-      let movementMultiplier =
-        (controllerState.boostActive ? boostMovementMultiplier : 1.0)
-        * (superBoostActive ? superBoostMovementMultiplier : 1.0)
+      let movementMultiplier: Float
+      if usesLargeWorldBoost {
+        if controllerState.leftShoulder && controllerState.rightShoulder {
+          movementMultiplier = largeWorldShoulderMovementMultiplier
+            * largeWorldShoulderMovementMultiplier
+        } else if controllerState.leftShoulder || controllerState.rightShoulder {
+          movementMultiplier = largeWorldShoulderMovementMultiplier
+        } else {
+          movementMultiplier = 1
+        }
+      } else {
+        movementMultiplier =
+          (controllerState.boostActive ? boostMovementMultiplier : 1.0)
+          * (superBoostActive ? superBoostMovementMultiplier : 1.0)
+      }
       let yawMultiplier = controllerState.boostActive ? boostYawMultiplier : 1.0
 
       let forwardInput = primaryStickInput.y

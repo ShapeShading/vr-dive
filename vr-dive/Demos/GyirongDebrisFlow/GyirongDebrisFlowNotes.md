@@ -47,21 +47,23 @@ forecasting or forensic attribution.
   mottling continuously across tile boundaries instead of assigning one flat
   colour to each coarse terrain triangle. A finer procedural normal field adds
   metre-scale surface relief without increasing the distant triangle budget.
-- A full-screen, depth-independent overcast sky pass covers every foveated
-  render tile with a grey horizon-to-zenith gradient. The renderer may retain
-  its required black clear color without exposing a black sky in this scene.
+- A closed 12-triangle sky enclosure is drawn as ordinary world geometry around
+  each eye, with a grey overcast horizon-to-zenith gradient. It does not depend
+  on clear color or a clip-space fullscreen primitive, so every foveated render
+  tile is covered by actual scene triangles without exposing black tile edges.
 - 144 OpenStreetMap building footprints near the port are extruded using tagged
   heights/levels when available and conservative defaults otherwise.
 - The Chinese border gate is anchored to OpenStreetMap way 904894059 at
-  28.279548° N, 85.377729° E. Its measured footprint principal axes are about
-  83 × 51 m. This corrects the former CCTV-reference placement, which was about
+  28.279511° N, 85.377742° E. Its measured footprint principal axes are about
+  83 × 51 m, with the long facade at a 70.47° bearing. This corrects the
+  former CCTV-reference placement, which was about
   149 m too far north, and rotates the long facade onto the mapped building
   bearing instead of into the mountainside. The procedural gate is about 84 m
   wide, 30 m deep and 27 m high, with an open central portal, four rows of
   recessed windows, facade bands and stone/glass material detail. Height is
   still inferred from imagery and freight-vehicle scale, not surveyed.
-- Supplied aerial and satellite views show the broad Chinese inspection apron
-  extending south of the gate, with the river immediately along its eastern
+- OSM geometry and the regional north/south border layout place the broad
+  Chinese inspection apron north of the gate, with the river immediately along its eastern
   edge. A flat 160 × 126 m structural terrace around the documented gate and
   near inspection apron now sits over continuously conditioned terrain rather
   than a deleted mesh region. It includes lane markings, booths, a
@@ -70,7 +72,10 @@ forecasting or forensic attribution.
 - The presentation frame is aligned to the gate itself rather than the old
   CCTV coordinate: reset places the gate 650 m ahead, centres the portal, looks
   from the Chinese approach into the Nepal-side valley, and puts the mapped
-  river on the viewer's right. A continuous 16 m road ribbon passes through the
+  river on the viewer's right. The former implementation used the correct
+  facade line but reversed the short-axis sign, placing the Chinese apron on
+  the Nepal side; the corrected positive-forward axis now points south-southeast
+  through the portal toward Nepal. A continuous 16 m road ribbon passes through the
   portal. Because the source DEM cells are wider than the road, a 60 m valley
   floor with 180 m blended shoulders lowers only obstructing terrain for 520 m
   on the Chinese side and 420 m into the Nepal-side valley.

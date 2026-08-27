@@ -28,11 +28,11 @@ August 26, 2026 Gyirong–Rasuwagadhi flood/debris-flow visualization.
 - The procedural Chinese-side gate model is separate from the much larger Nepal
   Rasuwagadhi dry port. Its position, facade bearing and approximately 83 × 51 m
   footprint principal dimensions come from OpenStreetMap way 904894059,
-  queried August 27, 2026. The resulting centre is 28.279548° N, 85.377729° E,
+  queried August 27, 2026. The resulting centre is 28.279511° N, 85.377742° E,
   about 149 m south of the earlier CCTV/plaza reference. Its approximately
   27 m height remains estimated from border-gate photographs and freight
-  vehicles. Supplied aerial/satellite references place the 160 × 126 m
-  reconstructed flat inspection apron south of the gate and the river along
+  vehicles. OSM geometry and the regional border layout place the 160 × 126 m
+  reconstructed flat inspection apron north of the gate and the river along
   its east side; this platform geometry is image-derived, not a cadastral
   survey. Runtime aligns reset to the Chinese approach and lowers only excess
   DEM terrain along a 60 m road floor with 180 m blended shoulders, because the

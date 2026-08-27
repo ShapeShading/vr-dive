@@ -67,33 +67,38 @@ struct GyirongParticleOut {
 
 struct GyirongSkyOut {
   float4 clipPosition [[position]];
-  float2 uv;
+  float3 direction;
 };
 
 vertex GyirongSkyOut gyirongSkyVertex(
   ushort amplificationID [[amplification_id]],
+  const device float3 *vertices [[buffer(0)]],
+  constant GyirongDebrisFlowUniforms &uniforms [[buffer(1)]],
+  constant float4x4 *viewProjectionMatrices [[buffer(2)]],
+  constant float4x4 *viewToWorldTransforms [[buffer(3)]],
   uint vertexID [[vertex_id]])
 {
-  (void)amplificationID;
-  const float2 positions[3] = {
-    float2(-1.0f, -1.0f),
-    float2(3.0f, -1.0f),
-    float2(-1.0f, 3.0f)
-  };
+  uint viewIndex = min((uint)amplificationID, max(uniforms.viewCount, 1u) - 1u);
+  float3 skyOffset = vertices[vertexID];
+  float3 cameraPosition = viewToWorldTransforms[viewIndex][3].xyz;
+  float3 worldPosition = cameraPosition + skyOffset;
   GyirongSkyOut out;
-  out.clipPosition = float4(positions[vertexID], 0.0f, 1.0f);
-  out.uv = positions[vertexID] * 0.5f + 0.5f;
+  out.clipPosition = viewProjectionMatrices[viewIndex] * float4(worldPosition, 1.0f);
+  out.direction = skyOffset;
   return out;
 }
 
 fragment float4 gyirongSkyFragment(GyirongSkyOut in [[stage_in]]) {
-  float vertical = clamp(in.uv.y, 0.0f, 1.0f);
-  float3 horizon = float3(0.56f, 0.58f, 0.59f);
-  float3 zenith = float3(0.31f, 0.34f, 0.37f);
-  float cloudBand = sin(in.uv.x * 10.0f + vertical * 4.0f) * 0.012f
-    + sin(in.uv.x * 23.0f - vertical * 7.0f) * 0.007f;
-  float3 color = mix(horizon, zenith, smoothstep(0.02f, 0.92f, vertical));
-  color += cloudBand * (1.0f - vertical) * 0.55f;
+  float3 direction = normalize(in.direction);
+  float vertical = clamp(direction.y * 0.5f + 0.5f, 0.0f, 1.0f);
+  float azimuth = atan2(direction.z, direction.x);
+  float3 horizon = float3(0.57f, 0.59f, 0.60f);
+  float3 zenith = float3(0.34f, 0.37f, 0.40f);
+  float cloudBand = sin(azimuth * 3.0f + vertical * 5.0f) * 0.014f
+    + sin(azimuth * 7.0f - vertical * 9.0f) * 0.008f
+    + sin((direction.x + direction.z) * 17.0f) * 0.005f;
+  float3 color = mix(horizon, zenith, smoothstep(0.47f, 0.98f, vertical));
+  color += cloudBand * smoothstep(0.25f, 0.82f, vertical);
   return float4(color, 1.0f);
 }
 

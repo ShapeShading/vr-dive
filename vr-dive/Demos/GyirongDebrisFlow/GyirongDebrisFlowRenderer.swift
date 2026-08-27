@@ -24,7 +24,8 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
   private static let maximumPendingTime: Float = 2.0
   private static let maximumSubstep: Float = 0.45
   private static let maximumSubstepsPerFrame = 3
-  /// Initial view: roughly 420 m above and 650 m south of the border gate.
+  /// Initial view: roughly 420 m above the Chinese approach, with the border
+  /// gate centred 650 m ahead toward Nepal.
   private static let portGroundY: Float = -420
   private static let portForwardZ: Float = -650
   private static let terrainTileCellSize = 32
@@ -32,11 +33,13 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
   // The previous model incorrectly treated the nearby CCTV/plaza reference
   // coordinate as the building centre, placing the gate about 149 m too far
   // north and rotating its long facade into the mountainside.
-  private static let gateLatitude = 28.279_548
-  private static let gateLongitude = 85.377_729
+  private static let gateLatitude = 28.279_511
+  private static let gateLongitude = 85.377_742
   /// Principal axes of the measured 83 x 51 m OSM footprint in scene x/z.
-  private static let gateAcross = SIMD2<Float>(-0.305_775, 0.952_104)
-  private static let gateForward = SIMD2<Float>(0.952_104, 0.305_775)
+  /// Across follows the 70.47-degree facade bearing. Positive forward points
+  /// south-southeast from the Chinese apron through the gate toward Nepal.
+  private static let gateAcross = SIMD2<Float>(-0.334_228, 0.942_492)
+  private static let gateForward = SIMD2<Float>(-0.942_492, -0.334_228)
 
   private let metadata: GyirongSceneMetadata
   private let heights: [Float]
@@ -46,6 +49,9 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
   private let scenePresentationTransform: simd_float4x4
   private let terrainTiles: [GyirongTerrainTile]
   private let outerTerrainLOD: GyirongMeshLOD
+  private let skyVertexBuffer: MTLBuffer
+  private let skyIndexBuffer: MTLBuffer
+  private let skyIndexCount: Int
   private let buildingVertexBuffer: MTLBuffer
   private let buildingIndexBuffer: MTLBuffer
   private let buildingIndexCount: Int
@@ -108,6 +114,11 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
       device: device,
       metadata: scene.metadata,
       heights: conditionedHeights)
+
+    let skyBox = try Self.makeSkyBox(device: device)
+    skyVertexBuffer = skyBox.vertexBuffer
+    skyIndexBuffer = skyBox.indexBuffer
+    skyIndexCount = skyBox.indexCount
 
     let buildings = try Self.makeBuildings(
       device: device,
@@ -228,12 +239,31 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
     if viewProjectionMatrices.isEmpty {
       viewProjectionMatrices = [matrix_identity_float4x4]
     }
+    var viewToWorldTransforms = context.viewData.viewToWorldTransforms
+    if viewToWorldTransforms.isEmpty {
+      viewToWorldTransforms = [matrix_identity_float4x4]
+    }
     let cameraScene = sceneCameraPosition(context: context, navigationTransform: navigation)
     encoder.pushDebugGroup("Gyirong overcast sky")
     encoder.setRenderPipelineState(skyPipelineState)
     encoder.setDepthStencilState(skyDepthState)
     encoder.setCullMode(.none)
-    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+    encoder.setVertexBuffer(skyVertexBuffer, offset: 0, index: 0)
+    setVertexSharedData(
+      encoder: encoder,
+      uniforms: &uniforms,
+      viewProjectionMatrices: viewProjectionMatrices)
+    viewToWorldTransforms.withUnsafeBytes { bytes in
+      if let baseAddress = bytes.baseAddress, bytes.count > 0 {
+        encoder.setVertexBytes(baseAddress, length: bytes.count, index: 3)
+      }
+    }
+    encoder.drawIndexedPrimitives(
+      type: .triangle,
+      indexCount: skyIndexCount,
+      indexType: .uint16,
+      indexBuffer: skyIndexBuffer,
+      indexBufferOffset: 0)
     encoder.popDebugGroup()
 
     encoder.pushDebugGroup("Gyirong terrain and buildings")
@@ -323,7 +353,7 @@ final class GyirongDebrisFlowRenderer: VisualPatternController {
       didLogConfiguration = true
       let event = metadata.event
       print(
-        "[GyirongDebrisFlow] 1:1 aerial scene active: terrain=\(metadata.terrain.width)x\(metadata.terrain.height) in \(terrainTiles.count) tiled LODs + outer apron, continuousPortGround=true, terrainSkirts=4m, overcastSky=true, gateAlignedChineseApproach=true, OSMBuildings=\(metadata.buildings.count), calibratedGateOSM904894059=true, scalePeople=52, flowPathPoints=\(flowPathPointCount), mappedLendeCenterline=true, riverTerrainConditioned=true, portFloodBranches=right62-left26-portal12, waterFiniteGuard=true, physicalParticles=\(Self.particleCount), visibleClasts=\(Self.particleCount * Self.particleVisualReplicaCount), avalanche≈0-6s, breach≈13s, routedFloodArrival≈79s, peakScenario=\(Int(event.scenarioPeakDischargeCubicMetersPerSecond))m3/s, volumeScenario=\(String(format: "%.1f", event.scenarioReleasedVolumeCubicMeters / 1_000_000))Mm3, source=(\(event.sourceLatitude),\(event.sourceLongitude)), port=(\(event.portLatitude),\(event.portLongitude)), gaugeScenario=\(event.reportedMonitoringWaterLevelMeters)m, navigation=\(Int(Self.navigationSpeedScale))x base / 4000x single / 64000x both"
+        "[GyirongDebrisFlow] 1:1 aerial scene active: terrain=\(metadata.terrain.width)x\(metadata.terrain.height) in \(terrainTiles.count) tiled LODs + outer apron, continuousPortGround=true, terrainSkirts=4m, physicalSkyEnclosure=true, gateAlignedChineseApproach=true, gateFacadeBearing=70.47deg, OSMBuildings=\(metadata.buildings.count), calibratedGateOSM904894059=true, scalePeople=52, flowPathPoints=\(flowPathPointCount), mappedLendeCenterline=true, riverTerrainConditioned=true, portFloodBranches=right62-left26-portal12, waterFiniteGuard=true, physicalParticles=\(Self.particleCount), visibleClasts=\(Self.particleCount * Self.particleVisualReplicaCount), avalanche≈0-6s, breach≈13s, routedFloodArrival≈79s, peakScenario=\(Int(event.scenarioPeakDischargeCubicMetersPerSecond))m3/s, volumeScenario=\(String(format: "%.1f", event.scenarioReleasedVolumeCubicMeters / 1_000_000))Mm3, source=(\(event.sourceLatitude),\(event.sourceLongitude)), port=(\(event.portLatitude),\(event.portLongitude)), gaugeScenario=\(event.reportedMonitoringWaterLevelMeters)m, navigation=\(Int(Self.navigationSpeedScale))x base / 4000x single / 64000x both"
       )
     }
   }
@@ -652,6 +682,49 @@ extension GyirongDebrisFlowRenderer {
       terrainData.copyBytes(to: destination)
     }
     return (metadata, heights)
+  }
+
+  /// A real, closed scene object used as the sky background. Each eye places
+  /// this cube around its camera in the vertex shader, so ordinary triangles
+  /// cover the complete rasterization-rate map without relying on clear color
+  /// or a clip-space fullscreen primitive.
+  fileprivate static func makeSkyBox(
+    device: MTLDevice
+  ) throws -> (vertexBuffer: MTLBuffer, indexBuffer: MTLBuffer, indexCount: Int) {
+    let radius: Float = 240
+    let vertices: [SIMD3<Float>] = [
+      SIMD3<Float>(-radius, -radius, -radius),
+      SIMD3<Float>( radius, -radius, -radius),
+      SIMD3<Float>( radius,  radius, -radius),
+      SIMD3<Float>(-radius,  radius, -radius),
+      SIMD3<Float>(-radius, -radius,  radius),
+      SIMD3<Float>( radius, -radius,  radius),
+      SIMD3<Float>( radius,  radius,  radius),
+      SIMD3<Float>(-radius,  radius,  radius),
+    ]
+    let indices: [UInt16] = [
+      0, 1, 2, 0, 2, 3,
+      5, 4, 7, 5, 7, 6,
+      4, 0, 3, 4, 3, 7,
+      1, 5, 6, 1, 6, 2,
+      3, 2, 6, 3, 6, 7,
+      4, 5, 1, 4, 1, 0,
+    ]
+    guard
+      let vertexBuffer = device.makeBuffer(
+        bytes: vertices,
+        length: vertices.count * MemoryLayout<SIMD3<Float>>.stride,
+        options: .storageModeShared),
+      let indexBuffer = device.makeBuffer(
+        bytes: indices,
+        length: indices.count * MemoryLayout<UInt16>.stride,
+        options: .storageModeShared)
+    else {
+      throw GyirongDebrisFlowError.resourceAllocationFailed("physical sky enclosure")
+    }
+    vertexBuffer.label = "Gyirong physical sky enclosure vertices"
+    indexBuffer.label = "Gyirong physical sky enclosure indices"
+    return (vertexBuffer, indexBuffer, indices.count)
   }
 
   fileprivate static func makeTerrainTiles(
@@ -1164,7 +1237,7 @@ extension GyirongDebrisFlowRenderer {
     // measured footprint centre, 83 x 51 m principal axes and facade bearing.
     // Height remains an image-derived estimate using four window rows and
     // full-size freight vehicles, not a surveyed value. The satellite and
-    // aerial references place the broad Chinese apron south of the gate and
+    // map geometry places the broad Chinese apron north of the gate and
     // the river immediately along its eastern edge.
     let limestone = SIMD4<Float>(0.63, 0.60, 0.54, 1.25)
     let limestoneRoof = SIMD4<Float>(0.38, 0.18, 0.11, 1.45)
@@ -1663,7 +1736,7 @@ extension GyirongDebrisFlowRenderer {
         let terraceAcrossDistance = max(max(-48 - local.x, local.x - 112), 0)
         let terraceForwardDistance = max(max(-78 - local.y, local.y - 48), 0)
         let terraceDistance = hypot(terraceAcrossDistance, terraceForwardDistance)
-        // The satellite view places the broad Chinese inspection apron south
+        // OSM geometry places the broad Chinese inspection apron north
         // (negative local-forward) of the gate. Give that approach a very
         // slight downhill grade while keeping the gate threshold fixed.
         if terraceDistance < 80 {

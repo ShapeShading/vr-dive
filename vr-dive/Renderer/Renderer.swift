@@ -521,6 +521,10 @@ class Renderer {
           "[Renderer]  view[\(index)] texIndex=\(textureMap.textureIndex) slice=\(textureMap.sliceIndex) viewport=(\(viewport.originX), \(viewport.originY), \(viewport.width), \(viewport.height))"
         )
       }
+      let depthRange = drawable.depthRange
+      print(
+        "[Renderer]  reverse-Z depthRange near=\(depthRange.x) far=\(depthRange.y)"
+      )
     }
 
     // ⚠️ clearColor 必须是纯黑，不得改为读取 pattern?.preferredClearColor。

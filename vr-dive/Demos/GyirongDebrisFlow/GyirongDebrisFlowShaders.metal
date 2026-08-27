@@ -80,10 +80,15 @@ vertex GyirongSkyOut gyirongSkyVertex(
 {
   uint viewIndex = min((uint)amplificationID, max(uniforms.viewCount, 1u) - 1u);
   float3 skyOffset = vertices[vertexID];
-  float3 cameraPosition = viewToWorldTransforms[viewIndex][3].xyz;
-  float3 worldPosition = cameraPosition + skyOffset;
+  // Transform the enclosure from eye-local space so camera translation and
+  // rotation cancel exactly against the matching view-projection matrix.
+  float3 worldPosition = (
+    viewToWorldTransforms[viewIndex] * float4(skyOffset, 1.0f)).xyz;
   GyirongSkyOut out;
   out.clipPosition = viewProjectionMatrices[viewIndex] * float4(worldPosition, 1.0f);
+  // visionOS uses reverse-Z (clear depth 0). Pin the sky to the far plane and
+  // draw it last with greaterEqual so it fills only untouched background.
+  out.clipPosition.z = 0.0f;
   out.direction = skyOffset;
   return out;
 }

@@ -51,9 +51,13 @@ forecasting or forensic attribution.
   each eye, with a grey overcast horizon-to-zenith gradient. It does not depend
   on clear color or a clip-space fullscreen primitive, so every foveated render
   tile is covered by actual scene triangles without exposing black tile edges.
-  Its two-metre half-extent stays inside the drawable-specific visionOS far
-  plane; the former 240 m enclosure was almost entirely clipped and only left
-  block-shaped fragments near the terrain horizon.
+  Its vertices are transformed from eye-local space and pinned to the reverse-Z
+  far depth. The enclosure is drawn last with a greater-or-equal depth test, so
+  it fills only pixels still holding the zero clear depth and cannot cover
+  terrain or buildings. Its two-metre half-extent also stays inside the
+  drawable-specific visionOS clipping range; the former 240 m enclosure was
+  almost entirely clipped and only left block-shaped fragments near the
+  terrain horizon.
 - 144 OpenStreetMap building footprints near the port are extruded using tagged
   heights/levels when available and conservative defaults otherwise.
 - The Chinese border gate is anchored to OpenStreetMap way 904894059 at

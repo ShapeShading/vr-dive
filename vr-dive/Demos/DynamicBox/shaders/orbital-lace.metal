@@ -40,7 +40,7 @@ fragment float4 dynamicBoxFragment(
         float3 nn;
         float entry=db_boxHit(ro,rd,DB_BOXDIMS,nn,true);
         if(entry<0) return float4(0.003f,0.005f,0.009f,1);
-        ro+=rd*(entry+0.001f);
+        // Keep the eye origin; the sculpture's own sphere selects the interval.
     }
     ro=(u.patternTransform*float4(ro,1)).xyz;
     rd=normalize((u.patternTransform*float4(rd,0)).xyz);

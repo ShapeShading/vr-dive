@@ -20,7 +20,7 @@ static bool foldInterval(float3 ro, float3 rd, thread float &nearT, thread float
 }
 
 fragment float4 dynamicBoxFragment(DynamicBoxVertexOut in [[stage_in]],constant DynamicBoxUniforms&u [[buffer(0)]],constant float4x4*v2w [[buffer(1)]],constant float4x4*vp [[buffer(2)]]){
-uint vi=min(in.viewIndex,u.viewCount-1u);float3 ro=(v2w[vi][3].xyz-u.objectCenter.xyz)/u.boxScale,rd=normalize(in.worldPos-v2w[vi][3].xyz);float3 bn;if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.01,.008,.006,1);ro+=rd*(en+.002f);}ro=(u.patternTransform*float4(ro,1)).xyz;rd=normalize(float3(u.patternTransform*float4(rd,0)));float z, foldFar;
+uint vi=min(in.viewIndex,u.viewCount-1u);float3 ro=(v2w[vi][3].xyz-u.objectCenter.xyz)/u.boxScale,rd=normalize(in.worldPos-v2w[vi][3].xyz);float3 bn;if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.01,.008,.006,1);}ro=(u.patternTransform*float4(ro,1)).xyz;rd=normalize(float3(u.patternTransform*float4(rd,0)));float z, foldFar;
  if (!foldInterval(ro,rd,z,foldFar)) return float4(.004f,.007f,.012f,1.0f);
  float t=u.time;
 for(int i=0;i<120;i++){float3 p=ro+rd*z;float d=sedimentDE(p,t);if(d<.00085f){float3 n=sedimentN(p,t),l=normalize(float3(-.5,.8,.35));float dif=max(dot(n,l),0.f),r=pow(1-max(dot(n,-rd),0.f),2.f),sp=pow(max(dot(reflect(-l,n),-rd),0.f),34.f);float bands=.5f+.5f*sin((p.x+p.y)*18.f);float3 c=mix(float3(.035,.20,.29),float3(.88,.48,.19),smoothstep(.18,.82,bands));c=mix(c,float3(.88,.81,.65),smoothstep(.2,.5,p.z)*.35);return float4(c*(.22+dif)+float3(.4,.25,.08)*r*.26f+sp*.45f,1);}z+=clamp(d*.68f,.001f,.05f);if(z>foldFar)break;}return float4(.004,.005,.008,1);}

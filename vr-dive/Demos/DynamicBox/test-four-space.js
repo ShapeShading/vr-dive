@@ -4,15 +4,26 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const names = ["clifford-lantern", "hopf-fibration", "tesseract-jewel", "cell24-prism", "s3-trefoil"];
-const sources = Object.fromEntries(names.map(name => [name,
+const fourSpaceNames = ["clifford-lantern", "hopf-fibration", "tesseract-jewel", "cell24-prism", "s3-trefoil"];
+const runtimeNames = [...fourSpaceNames, "nacre-rosette", "orbital-lace",
+  "voxel-tide", "lamellar-bloom", "quaternion-reef", "prismatic-plume",
+  "coral-folds", "fiber-pleats", "liquid-contours", "pleated-marble",
+  "radial-gills", "sediment-ribbons", "topographic-velvet"];
+const sources = Object.fromEntries(runtimeNames.map(name => [name,
   fs.readFileSync(path.join(__dirname, "shaders", name + ".metal"), "utf8")]));
 const project = fs.readFileSync(path.join(__dirname, "../../..", "vr-dive.xcodeproj/project.pbxproj"), "utf8");
-const exceptions = project.match(/membershipExceptions\s*=\s*\(([\s\S]*?)\);/)[1];
-for (const name of names) {
+function capture(text, pattern, message) {
+  const match = text.match(pattern);
+  assert(match, message);
+  return match[1];
+}
+const exceptions = capture(project, /membershipExceptions\s*=\s*\(([\s\S]*?)\);/,
+  "Xcode project must contain a membershipExceptions block");
+for (const name of runtimeNames) {
   assert(exceptions.includes("Demos/DynamicBox/shaders/" + name + ".metal"), name + " must be runtime-only");
-  assert(sources[name].includes("patternTransform*float4(ro, 1)"), name + " must support navigation");
-  assert(!sources[name].includes("ro += rd*(entry"), name + " must not clip geometry at the Box entry");
+  assert(/patternTransform\s*\*\s*float4\s*\(\s*ro\s*,\s*1(?:\.0f)?\s*\)/.test(sources[name]),
+    name + " must support navigation");
+  assert(!/\bro\s*\+=\s*rd\s*\*/.test(sources[name]), name + " must not clip geometry at the Box entry");
 }
 const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
 const length = a => Math.hypot(...a);
@@ -33,8 +44,10 @@ const wRow = angles => [0,1,2,3].map(i => rotate([0,1,2,3].map(j => i === j ? 1 
 const projectedRadius = (w, scale) => scale*Math.sqrt((1+w)/(1-w));
 
 // Read the actual Metal lookup tables, rather than testing regenerated copies.
-const vertexBlock = sources["cell24-prism"].match(/CELL24_VERTICES\[24\] = \{([\s\S]*?)\};/)[1];
-const edgeBlock = sources["cell24-prism"].match(/CELL24_EDGES\[96\] = \{([\s\S]*?)\};/)[1];
+const vertexBlock = capture(sources["cell24-prism"], /CELL24_VERTICES\[24\] = \{([\s\S]*?)\};/,
+  "cell24-prism must declare CELL24_VERTICES[24]");
+const edgeBlock = capture(sources["cell24-prism"], /CELL24_EDGES\[96\] = \{([\s\S]*?)\};/,
+  "cell24-prism must declare CELL24_EDGES[96]");
 const vertices = [...vertexBlock.matchAll(/float4\(([^)]+)\)/g)].map(m => m[1].split(",").map(parseFloat));
 const edges = [...edgeBlock.matchAll(/ushort2\((\d+),(\d+)\)/g)].map(m => [Number(m[1]), Number(m[2])]);
 assert.equal(vertices.length, 24);

@@ -26,7 +26,7 @@ static bool foldInterval(float3 ro, float3 rd, thread float &nearT, thread float
 
 fragment float4 dynamicBoxFragment(DynamicBoxVertexOut in [[stage_in]],constant DynamicBoxUniforms&u [[buffer(0)]],constant float4x4*v2w [[buffer(1)]],constant float4x4*vp [[buffer(2)]]) {
  uint vi=min(in.viewIndex,u.viewCount-1u); float3 ro=(float3(v2w[vi][3].xyz)-u.objectCenter.xyz)/u.boxScale; float3 rd=normalize(in.worldPos-float3(v2w[vi][3].xyz)); float3 bn;
- if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.01,.015,.02,1);ro+=rd*(en+.002f);}
+ if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.01,.015,.02,1);}
  ro=(u.patternTransform*float4(ro,1)).xyz;rd=normalize(float3(u.patternTransform*float4(rd,0)));float d0, foldFar;
  if (!foldInterval(ro,rd,d0,foldFar)) return float4(.004f,.007f,.012f,1.0f);
  float t=u.time;

@@ -52,7 +52,7 @@ fragment float4 dynamicBoxFragment(
  constant float4x4 *v2w [[buffer(1)]], constant float4x4 *vp [[buffer(2)]]) {
  uint vi=min(in.viewIndex,u.viewCount-1u); float3 cam=v2w[vi][3].xyz;
  float3 ro=(cam-u.objectCenter.xyz)/u.boxScale, rd=normalize(in.worldPos-cam);
- if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float3 bn;float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.008,.012,.018,1);ro+=rd*(en+.001f);}
+ if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float3 bn;float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.008,.012,.018,1);}
  ro=(u.patternTransform*float4(ro,1)).xyz; rd=normalize(float3(u.patternTransform*float4(rd,0)));
  float dist, foldFar;
  if (!foldInterval(ro,rd,dist,foldFar)) return float4(.004f,.007f,.012f,1.0f);

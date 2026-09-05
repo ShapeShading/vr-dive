@@ -19,7 +19,7 @@ static bool foldInterval(float3 ro, float3 rd, thread float &nearT, thread float
 }
 
 fragment float4 dynamicBoxFragment(DynamicBoxVertexOut in [[stage_in]],constant DynamicBoxUniforms&u [[buffer(0)]],constant float4x4*v2w [[buffer(1)]],constant float4x4*vp [[buffer(2)]]){
-uint vi=min(in.viewIndex,u.viewCount-1u);float3 ro=(float3(v2w[vi][3].xyz)-u.objectCenter.xyz)/u.boxScale,rd=normalize(in.worldPos-float3(v2w[vi][3].xyz));float3 bn;if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.005,.01,.015,1);ro+=rd*(en+.002f);}ro=(u.patternTransform*float4(ro,1)).xyz;rd=normalize(float3(u.patternTransform*float4(rd,0)));float z, foldFar;
+uint vi=min(in.viewIndex,u.viewCount-1u);float3 ro=(float3(v2w[vi][3].xyz)-u.objectCenter.xyz)/u.boxScale,rd=normalize(in.worldPos-float3(v2w[vi][3].xyz));float3 bn;if(!all(abs(ro)<DB_BOXDIMS-1e-3f)){float en=db_boxHit(ro,rd,DB_BOXDIMS,bn,true);if(en<0)return float4(.005,.01,.015,1);}ro=(u.patternTransform*float4(ro,1)).xyz;rd=normalize(float3(u.patternTransform*float4(rd,0)));float z, foldFar;
  if (!foldInterval(ro,rd,z,foldFar)) return float4(.004f,.007f,.012f,1.0f);
  float t=u.time;
 for(int i=0;i<125;i++){float3 p=ro+rd*z;float d=fiberPleatsDE(p,t);if(d<.00065f){float3 n=fiberPleatsN(p,t),l=normalize(float3(-.4,.85,.25));float dif=max(dot(n,l),0.f),rim=pow(1-max(dot(n,-rd),0.f),3.f),sp=pow(max(dot(reflect(-l,n),-rd),0.f),55.f);float3 c=mix(float3(.025,.14,.23),float3(.94,.82,.62),smoothstep(-.4,.55,p.z+p.y*.3));c=mix(c,float3(.36,.16,.47),smoothstep(.3,.55,p.x)*.25);return float4(c*(.18+dif*1.08f)+float3(.2,.55,.7)*rim*.3f+sp*.6f,1);}z+=clamp(d*.6f,.0008f,.04f);if(z>foldFar)break;}return float4(.003,.006,.01,1);}

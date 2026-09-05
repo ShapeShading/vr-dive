@@ -60,6 +60,10 @@ constexpr constant float3 LS_CLIMBER_GRAY_BRIGHT = float3(0.5f, 0.51f, 0.53f);  
 constexpr constant float3 LS_CLIMBER_GRAY_DARK = float3(0.14f, 0.14f, 0.15f);   // climber fuselage, top/bottom caps
 constexpr constant float3 LS_CLIMBER_WINDOW_COLOR = float3(0.04f, 0.06f, 0.09f);
 constexpr constant float3 LS_BEACON_COLOR = float3(1.0f, 0.15f, 0.1f);
+constexpr constant float LS_METAL_SPECULAR = 0.42f;
+constexpr constant float LS_METAL_GLOSS = 48.0f;
+constexpr constant float3 LS_WINDOW_EMISSION = float3(0.12f, 0.32f, 0.48f);
+constexpr constant float LS_TOWER_DISTANCE_FADE = 0.000025f;
 
 // -- Moon terrain: near-field (marched) albedo ---------------------------
 constexpr constant float3 LS_NEAR_ALBEDO_A = float3(0.085f, 0.08f, 0.075f);
@@ -645,6 +649,26 @@ fragment float4 lunarSurfaceFragment(
     float3 p = ro + rd * tTower;
     float2 radial = p.xz - towerHitCenter;
     float3 n = normalize(float3(radial.x, 0.0f, radial.y));
+    // Select the actual cylinder/annulus face. A radial normal on a flat
+    // roof made the platform look like a starburst instead of a solid disc.
+    float faceLow=towerGroundY, faceHigh=towerGroundY+towerBaseH;
+    float faceRadius=hubRadius;
+    if(towerPart==1){ faceHigh=towerShaftTopY; faceRadius=pillarRadius; }
+    if(towerPart==2){
+      float ringCenter=ringBaseY+round((p.y-ringBaseY)/ringSpacing)*ringSpacing;
+      faceLow=ringCenter-ringHalfThick; faceHigh=ringCenter+ringHalfThick;
+      faceRadius=ringOuterRadius;
+    }
+    if(towerPart==3){faceLow=climberY-climberHalfThick;faceHigh=climberY+climberHalfThick;faceRadius=climberRadius;}
+    if(towerPart==4){faceLow=towerShaftTopY-topCapHalfThick;faceHigh=towerShaftTopY+topCapHalfThick;faceRadius=topCapRadius;}
+    float radialLength=length(radial);
+    float sideDistance=abs(radialLength-faceRadius);
+    if(towerPart==2 && abs(radialLength-ringInnerRadius)<sideDistance){
+      sideDistance=abs(radialLength-ringInnerRadius); n=-n;
+    }
+    if(min(abs(p.y-faceLow),abs(p.y-faceHigh))<sideDistance)
+      n=float3(0,p.y<(faceLow+faceHigh)*0.5f?-1.0f:1.0f,0);
+    float3 emission=float3(0);
 
     // Darker base metal than before, per user feedback — and a much smaller
     // flat ambient floor below so the sun-facing side reads clearly bright
@@ -685,14 +709,21 @@ fragment float4 lunarSurfaceFragment(
       float cellAngle = fract(angRad2 * (LS_CLIMBER_WINDOW_COUNT / 6.28318530718f) + 0.5f) - 0.5f;
       float arcDist = cellAngle * (6.28318530718f * climberRadius / LS_CLIMBER_WINDOW_COUNT);
       float windowDist = length(float2(arcDist, localY));
-      float windowMask = smoothstep(0.85f, 0.55f, windowDist) * step(abs(hFrac), 0.55f);
+      float windowAA=max(fwidth(windowDist),0.03f);
+      float windowMask = (1.0f-smoothstep(0.7f-windowAA,0.7f+windowAA,windowDist)) * step(abs(hFrac), 0.55f);
       baseColor = mix(climberGray, LS_CLIMBER_WINDOW_COLOR, windowMask);
+      emission=LS_WINDOW_EMISSION*windowMask;
     } else if (towerPart == 4) {
       baseColor = LS_TOPCAP_COLOR;
     }
 
     float diff = max(dot(n, sunDir), 0.0f);
     float3 lit = baseColor * (diff * 1.1f + 0.04f);
+    float3 halfVector=normalize(sunDir-rd);
+    float highlight=pow(max(dot(n,halfVector),0.0f),LS_METAL_GLOSS)*diff;
+    float grazing=pow(1.0f-max(dot(n,-rd),0.0f),5.0f);
+    lit+=float3(1.0f,0.91f,0.77f)*highlight*LS_METAL_SPECULAR;
+    lit+=baseColor*float3(0.35f,0.48f,0.70f)*grazing*0.08f+emission;
     if (towerPart == 3) {
       lit += baseColor * 0.35f;  // platform reads as lit/powered, not just sun-lit
     }
@@ -709,7 +740,7 @@ fragment float4 lunarSurfaceFragment(
     // depth cue) the tether should stay crisp for kilometers — only a very
     // gentle falloff so it doesn't look like a flat cardboard cutout at
     // extreme distance up the shaft.
-    float fog = exp2(-tTower * 0.0008f);
+    float fog = exp2(-tTower * LS_TOWER_DISTANCE_FADE);
     float3 skyTint = ls_sky(rd, sunDir, milkywayTex, wrapSampler) * 0.15f;
     col = mix(skyTint, lit, fog);
   } else if (t > 0.0f) {
@@ -728,9 +759,9 @@ fragment float4 lunarSurfaceFragment(
     float3 lit = albedo * (diff * float3(1.15f, 1.08f, 0.95f) + earthLight * float3(0.5f, 0.6f, 0.8f) + 0.01f);
     lit += albedo * opposition;
 
-    float fog = exp2(-t * 0.012f);
-    float3 skyAtHorizon = ls_sky(rd, sunDir, milkywayTex, wrapSampler) * 0.15f;
-    col = mix(skyAtHorizon, lit, fog);
+    // Opaque regolith, consistent with the far-field fallback: no stars
+    // leaking through the ground or a fog discontinuity at the march limit.
+    col = lit;
   } else {
     // Far-field fallback: the height-field march above only searches out to
     // `maxDist`, so past that range (or at grazing angles where it burns its

@@ -148,4 +148,6 @@ function main() {
   }
 }
 
-main();
+// Reuse the exact runtime wrapper for the optional on-Mac image preview.
+module.exports = { PRELUDE };
+if (require.main === module) main();

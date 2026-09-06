@@ -19,6 +19,17 @@
 		9A9B19DC2ECF8286003DA309 /* Exceptions for "vr-dive" folder in "vr-dive" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				"Demos/DynamicBox/shaders/voxel-tide.metal",
+				"Demos/DynamicBox/shaders/lamellar-bloom.metal",
+				"Demos/DynamicBox/shaders/quaternion-reef.metal",
+				"Demos/DynamicBox/shaders/prismatic-plume.metal",
+				"Demos/DynamicBox/shaders/cell24-prism.metal",
+				"Demos/DynamicBox/shaders/clifford-lantern.metal",
+				"Demos/DynamicBox/shaders/hopf-fibration.metal",
+				"Demos/DynamicBox/shaders/s3-trefoil.metal",
+				"Demos/DynamicBox/shaders/tesseract-jewel.metal",
+				"Demos/DynamicBox/shaders/nacre-rosette.metal",
+				"Demos/DynamicBox/shaders/orbital-lace.metal",
 				Demos/DynamicBox/shaders/apollonian.metal,
 				"Demos/DynamicBox/shaders/coral-folds.metal",
 				"Demos/DynamicBox/shaders/cosine-cross-orbit.metal",

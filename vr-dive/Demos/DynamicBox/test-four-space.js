@@ -6,9 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const fourSpaceNames = ["clifford-lantern", "hopf-fibration", "tesseract-jewel", "cell24-prism", "s3-trefoil"];
 const runtimeNames = [...fourSpaceNames, "nacre-rosette", "orbital-lace",
-  "voxel-tide", "lamellar-bloom", "quaternion-reef", "prismatic-plume",
-  "coral-folds", "fiber-pleats", "liquid-contours", "pleated-marble",
-  "radial-gills", "sediment-ribbons", "topographic-velvet"];
+  "voxel-tide", "lamellar-bloom", "quaternion-reef", "prismatic-plume"];
 const sources = Object.fromEntries(runtimeNames.map(name => [name,
   fs.readFileSync(path.join(__dirname, "shaders", name + ".metal"), "utf8")]));
 const project = fs.readFileSync(path.join(__dirname, "../../..", "vr-dive.xcodeproj/project.pbxproj"), "utf8");

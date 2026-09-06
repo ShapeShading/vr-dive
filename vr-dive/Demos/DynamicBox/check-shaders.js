@@ -31,6 +31,8 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const SHADERS_DIR = path.join(__dirname, "shaders");
+const MODULE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dynbox-metal-module-cache-"));
+process.on("exit", () => fs.rmSync(MODULE_CACHE_DIR, { recursive: true, force: true }));
 
 // ─── Prelude (mirrors DynamicBoxRenderer.wrapShaderSource) ────────────────────
 const PRELUDE = `#include <metal_stdlib>
@@ -94,7 +96,7 @@ function checkShader(fileName) {
 
   try {
     fs.writeFileSync(tmpMetal, wrapped, "utf-8");
-    execFileSync("xcrun", ["metal", "-c", "-Wall", tmpMetal, "-o", tmpAir], {
+    execFileSync("xcrun", ["metal", "-c", "-Wall", `-fmodules-cache-path=${MODULE_CACHE_DIR}`, tmpMetal, "-o", tmpAir], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     return { ok: true };
